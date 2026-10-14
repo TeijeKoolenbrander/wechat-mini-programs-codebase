@@ -1,11 +1,11 @@
 # 点将台 (working title): direction
 
-Status: reviewed with the founder, 2026-10-14; founder decisions are logged in spec §0 (D1-D13). Scope: **三国 only**. Author: product-ux. Date: 2026-10-14.
+Status: reviewed with the founder, 2026-10-14; founder decisions are logged in spec §0 (D1-D14). Scope: **三国 only**. Author: product-ux. Date: 2026-10-14.
 Companion: `docs/dianjiangtai/spec.md` (the "what", scoped to the Phase 1 prototype).
 Sources: `research/2026-10-14-social-minigames/` (00-shortlist, 03-social-mechanics-monetization, 04-legal-compliance).
 
 Labels used in both docs:
-- **[VERIFY-P0]**: the research flagged this API or policy detail as UNVERIFIED, or it rests on stale or second-hand sources. It **needs verification in Phase 0** and must not be treated as fact.
+- **[VERIFY-P0]**: the research flagged this API or platform detail as UNVERIFIED, or it rests on stale or second-hand sources. It **needs verification in Phase 0** and must not be treated as fact. (Policy/legal items were cleared by the founder, spec D14.)
 - **[COMPLIANCE]**: compliance-sensitive feature (user data, sharing rules, ads, content review).
 - **INFERENCE**: our own judgement, with no published benchmark behind it.
 
@@ -61,7 +61,7 @@ Mood: **a general's desk at dusk.** Rice paper, ink, cinnabar seals and lacquere
 - **Style guide** (framing, palette, line weight, costume and armour rules by era and faction) written before any generation, so 120-160 portraits read as one set.
 - **Provenance log per asset:** tool and model version, full prompt, negative prompt, seed, settings, date, the generated candidates, the selected output, and every human edit. Stored alongside the asset record (not in git as binaries).
 - **Human review** of every portrait before use: historical plausibility (era-appropriate dress, arms and age; no anachronisms) and a resemblance check against other games' art. No Koei 三国志 or 三国杀 lookalikes. Prompts never name another game, studio, artist or copyrighted character, and no reference sheets from other games are used. Rejected images are logged as rejected.
-- **AIGC labelling:** comply with 《人工智能生成合成内容标识办法》 (in force 2025-09-01): explicit labels where required and implicit (metadata) labels in the files. How it applies to in-game art, and where the label must appear, is [VERIFY-P0] with counsel (spec §17 #16). [COMPLIANCE]
+- **AIGC labelling:** comply with 《人工智能生成合成内容标识办法》 (in force 2025-09-01): explicit labels where required and implicit (metadata) labels in the files. The legal check is cleared (spec D14); the implementation rule is a visible label in the general detail sheet plus metadata labels in every file, and store-listing disclosure where applicable (spec §17 #16). [COMPLIANCE]
 - **Human-edit trail:** keep layered or versioned working files showing the human edits (composition, paint-over, corrections). Copyright in purely AI output is uncertain in China, so documented human creative input is what supports our claim and the 软著 file.
 - **Hosting:** final portraits live on CDN/cloud storage (whitelisted domain, spec §17 #12), referenced by `portraitId`, and are **not committed as plain files in git**. The repo holds only the style guide, the prompt/seed log and the asset manifest.
 
@@ -101,13 +101,14 @@ All thresholds are INFERENCE. There are no published WeChat benchmarks for this 
 
 The game is **三国 only**. There is no separate concept test before the build: **validation of the concept relies entirely on the Phase 1 prototype**, played in the founder's 15-20 WeChat groups, against the go/kill thresholds below.
 
-### Phase 0: platform and compliance verification (about 3-5 days, before any code)
-- **Platform-API verification:** minigame-dev resolves every API item in spec §17 (open data domain and group boards, server-side storage write for leaderboard trust, cloud function timeout for `genDaily`, share behaviour, ads, package limits). Anything that fails gets the listed design fallback before Phase 1 starts.
-- **Compliance/legal check:** the founder and counsel resolve the policy items in spec §17 (诱导分享 rules, rewarded re-spin vs paid randomness, 流量主 and no-fill rewards, IAA 版号/软著/anti-addiction, privacy interfaces, AIGC labelling for later art) and confirm the entity status (spec §19 Q1).
-- Outcomes are written back into the spec before Phase 1 starts.
+### Phase 0: platform-API verification (before any code) — done 2026-10-14
+- **Platform-API verification** was the whole of Phase 0. Findings against the official docs are in `docs/dianjiangtai/phase0-platform.md`; verdicts per item are in spec §17. They changed the design: `getGroupEnterInfo` replaces the deprecated `getShareInfo`, 微信朋友关系 must be declared with a privacy and friend-scope flow, rewarded-video fallback share pages are disabled, cloud functions need `TZ=Asia/Shanghai` and explicit timeouts, and (CTO decision C3) leaderboard ranks come from our server rather than from WeChat user cloud storage.
+- The compliance/legal check is **done**: cleared by the founder on 2026-10-14 (spec D14). The entity is resolved (spec D9): the founder's Beijing (mainland China) company registers the game; game-category access, WeChat 认证, 流量主, the 微信朋友关系 privacy declaration and (Phase 2) an ICP-filed CDN domain are the founder's operational setup steps.
 
 ### Phase 1: two-week prototype (the validation)
-Text plus monogram portraits, **32 generals** (spec Appendix B), the daily 军令, free play, result and challenge cards, group and friend boards, and stub ads if 流量主 is not ready. The founder posts the prototype into **15-20 WeChat groups** and we collect **at least 7 days** of data. The Go/Kill decision is made on these thresholds alone:
+**Phase 1 opens with a 1-2 day real-device spike** (spec §17.1). cheatshaizi uses none of the share, group-entry, cloud, open data, ad or privacy APIs, so nothing has been proven on a phone yet. The spike covers share → group entry → `getGroupEnterInfo` → cloud decrypt, open data domain rendering with friend scope, the fields on `getGroupCloudStorage` rows, rewarded video (stub or real) with the fallback share page disabled, and `genDaily` timing. Feature work on boards, sharing and ads starts once its exit criteria (spec §17.1, E1-E7) pass, or once the listed fallback is adopted with CTO sign-off. The spike is part of the two weeks.
+
+Then: text plus monogram portraits, **32 generals** (spec Appendix B), the daily 军令, free play, result and challenge cards, group and friend boards, and stub ads if 流量主 is not ready. The founder posts the prototype into **15-20 WeChat groups** and we collect **at least 7 days** of data. The Go/Kill decision is made on these thresholds alone:
 
 | Metric (definitions in spec §15) | Go | Kill |
 |---|---|---|
@@ -119,19 +120,19 @@ Text plus monogram portraits, **32 generals** (spec Appendix B), the daily 军�
 Between the thresholds, we iterate for at most one more week, then decide. **AI-generated portrait production (§6) starts only after Go.**
 
 ### Phase 2: full build (about 6-8 weeks after Go)
-120-160 generals with final AI-generated portraits (§6), the 晋 faction and 归晋 era, 识人模式 (hidden stats), 擂台 challenges, updatable cards, streaks, and production ads. This needs the mainland entity, game category, 备案, 软著, privacy guide and 流量主 in place before release. Launch-health targets (INFERENCE, to be set from Phase 1 data): D1 ≥ 40%, D7 ≥ 15%, and share rate kept ≥ 8% at scale.
+120-160 generals with final AI-generated portraits (§6), the 晋 faction and 归晋 era, 识人模式 (hidden stats), streaks, optionally 擂台赛 and updatable cards (both constrained: gift packs and client scores, fixed template text; spec §21), and production ads. Before release, the founder's setup steps (game category, WeChat 认证, 流量主; spec D9) and the release items (备案, 软著, privacy guide, per the cleared legal check, spec D14) must be in place, and release runs its normal pre-submission rules check. Launch-health targets (INFERENCE, to be set from Phase 1 data): D1 ≥ 40%, D7 ≥ 15%, and share rate kept ≥ 8% at scale.
 
 ## 11. Risks
 
 1. **Fad and clones.** The mechanic was cloned within weeks worldwide (research 04, §4). Our moat is content quality, balance, the daily group loop and the 三国 voice, not the loop itself.
 2. **Grade feels arbitrary.** If players stop believing the simulator, arguments turn into complaints. Mitigation: shared daily luck, visible role fit, reasons in the log, the 复盘 view, and tuning targets checked by a simulation tool (spec §7).
-3. **Group leaderboard API availability.** `getGroupCloudStorage` and related open data domain APIs are unverified for 2026 [VERIFY-P0]. Fallback: a server-side group board (spec §11).
-4. **Entity and 流量主.** The founder's company registers the game; whether it is a mainland entity with game-category access is still open (spec §19 Q1, confirmed in Phase 0). This blocks release and real ads, not the prototype: stub ads are approved for Phase 1.
-5. **诱导分享 enforcement.** The current 运营规范 text was not retrieved [VERIFY-P0]. Our design avoids every share reward, which leaves little exposure.
+3. **Group leaderboard API behaviour on real devices.** Phase 0 confirmed in the docs that `getGroupCloudStorage` and the open data domain APIs exist (they need the 微信朋友关系 privacy declaration and `scope.WxFriendInteraction`), and that `getGroupEnterInfo` replaces the deprecated `getShareInfo` (spec §17). Nothing has run on a phone yet. Mitigation: the Phase 1 device spike (spec §17.1). If group entry cannot be decrypted, the group board shows only its explainer and the friend board is unaffected.
+4. **Entity setup and 流量主.** The entity is resolved: the founder's Beijing (mainland China) company registers the game (spec D9). Game-category access, WeChat 认证 and 流量主 activation remain operational setup steps; delays block release and real ads, not the prototype (stub ads are approved for Phase 1).
+5. **诱导分享 enforcement.** Cleared in the founder's legal check (spec D14). Our design avoids every share reward, which leaves little exposure; release re-checks share copy in its pre-submission rules check.
 6. **Roster depth.** 32 generals (spec Appendix B) cover all 16 faction-era cells, but the thinnest cells hold only 2, so some rounds will feel repetitive over many runs. Watch draft-pick spread and runs per session in Phase 1; Phase 2 grows to 120-160.
 7. **Content-review subjectivity** around historical figures (including the 临阵生变 event, reviewed before submission) and AIGC labelling and copyright for the AI-generated portraits (§6).
 8. **Ad saturation.** 三国 ad creatives are dominated by SLG titles, so paid UA would be expensive. The plan is organic group spread first.
 9. **IAA economics.** IAA-only money is shrinking as a share of the market (research 03, §1). The upside is capped unless we later add IAP, which brings 版号 and is out of scope.
-10. **Leaderboard tampering.** Friend and group boards are written by the client through the open data domain, so a tampered client could post a fake record. Phase 0 checks for a server-side write; otherwise the risk is accepted for Phase 1 (no prizes), with signed values and mismatch detection (spec §11.4).
+10. **Leaderboard tampering.** The client can overwrite its WeChat cloud-storage values, and the server cannot read them back (Phase 0). Mitigation (spec C3, §11): ranks come only from our server-validated results, matched to friend and group rows by a salted per-day openid hash, so a tampered value never earns a rank. This depends on the Phase 1 device spike. If the spike fails, the fallbacks are, in order, Ed25519-signed values verified in the open data domain, then B-lite: self-reported values with the risk accepted for the no-prize prototype (spec §11.8).
 11. **Daily seed generation cost.** Gate-checking candidate seeds may exceed the cloud function timeout. Mitigation: a 30-day offline seed bank, a time-boxed live fallback, and a timeout acceptance test (spec §5.2, §7.5.1).
 12. **No pre-build concept signal.** We build before any market signal on the concept. Mitigation: the prototype is two weeks, uses no art, and has hard kill thresholds.
