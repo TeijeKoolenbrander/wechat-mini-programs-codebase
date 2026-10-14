@@ -1,0 +1,9 @@
+{
+  "desc": "Private build, never indexed.",
+  "rules": [
+    {
+      "action": "disallow",
+      "page": "*"
+    }
+  ]
+}

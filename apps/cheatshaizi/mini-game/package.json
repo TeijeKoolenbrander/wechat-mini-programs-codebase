@@ -1,0 +1,9 @@
+{
+  "name": "cheatshaizi-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Virtual dice cup for 吹牛, as a WeChat Mini Game. See ../SPEC.md.",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}

@@ -1,0 +1,85 @@
+page {
+  background: #000000;
+  height: 100%;
+}
+
+/* Black stage with the blue glow from the renders in visuals/. */
+.stage {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100vh;
+  background: radial-gradient(
+      ellipse at 50% 42%,
+      #0b2f9e 0%,
+      #071d6b 28%,
+      #030a2a 58%,
+      #000000 85%
+    );
+  overflow: hidden;
+}
+
+.sparkle {
+  position: absolute;
+  background: #ffffff;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* The round controls along the bottom. */
+.controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 90rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 90rpx;
+}
+
+.ctl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 108rpx;
+  height: 108rpx;
+  border: 2rpx solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 44rpx;
+  line-height: 1;
+}
+
+/*
+ * The icon itself now carries the state (🔊 / 🔇), so this is only a light
+ * knock-back rather than the dimming that used to be the sole indicator.
+ */
+.ctl.muted {
+  opacity: 0.7;
+}
+
+/* The big red button. */
+.shake-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 164rpx;
+  height: 164rpx;
+  border: 8rpx solid #cfd6e4;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 30%, #ff6a5e 0%, #e0251c 55%, #a81109 100%);
+  box-shadow: 0 10rpx 26rpx rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 54rpx;
+  font-weight: 700;
+  letter-spacing: 2rpx;
+}
+
+.shake-btn.pressed {
+  transform: scale(0.94);
+}
+
+.shake-btn.hidden {
+  visibility: hidden;
+}

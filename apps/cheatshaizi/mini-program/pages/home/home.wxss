@@ -1,0 +1,70 @@
+.stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+}
+
+.brand {
+  margin-bottom: 90rpx;
+  text-align: center;
+}
+
+/*
+ * The title is the Insane trigger. The padding widens the tap target well
+ * past the glyphs so it can be hit without aiming, while looking like plain
+ * centred text. No hover-class — nothing may hint that it is tappable.
+ */
+.brand-title {
+  padding: 30rpx 70rpx;
+  color: #eaf1ff;
+  font-size: 68rpx;
+  font-weight: 700;
+  letter-spacing: 8rpx;
+}
+
+.play {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 260rpx;
+  height: 260rpx;
+  border: 10rpx solid #cfd6e4;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 30%, #ff6a5e 0%, #e0251c 55%, #a81109 100%);
+  box-shadow: 0 14rpx 36rpx rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 56rpx;
+  font-weight: 700;
+  letter-spacing: 4rpx;
+}
+
+.play-pressed {
+  transform: scale(0.95);
+}
+
+/*
+ * The Cheat trigger, dressed as a help link. Same deal: generous padding,
+ * no hover state, nothing to suggest it does anything unusual.
+ */
+.howto {
+  margin-top: 70rpx;
+  padding: 24rpx 60rpx;
+  color: rgba(234, 241, 255, 0.42);
+  font-size: 28rpx;
+  letter-spacing: 4rpx;
+}
+
+.credits {
+  position: absolute;
+  bottom: calc(40rpx + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  color: rgba(234, 241, 255, 0.28);
+  font-size: 22rpx;
+  letter-spacing: 2rpx;
+  text-align: center;
+  pointer-events: none;
+}

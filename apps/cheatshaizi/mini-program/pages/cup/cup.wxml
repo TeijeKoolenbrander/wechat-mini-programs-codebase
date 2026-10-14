@@ -1,0 +1,58 @@
+<view
+  class="stage"
+  bindtouchstart="onTouchStart"
+  bindtouchend="onTouchEnd"
+>
+  <view
+    class="sparkle"
+    wx:for="{{sparkles}}"
+    wx:key="id"
+    style="{{item.style}}"
+  ></view>
+
+  <view class="table">
+    <image class="mat" src="/assets/images/tray.png" mode="aspectFit"></image>
+
+    <view class="dice-field">
+      <image
+        class="die"
+        wx:for="{{dice}}"
+        wx:key="id"
+        style="{{item.pos}}"
+        src="{{item.src}}"
+        mode="aspectFit"
+      ></image>
+    </view>
+
+    <view class="cup {{revealed ? 'cup-up' : ''}} {{shaking ? 'cup-wobble' : ''}}">
+      <image class="cup-img" src="/assets/images/cup.png" mode="aspectFit"></image>
+    </view>
+  </view>
+
+  <view class="hint {{showHint ? '' : 'hint-off'}}">上滑开盅</view>
+
+  <view class="controls">
+    <!--
+      In cheat mode this slot becomes the no-wilds toggle instead of mute.
+      Normal brightness is the default, where the declared dice mix in wilds;
+      dimmed means wilds are switched off and only the chosen face appears.
+    -->
+    <view
+      wx:if="{{mode === 'cheat'}}"
+      class="ctl {{pureCheat ? 'muted' : ''}}"
+      catchtap="togglePure"
+    >🍶</view>
+    <view
+      wx:else
+      class="ctl {{muted ? 'muted' : ''}}"
+      catchtap="toggleMute"
+    >{{muted ? '🔇' : '🔊'}}</view>
+    <view
+      class="shake-btn {{shaking ? 'hidden' : ''}} {{pressed ? 'pressed' : ''}}"
+      catchtouchstart="onBtnStart"
+      catchtouchend="onBtnEnd"
+      catchtouchcancel="onBtnEnd"
+    >摇</view>
+    <view class="ctl" catchtap="goBack">⚙</view>
+  </view>
+</view>

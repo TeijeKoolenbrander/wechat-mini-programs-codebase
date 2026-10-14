@@ -1,0 +1,49 @@
+{
+  "appid": "wx6d5a9d8ec36cf6a1",
+  "compileType": "miniprogram",
+  "projectname": "cheatshaizi",
+  "libVersion": "latest",
+  "setting": {
+    "es6": true,
+    "enhance": false,
+    "minified": false,
+    "postcss": true
+  },
+  "packOptions": {
+    "ignore": [
+      {
+        "type": "folder",
+        "value": "base_images"
+      },
+      {
+        "type": "folder",
+        "value": "visuals"
+      },
+      {
+        "type": "folder",
+        "value": "tests"
+      },
+      {
+        "type": "folder",
+        "value": "tools"
+      },
+      {
+        "type": "folder",
+        "value": "node_modules"
+      },
+      {
+        "type": "file",
+        "value": "SPEC.md"
+      },
+      {
+        "type": "file",
+        "value": "package.json"
+      },
+      {
+        "type": "file",
+        "value": "package-lock.json"
+      }
+    ]
+  },
+  "simulatorPluginLibVersion": {}
+}

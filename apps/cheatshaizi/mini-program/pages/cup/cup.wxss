@@ -1,0 +1,126 @@
+.stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ---- the table: tray, dice, and the cup that covers them ---- */
+
+/*
+ * Sprites come from assets/images/, cut from the renders in visuals/. The
+ * layout is measured from visuals/open&close.png (closed) and oc2.png (open):
+ * the tray stays put and only the cup moves. Sizes keep each sprite's own
+ * aspect ratio: tray 520x352, cup 442x622, die 88x100.
+ */
+.table {
+  position: relative;
+  width: 100%;
+  height: 1000rpx;
+  margin-top: 30rpx;
+}
+
+.mat {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 520rpx;
+  height: 352rpx;
+  margin-left: -260rpx;
+}
+
+/*
+ * Exactly the tray's box, so the slots in cup.js are fractions of the tray.
+ *
+ * z-index 1 makes the field its own stacking context, so the dice always
+ * paint above the tray. cup.js also keeps every die's z-index positive. A
+ * negative one used to sink a back-row die behind the tray, where it vanished.
+ */
+.dice-field {
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  bottom: 0;
+  width: 520rpx;
+  height: 352rpx;
+  margin-left: -260rpx;
+}
+
+.die {
+  position: absolute;
+  width: 88rpx;
+  height: 100rpx;
+  filter: drop-shadow(0 3rpx 3rpx rgba(0, 0, 0, 0.4));
+}
+
+/* ---- the cup ---- */
+
+/*
+ * z-index 200 keeps the cup above every die (the dice carry z-indexes of
+ * 1-50 to depth-sort themselves). Closed, it sits deep in the tray, with its
+ * base 79rpx above the tray's front edge, about three quarters of the way
+ * down the tray.
+ */
+.cup {
+  position: absolute;
+  left: 50%;
+  bottom: 79rpx;
+  z-index: 200;
+  width: 442rpx;
+  height: 622rpx;
+  margin-left: -221rpx;
+  transform: translateY(0);
+  transform-origin: 50% 100%;
+  transition: transform 0.45s cubic-bezier(0.22, 0.9, 0.3, 1);
+}
+
+/* Open: the base hovers just above the tray's back rim, as in oc2.png. */
+.cup-up {
+  transform: translateY(-288rpx);
+}
+
+.cup-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- shake ---- */
+
+.cup-wobble {
+  animation: wobble 0.22s linear infinite;
+}
+
+@keyframes wobble {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-14rpx) rotate(-7deg);
+  }
+  50% {
+    transform: translateY(0) rotate(0deg);
+  }
+  75% {
+    transform: translateY(-14rpx) rotate(7deg);
+  }
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+}
+
+/* ---- hint ---- */
+
+/* Positioned so the mat, which now hangs below the table, cannot cover it. */
+.hint {
+  position: relative;
+  z-index: 1;
+  margin-top: 10rpx;
+  color: rgba(234, 241, 255, 0.34);
+  font-size: 26rpx;
+  letter-spacing: 6rpx;
+  transition: opacity 0.3s;
+}
+
+.hint-off {
+  opacity: 0;
+}

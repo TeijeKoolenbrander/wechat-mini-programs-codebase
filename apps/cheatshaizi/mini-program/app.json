@@ -1,0 +1,13 @@
+{
+  "pages": ["pages/home/home", "pages/cup/cup"],
+  "window": {
+    "navigationBarTitleText": "摇骰子",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#0a1230",
+    "backgroundColorTop": "#0a1230",
+    "backgroundColorBottom": "#0a1230"
+  },
+  "sitemapLocation": "sitemap.json",
+  "style": "v2"
+}

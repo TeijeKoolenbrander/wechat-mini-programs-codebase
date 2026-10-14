@@ -1,0 +1,11 @@
+{
+  "name": "cheatshaizi",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Virtual dice cup for 吹牛. See ../SPEC.md.",
+  "scripts": {
+    "test": "node --test",
+    "test:watch": "node --test --watch",
+    "stats": "node tools/stats.js"
+  }
+}

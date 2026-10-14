@@ -1,0 +1,20 @@
+<view class="stage">
+  <view
+    class="sparkle"
+    wx:for="{{sparkles}}"
+    wx:key="id"
+    style="{{item.style}}"
+  ></view>
+
+  <view class="brand">
+    <!-- The title is the way into Insane. Nothing says so. -->
+    <view class="brand-title" catchtap="goInsane">摇骰子</view>
+  </view>
+
+  <view class="play" hover-class="play-pressed" catchtap="goLucky">PLAY</view>
+
+  <!-- Reads as a help link. Goes to Cheat. -->
+  <view class="howto" catchtap="goCheat">玩法说明</view>
+
+  <view class="credits">TK · EW</view>
+</view>
