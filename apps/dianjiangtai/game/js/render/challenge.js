@@ -72,7 +72,7 @@ function draw(ctx, vm, L) {
         y += hh;
       } else if (vm.isFriendly) {
         y += L.u(6);
-        line('你已完成今日军令，本局为友谊赛，不计入榜单', { size: T.FS.body, weight: 700, color: C.sub, h: L.u(48) });
+        y += W.paragraph(ctx, '你已完成今日军令，本局为友谊赛，不计入榜单', x, y, cw, L.u(24), { size: T.FS.body, weight: 700, color: C.sub, align: 'center' });
       }
       stack([
         { id: 'challenge:accept', label: '接受挑战', kind: 'primary' },
