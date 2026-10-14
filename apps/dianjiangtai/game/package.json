@@ -1,0 +1,10 @@
+{
+  "name": "dianjiangtai-game",
+  "version": "0.1.0",
+  "private": true,
+  "description": "点将台 (dianjiangtai) WeChat mini game, Phase 1 prototype. See docs/dianjiangtai/spec.md.",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "simstats": "node tools/simstats.js --check --out tools/simstats-report.md"
+  }
+}
