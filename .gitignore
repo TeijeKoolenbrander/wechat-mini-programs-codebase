@@ -1,0 +1,25 @@
+# Dependencies & builds
+node_modules/
+dist/
+build/
+miniprogram_npm/
+coverage/
+
+# WeChat DevTools per-user config
+project.private.config.json
+
+# Secrets — never commit
+.env
+.env.*
+*.key
+*.pem
+private.*.key
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
