@@ -35,4 +35,23 @@ async function challengeCountsAsDaily(ch, openid, nowMs) {
   return !(await store.getDoc('daily_results', `${ch.dateKey}_${openid}`));
 }
 
-module.exports = { windowState, loadAnswerableChallenge, priorAnswer, challengeCountsAsDaily };
+/**
+ * Spoiler lock: anything that could reveal a good lineup for a DAILY seed (the stored optimum, or another
+ * player's lineup on that seed) is withheld while the date is still playable (today, or yesterday inside the
+ * grace window) unless the caller already has their ranked result for that date.
+ */
+async function dailyLocked(dateKey, openid, nowMs) {
+  if (!dateKey) return false;
+  const ws = windowState(dateKey, nowMs);
+  if (ws !== 'open' && ws !== 'grace') return false;
+  return !(await store.getDoc('daily_results', `${dateKey}_${openid}`));
+}
+
+/** daily date (if any) a run's seed belongs to: by recorded dateKey, else by seed match (free runs) */
+async function dailyDateOfRun(run) {
+  if (run.dateKey) return run.dateKey;
+  const r = await store.db().collection('daily_seeds').where({ seed: run.seed }).limit(1).get();
+  return r.data[0] ? r.data[0]._id : null;
+}
+
+module.exports = { windowState, loadAnswerableChallenge, priorAnswer, challengeCountsAsDaily, dailyLocked, dailyDateOfRun };

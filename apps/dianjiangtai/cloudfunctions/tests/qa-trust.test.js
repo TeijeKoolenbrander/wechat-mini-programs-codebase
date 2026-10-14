@@ -28,7 +28,6 @@ async function dailyChallenge() {
 
 // ---- BUG: the daily optimum leaks through a friendly challenge run + getReplay (AC 19, 38 intent, spec 5.2) ----
 test('daily best lineup is never obtainable before the caller has a ranked daily result (challenge + getReplay)',
-  { todo: 'BUG: friendly challenge run on today\'s daily seed (no startRun) lets getReplay return daily_seeds.best' },
   async () => {
     const challengeId = await dailyChallenge();
     const view = await h.call('getChallenge', { challengeId }, { openid: 'cheat' });

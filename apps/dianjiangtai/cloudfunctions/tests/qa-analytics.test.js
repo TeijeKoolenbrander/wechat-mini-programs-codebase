@@ -83,7 +83,6 @@ test('AC 52: share rate, card-open-to-play, runs-per-session and D1 are computab
 });
 
 test('events keep the session id the metric queries need, at the top level too',
-  { todo: 'BUG: client sends sessionId inside props and ts as clientTs; track() reads e.sessionId so events.sessionId is always null (metrics must use props.sessionId)' },
   async () => {
     await send('A', 'run_start', { sessionId: 'sess-123', runId: 'r9', mode: 'free' });
     const e = h.db.all('events')[0];
