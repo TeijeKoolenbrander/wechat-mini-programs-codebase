@@ -126,7 +126,7 @@ test('group board: groupRef accepted only from a member (AC 61, 62)', async () =
 
 test('over boardListCap: group -> mode group (members only), friend -> selfOnly; never more rows than cap (AC 56, 61)', async () => {
   await populate();
-  global.__DJ_BOARD_CAP = 3; // 5 ranked results today > 3
+  h.setBoardCap(3); // 5 ranked results today > 3
   const a = await group('alice', 'G-ONE');
   await group('carol', 'G-ONE');
   const grp = await board('alice', { kind: 'group', groupRef: a.groupRef });
@@ -146,7 +146,7 @@ test('over boardListCap: group -> mode group (members only), friend -> selfOnly;
   assert.deepEqual(nobody.rows, []);
 
   // at the cap exactly: full again
-  global.__DJ_BOARD_CAP = 5;
+  h.setBoardCap(5);
   h.advance(61000); // expire the 60 s cache
   const full = await board('zed');
   assert.equal(full.mode, 'full');

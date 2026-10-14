@@ -1,20 +1,19 @@
 'use strict';
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { createHarness } = require('./helpers/harness');
+const { createHarness, OPTIMAL_SEEDS } = require('./helpers/harness');
 
 const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT
 let h;
 beforeEach(() => { h = createHarness({ now: T0 }); });
 afterEach(() => h.teardown());
 
-const bankEntry = (id, over = {}) => {
-  // a bank entry whose stored best lineup really scores 12-0 in the fake sim
-  const gens = ['g_wei7', 'g_wei6', 'g_wei5', 'g_wei4', 'g_wei3']; // power 10+9+8+7+6 = 40 -> 12-0
-  const slots = ['zhugong', 'junshi', 'xianfeng', 'mengjiang', 'shoujiang'];
+// Bank entries use real seeds whose optimal lineup (found by the real search) scores 12-0.
+const bankEntry = (id, i = 0, over = {}) => {
+  const f = OPTIMAL_SEEDS[i];
   return {
-    _id: id, seed: 1000 + Number(id.replace(/\D/g, '') || 0), contentVersion: 1, configVersion: 1, gateVersion: 1,
-    best: { lineup: slots.map((slot, i) => ({ slot, generalId: gens[i] })), record: { w: 12, l: 0 } },
+    _id: id, seed: f.seed, contentVersion: 1, configVersion: 1, gateVersion: 1,
+    best: { lineup: f.lineup, record: { w: 12, l: 0 } },
     gates: { optimal: { w: 12, l: 0 }, greedyRate: 0.02, randomRate: 0, K: 400, gateVersion: 1, relaxed: false },
     used: false, importedAt: 1, ...over,
   };
@@ -73,20 +72,19 @@ test('genDaily writes the NEXT day, only for server/timer calls', async () => {
 });
 
 test('genDaily double-fire: concurrent invocations create one document and use one bank entry (AC 54, edge 23)', async () => {
-  for (const i of [1, 2, 3]) h.db.put('daily_seed_bank', bankEntry(`b${i}`));
+  for (const i of [0, 1, 2]) h.db.put('daily_seed_bank', bankEntry(`b${i}`, i));
   const results = await Promise.all([
     h.call('genDaily', { Type: 'Timer' }, {}),
     h.call('genDaily', { Type: 'Timer' }, {}),
     h.call('genDaily', { Type: 'Timer' }, {}),
   ]);
-  assert.ok(results.every((r) => r.ok));
+  assert.ok(results.every((r) => r.ok), JSON.stringify(results));
   assert.equal(results.filter((r) => r.created).length, 1);
   assert.equal(h.db.all('daily_seeds').length, 1);
   const used = h.db.all('daily_seed_bank').filter((b) => b.used);
   assert.equal(used.length, 1, 'losing writers roll back and consume no bank entry');
   assert.equal(used[0].usedFor, '20261104');
   assert.equal(h.db.all('daily_seeds')[0].source, 'bank');
-  // sequential re-fire is a no-op too
   const again = await h.call('genDaily', { Type: 'Timer' }, {});
   assert.equal(again.created, false);
   assert.equal(h.db.all('daily_seed_bank').filter((b) => b.used).length, 1);
@@ -94,7 +92,7 @@ test('genDaily double-fire: concurrent invocations create one document and use o
 
 test('genDaily races the lazy getDaily path: one document, one bank entry', async () => {
   h.setNow(Date.UTC(2026, 10, 3, 15, 0, 0)); // 23:00 BJT on the 3rd
-  for (const i of [1, 2]) h.db.put('daily_seed_bank', bankEntry(`b${i}`));
+  for (const i of [0, 1]) h.db.put('daily_seed_bank', bankEntry(`b${i}`, i));
   const [g, d] = await Promise.all([
     h.call('genDaily', { dateKey: '20261103' }, {}),
     h.call('getDaily', {}, { openid: 'u1' }),
@@ -106,82 +104,91 @@ test('genDaily races the lazy getDaily path: one document, one bank entry', asyn
   assert.equal(h.db.all('daily_seed_bank').filter((x) => x.used).length, 1);
 });
 
-test('bank path: skips entries with other content/config/gate versions, re-verifies 12-0, marks used (AC 54)', async () => {
-  h.db.put('daily_seed_bank', bankEntry('b1', { contentVersion: 2 }));
-  h.db.put('daily_seed_bank', bankEntry('b2', { gateVersion: 0 }));
-  h.db.put('daily_seed_bank', bankEntry('b3', { configVersion: 9 }));
-  const weak = bankEntry('b4');
-  weak.best.lineup[0].generalId = 'g_wei0'; weak.best.lineup[1].generalId = 'g_wei1'; // no longer scores 12-0 -> skipped by the cheap re-check
+test('bank is the primary path: next unused entry in _id order, version-matched, re-verified 12-0, marked used (AC 54)', async () => {
+  h.db.put('daily_seed_bank', bankEntry('b1', 0, { contentVersion: 2 }));
+  h.db.put('daily_seed_bank', bankEntry('b2', 0, { gateVersion: 0 }));
+  h.db.put('daily_seed_bank', bankEntry('b3', 0, { configVersion: 9 }));
+  h.db.put('daily_seed_bank', bankEntry('b4', 0, { used: true }));
+  // b5: the stored best belongs to another seed -> does not score 12-0 on this seed -> skipped by the cheap re-check
+  const weak = bankEntry('b5', 1);
+  weak.best = { lineup: OPTIMAL_SEEDS[2].lineup, record: { w: 12, l: 0 } };
   h.db.put('daily_seed_bank', weak);
-  h.db.put('daily_seed_bank', bankEntry('b5'));
+  h.db.put('daily_seed_bank', bankEntry('b6', 3));
+  h.db.put('daily_seed_bank', bankEntry('b7', 4));
+  global.__DJ_GATES_LOG = [];
   const r = await h.call('genDaily', {}, {});
   assert.equal(r.source, 'bank');
+  assert.deepEqual(global.__DJ_GATES_LOG, [], 'no live generation when the bank has a usable entry');
   const doc = h.db.all('daily_seeds')[0];
-  assert.equal(doc.seed, bankEntry('b5').seed);
+  assert.equal(doc.seed, OPTIMAL_SEEDS[3].seed);
   assert.equal(doc.source, 'bank');
+  assert.equal(doc.rounds.length, 5);
+  assert.ok(doc.rounds.every((x) => Array.isArray(x.fallback)), 'rounds carry the fallback tokens for the seedless client');
   const byId = Object.fromEntries(h.db.all('daily_seed_bank').map((b) => [b._id, b]));
-  assert.equal(byId.b5.used, true);
-  assert.equal(byId.b5.usedFor, '20261104');
-  for (const id of ['b1', 'b2', 'b3', 'b4']) assert.equal(byId[id].used, false);
+  assert.equal(byId.b6.used, true);
+  assert.equal(byId.b6.usedFor, '20261104');
+  for (const id of ['b1', 'b2', 'b3', 'b5', 'b7']) assert.equal(byId[id].used, false, id);
+  delete global.__DJ_GATES_LOG;
 });
 
-test('bank low-water warning (< 7 entries) and daily_gen event carries bankLeft', async () => {
-  for (const i of [1, 2]) h.db.put('daily_seed_bank', bankEntry(`b${i}`));
+test('low-bank warning (< 10 days left) in the logs and bankLeft on the daily_gen event', async () => {
+  for (const i of [0, 1, 2]) h.db.put('daily_seed_bank', bankEntry(`b${i}`, i));
   const warns = [];
   const orig = console.warn;
   console.warn = (...a) => warns.push(a.join(' '));
   try { await h.call('genDaily', {}, {}); } finally { console.warn = orig; }
-  assert.ok(warns.some((w) => /seed bank low: 1 entries left/.test(w)), warns.join('|'));
-  assert.equal(h.db.all('events').find((e) => e.name === 'daily_gen').props.bankLeft, 1);
+  assert.ok(warns.some((w) => /seed bank low: 2 entries left/.test(w)), warns.join('|'));
+  assert.equal(h.db.all('events').find((e) => e.name === 'daily_gen').props.bankLeft, 2);
+  for (let i = 0; i < 12; i++) h.db.put('daily_seed_bank', bankEntry(`c${i}`, i % 8));
+  const warns2 = [];
+  console.warn = (...a) => warns2.push(a.join(' '));
+  try { await h.call('genDaily', { dateKey: '20261105' }, {}); } finally { console.warn = orig; }
+  assert.equal(warns2.filter((w) => /bank low/.test(w)).length, 0);
 });
 
-test('live fallback: stops at the first accepted candidate, never exceeds 50 attempts', async () => {
+test('live is the last resort: stops at the first accepted candidate', async () => {
   global.__DJ_GATES_LOG = [];
-  global.__DJ_GATES = (seed) => global.__DJ_GATES_LOG.length === 7; // 7th candidate passes
-  await h.call('genDaily', {}, {});
+  h.patchGates(() => global.__DJ_GATES_LOG.length === 7); // the log is pushed before the predicate runs
+  const r = await h.call('genDaily', {}, {});
+  assert.equal(r.ok, true);
   const doc = h.db.all('daily_seeds')[0];
   assert.equal(doc.attempts, 7);
-  assert.equal(doc.gates.relaxed, false);
   assert.equal(doc.source, 'live');
+  assert.equal(doc.gates.relaxed, false);
+  assert.equal(doc.rounds.length, 5);
+  assert.equal(doc.best.lineup.length, 5);
+  delete global.__DJ_GATES_LOG;
 });
 
-test('live fallback: no candidate passes -> relaxed seed that still reaches 12-0, alert logged, daily still opens', async () => {
+test('live failure: NO seed is published (no relaxed seeds), ALERT logged, nothing stored', async () => {
   global.__DJ_GATES_LOG = [];
-  global.__DJ_GATES = () => false;
+  h.patchGates(() => false);
   const errs = [];
   const orig = console.error;
   console.error = (...a) => errs.push(a.join(' '));
-  try { await h.call('genDaily', {}, {}); } finally { console.error = orig; }
-  const doc = h.db.all('daily_seeds')[0];
-  assert.equal(doc.attempts, 50);
-  assert.equal(doc.gates.relaxed, true);
-  assert.ok(errs.some((e) => /ALERT.*relaxed/.test(e)));
-  assert.equal(doc.best.record.w, 12);
-});
-
-test('live fallback: relaxed picks a candidate that reaches optimal 12-0 when one exists', async () => {
-  global.__DJ_GATES_LOG = [];
-  global.__DJ_GATES = () => false;
-  global.__DJ_GATES_REACH12 = (seed) => global.__DJ_GATES_LOG.length === 3;
-  const orig = console.error;
-  console.error = () => {};
-  try { await h.call('genDaily', {}, {}); } finally { console.error = orig; }
-  const doc = h.db.all('daily_seeds')[0];
-  assert.equal(doc.seed, global.__DJ_GATES_LOG[2]);
-  assert.equal(doc.gates.relaxed, true);
+  let r;
+  try { r = await h.call('genDaily', {}, {}); } finally { console.error = orig; }
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'DAILY_UNAVAILABLE');
+  assert.equal(global.__DJ_GATES_LOG.length, 50, 'tries at most 50 candidates');
+  assert.equal(h.db.all('daily_seeds').length, 0);
+  assert.ok(errs.some((e) => /ALERT.*seed bank/.test(e)));
+  assert.equal(h.db.all('events').find((e) => e.name === 'daily_gen').props.failed, true);
+  delete global.__DJ_GATES_LOG;
 });
 
 test('live loop honours the 70% time budget read from function.config.json (AC 53)', async () => {
-  const cfg = h.mod('genDaily') && require(require('path').join(h.root, 'genDaily', 'function.config.json'));
+  const cfg = require(require('path').join(h.root, 'genDaily', 'function.config.json'));
   const budget = cfg.timeout * 1000 * 0.7;
   global.__DJ_GATES_LOG = [];
-  global.__DJ_GATES = () => { h.advance(budget / 4 + 1); return false; }; // each candidate costs 25% of the budget
+  h.patchGates(() => { h.advance(budget / 4 + 1); return false; }); // each candidate costs 25% of the budget
   const orig = console.error;
   console.error = () => {};
-  try { await h.call('genDaily', {}, {}); } finally { console.error = orig; }
-  const doc = h.db.all('daily_seeds')[0];
-  assert.equal(doc.attempts, 4, 'stops once 70% of the configured timeout is used');
-  assert.ok(doc.attempts < 50);
+  let r;
+  try { r = await h.call('genDaily', {}, {}); } finally { console.error = orig; }
+  assert.equal(r.code, 'DAILY_UNAVAILABLE');
+  assert.equal(global.__DJ_GATES_LOG.length, 4, 'stops once 70% of the configured timeout is used');
+  delete global.__DJ_GATES_LOG;
 });
 
 test('every function sets TZ=Asia/Shanghai and an explicit timeout; timers have the right cron', () => {

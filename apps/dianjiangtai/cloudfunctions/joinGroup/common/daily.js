@@ -7,7 +7,7 @@ const { AppError, isDateKey, daysBetween, randomSeed, now } = require('./util');
 
 const MAX_LIVE_CANDIDATES = 50;
 const LIVE_BUDGET_FRACTION = 0.7;
-const BANK_LOW_WATER = 7;
+const BANK_LOW_WATER = 10; // days of seeds
 const BANK_SCAN = 20;
 
 /** Launch date key: env override, else the first seed ever created (stored once in `meta`). */
@@ -92,38 +92,36 @@ async function tryBank(dateKey, v, issueNo, t0) {
       throw e;
     }
     const left = await bankLeft(v);
-    if (left < BANK_LOW_WATER) console.warn(`[daily] WARNING seed bank low: ${left} entries left`);
+    if (left < BANK_LOW_WATER) console.warn(`[daily] WARNING seed bank low: ${left} entries left (< ${BANK_LOW_WATER}); generate and import a new bank`);
     return { doc, created: true, bankLeft: left };
   }
   return null;
 }
 
+/**
+ * Last resort (bank empty or version-mismatched). Never publishes a seed that failed the strict gates:
+ * if no candidate is accepted within 50 tries / 70% of the timeout, log an ALERT and throw DAILY_UNAVAILABLE.
+ */
 async function live(dateKey, v, issueNo, t0, startedAt, timeoutMs) {
   const budget = LIVE_BUDGET_FRACTION * timeoutMs;
   let attempts = 0;
   let chosen = null;
-  let reached12 = null;
-  let last = null;
   do {
     attempts++;
     const seed = randomSeed();
     const r = core.acceptDailySeed(seed);
-    last = { seed, gates: r.gates || {} };
-    if (r.ok) { chosen = last; break; }
-    if (!reached12 && last.gates.optimal && last.gates.optimal.w === 12) reached12 = last;
+    if (r && r.accepted && r.best && r.rounds) { chosen = { seed, ...r }; break; }
   } while (attempts < MAX_LIVE_CANDIDATES && now() - startedAt < budget);
 
-  let relaxed = false;
   if (!chosen) {
-    relaxed = true;
-    chosen = reached12 || last;
+    console.error(`[ALERT] no daily seed for ${dateKey}: seed bank empty and ${attempts} live candidates failed the gates. Import a seed bank NOW.`);
+    await store.writeEvent('server', 'daily_gen', { dateKey, source: 'live', attempts, genMs: now() - t0, failed: true, bankLeft: 0 });
+    throw new AppError('DAILY_UNAVAILABLE', 'no accepted daily seed available');
   }
-  const rounds = core.buildSheet(chosen.seed, v.contentVersion);
-  const best = core.bestLineup(chosen.seed, v.contentVersion, core.primaryTokens(rounds));
   const doc = {
     _id: dateKey, seed: chosen.seed, issueNo, contentVersion: v.contentVersion, configVersion: v.configVersion,
-    rounds, best, gates: { ...chosen.gates, relaxed }, source: 'live', attempts, genMs: now() - t0,
-    boardSalt: crypto.randomBytes(16).toString('hex'), createdAt: now(),
+    rounds: chosen.rounds, best: chosen.best, gates: { ...chosen.gates, relaxed: false }, source: 'live', attempts,
+    genMs: now() - t0, boardSalt: crypto.randomBytes(16).toString('hex'), createdAt: now(),
   };
   try {
     await commitSeed(doc, null);
@@ -131,7 +129,6 @@ async function live(dateKey, v, issueNo, t0, startedAt, timeoutMs) {
     if (e.code === 'EXISTS') return { doc: await store.getDoc('daily_seeds', dateKey), created: false };
     throw e;
   }
-  if (relaxed) console.error(`[ALERT] daily seed ${dateKey} is relaxed (gates not met); refill the seed bank`);
   return { doc, created: true, bankLeft: 0 };
 }
 

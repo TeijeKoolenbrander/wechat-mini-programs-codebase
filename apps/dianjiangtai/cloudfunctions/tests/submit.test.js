@@ -131,20 +131,29 @@ test('rejects malformed input shapes', async () => {
 test('free mode: unknown contentVersion rejected, bad seed rejected, ad re-spins allowed (<= 2), unranked', async () => {
   const seed = 4242;
   const rounds = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, 1);
-  const a = bestActions(rounds);
+  const a = bestActions(rounds, { mode: 'free' });
   const ok = await h.call('submitRun', { mode: 'free', clientRunId: runId(), seed, actions: a }, { openid: 'u' });
-  assert.equal(ok.ok, true);
+  assert.equal(ok.ok, true, JSON.stringify(ok));
   assert.equal(ok.ranked, false);
   assert.equal(h.db.all('daily_results').length, 0);
   const cv = await h.call('submitRun', { mode: 'free', clientRunId: runId(), seed, contentVersion: 7, actions: a }, { openid: 'u' });
   assert.equal(cv.code, 'INVALID_ACTIONS');
   const bs = await h.call('submitRun', { mode: 'free', clientRunId: runId(), seed: -1, actions: a }, { openid: 'u' });
   assert.equal(bs.code, 'INVALID_ACTIONS');
-  const withAd = clone(a);
-  withAd.splice(1, 0, { round: 1, type: 'respinFaction', source: 'ad' }, { round: 1, type: 'respinEra', source: 'ad' });
-  assert.equal((await h.call('submitRun', { mode: 'free', clientRunId: runId(), seed, actions: withAd }, { openid: 'u' })).ok, true);
-  const three = clone(a);
-  three.splice(1, 0, ...[1, 2, 3].map(() => ({ round: 1, type: 'respinEra', source: 'ad' })));
+  // free re-spin then ad re-spin of the faction, free then ad of the era: two ad re-spins are allowed in free play
+  const twoAd = bestActions(rounds, {
+    mode: 'free',
+    prelude: [
+      { type: 'respinFaction' }, { type: 'respinFaction', source: 'ad' },
+      { type: 'respinEra' }, { type: 'respinEra', source: 'ad' },
+    ],
+  });
+  const r2 = await h.call('submitRun', { mode: 'free', clientRunId: runId(), seed, actions: twoAd }, { openid: 'u' });
+  assert.equal(r2.ok, true, JSON.stringify(r2));
+  // a third ad re-spin is rejected by the shared engine
+  const three = clone(twoAd);
+  const at = three.findIndex((x) => x.type === 'pick');
+  three.splice(at, 0, { round: 1, type: 'respinEra', source: 'ad' });
   assert.equal((await h.call('submitRun', { mode: 'free', clientRunId: runId(), seed, actions: three }, { openid: 'u' })).code, 'INVALID_ACTIONS');
 });
 
@@ -302,20 +311,22 @@ test('getReplay: only the owner of a completed run gets the best lineup (and it 
   assert.equal((await h.call('getReplay', { runId: '../x' }, { openid: 'userA' })).code, 'INVALID_ACTIONS');
 });
 
-test('getReplay uses final tokens after free re-spins', async () => {
+test('getReplay uses final tokens after a free re-spin (复盘 lineup is drawable from them)', async () => {
   const s = await startDaily(h, 'userA');
-  // respin round 1 faction (free) and pick from the new faction
-  const r0 = s.rounds[0];
-  const core = require(require('path').join(h.root, 'getDaily', 'core', 'content.js'));
-  const a = bestActions(s.rounds);
-  const others = new Set(a.filter((x) => x.type === 'pick' && x.round > 1).map((x) => x.generalId));
-  const g = core.getContent(1).generals.filter((x) => x.faction === r0.altFaction[0] && !others.has(x.id)).sort((a2, b) => b.power - a2.power)[0];
-  a.splice(1, 0, { round: 1, type: 'respinFaction' });
-  a.find((x) => x.type === 'pick' && x.round === 1).generalId = g.id;
+  const a = bestActions(s.rounds, { respinFirst: true });
   const sub = await h.call('submitRun', { mode: 'daily', clientRunId: runId(), dateKey: s.dateKey, actions: a }, { openid: 'userA' });
   assert.equal(sub.ok, true, JSON.stringify(sub));
   const run = h.db.all('runs')[0];
-  assert.equal(run.finalTokens[0].faction, r0.altFaction[0]);
+  const r0 = s.rounds[0];
+  assert.equal(run.finalTokens.length, 5);
+  assert.equal(run.finalTokens[0].faction, r0.altFaction[0], 'the re-spin changed round 1');
+  assert.equal(run.finalTokens[0].era, r0.era);
   const rep = await h.call('getReplay', { runId: run.clientRunId }, { openid: 'userA' });
-  assert.equal(core.getContent(1).generals.find((x) => x.id === rep.best.lineup[0].generalId).faction, r0.altFaction[0]);
+  assert.equal(rep.ok, true, JSON.stringify(rep));
+  assert.ok(rep.best.record.w >= sub.record.w, 'best is at least as good as the run');
+  const gens = require(require('path').join(h.root, 'getDaily', 'core', 'content.js')).getContent(1).byId;
+  for (const l of rep.best.lineup) {
+    const g = gens[l.generalId];
+    assert.ok(run.finalTokens.some((t) => g.faction === t.faction && g.eras.includes(t.era)), l.generalId + ' not drawable from the final tokens');
+  }
 });

@@ -1,7 +1,6 @@
 'use strict';
 // The ONLY place that touches the shared game core (copied into ./core by sync-core.js).
-// Assumptions about shapes the core spec did not pin down are isolated here.
-const rng = require('../core/rng');
+// Real core contract: apps/dianjiangtai/game/core/README.md.
 const dateMod = require('../core/date');
 const content = require('../core/content');
 const config = require('../core/config');
@@ -17,51 +16,48 @@ function dateKeyAt(ms) {
   return dateMod.beijingDateKey(ms);
 }
 
-/** ASSUMPTION: config.js exports CONTENT_VERSION / CONFIG_VERSION / GATE_VERSION (current live versions). */
+/** Live versions: content.js LATEST_CONTENT_VERSION, config.js LATEST_CONFIG_VERSION, getConfig(v).gateVersion. */
 function currentVersions() {
+  const configVersion = config.LATEST_CONFIG_VERSION;
   return {
-    contentVersion: config.CONTENT_VERSION != null ? config.CONTENT_VERSION : 1,
-    configVersion: config.CONFIG_VERSION != null ? config.CONFIG_VERSION : 1,
-    gateVersion: config.GATE_VERSION != null ? config.GATE_VERSION : 1,
+    contentVersion: content.LATEST_CONTENT_VERSION,
+    configVersion,
+    gateVersion: config.getConfig(configVersion).gateVersion,
   };
 }
 
-/** ASSUMPTION: config.getConfig(version) returns the versioned config object (or config itself is it). */
+/** versioned config; null for an unknown version */
 function getConfig(version) {
-  const c = typeof config.getConfig === 'function' ? config.getConfig(version) : config;
-  return c || {};
+  return config.getConfig(version) || null;
 }
 function boardListCap() {
-  const c = getConfig(currentVersions().configVersion);
+  const c = getConfig(currentVersions().configVersion) || {};
   return Number.isInteger(c.boardListCap) && c.boardListCap > 0 ? c.boardListCap : 3000;
 }
 
-/** Roster array for a content version, or throws INVALID_ACTIONS (unknown contentVersion).
- *  ASSUMPTION: getContent(v) returns {generals:[...]} (or the array itself); unknown version throws or returns null. */
+/** Roster array for a content version; unknown version (core returns null) -> INVALID_ACTIONS. */
 function roster(contentVersion) {
-  let c = null;
-  try { c = content.getContent(contentVersion); } catch (e) { c = null; }
-  const gens = c && (Array.isArray(c) ? c : c.generals);
-  if (!Array.isArray(gens) || gens.length === 0) fail('INVALID_ACTIONS', 'unknown contentVersion');
-  return gens;
-}
-function generalIndex(contentVersion, generalId) {
-  const idx = roster(contentVersion).findIndex((g) => g.id === generalId);
-  return idx;
+  const c = content.getContent(contentVersion);
+  if (!c || !Array.isArray(c.generals) || c.generals.length === 0) fail('INVALID_ACTIONS', 'unknown contentVersion');
+  return c.generals;
 }
 
-function buildSheet(seed, contentVersion) {
-  return sheet.buildSheet(seed, contentVersion);
+function buildSheet(seed, contentVersion, configVersion) {
+  const r = sheet.buildSheet(seed, contentVersion, configVersion);
+  if (!r) fail('INVALID_ACTIONS', 'unknown contentVersion');
+  return r;
 }
 function primaryTokens(rounds) {
   return rounds.map((r) => ({ faction: r.faction, era: r.era }));
 }
 
-/** Replay actions. Never throws: returns {ok:false,error}. */
+/** Replay actions. Never throws: returns {ok:false, error:'<reason>[@index]'}. */
 function replay(seed, contentVersion, actions, mode) {
   try {
     const r = validate.replay(seed, contentVersion, actions, mode);
-    return r || { ok: false, error: 'replay returned nothing' };
+    if (!r) return { ok: false, error: 'replay returned nothing' };
+    if (r.ok === false) return { ok: false, error: [r.reason || r.error, r.index].filter((x) => x !== undefined).join('@') };
+    return r;
   } catch (e) {
     return { ok: false, error: 'replay threw: ' + String(e && e.message).slice(0, 80) };
   }
@@ -69,9 +65,11 @@ function replay(seed, contentVersion, actions, mode) {
 function simulate(lineup, seed, contentVersion, configVersion) {
   return sim.simulate(lineup, seed, contentVersion, configVersion);
 }
+/** null when five distinct generals cannot be drafted */
 function bestLineup(seed, contentVersion, finalTokens) {
   return search.bestLineup(seed, contentVersion, finalTokens);
 }
+/** -> {accepted, gates, best?, rounds?} */
 function acceptDailySeed(seed) {
   return gates.acceptDailySeed(seed);
 }
@@ -94,15 +92,10 @@ function lineupToIdx(lineup, contentVersion) {
   return lineup.map((l) => gens.findIndex((g) => g.id === l.generalId));
 }
 
-/**
- * Final tokens per round after re-spins: [{faction, era}] x5.
- * Uses replay().tokens when the core provides it; else derives from the sheet + actions
- * (re-spin k of a dimension reads alt[k], spec §4). Auto-reflip on empty pool is core-internal.
- */
+/** Final tokens per round after re-spins: replay().finalTokens (alias tokens); sheet-derived fallback. */
 function finalTokens(rounds, actions, replayResult) {
-  if (replayResult && Array.isArray(replayResult.tokens) && replayResult.tokens.length === 5) {
-    return replayResult.tokens.map((t) => ({ faction: t.faction, era: t.era }));
-  }
+  const ft = replayResult && (replayResult.finalTokens || replayResult.tokens);
+  if (Array.isArray(ft) && ft.length === 5) return ft.map((t) => ({ faction: t.faction, era: t.era }));
   return rounds.map((r, i) => {
     let faction = r.faction;
     let era = r.era;
@@ -118,7 +111,7 @@ function finalTokens(rounds, actions, replayResult) {
 }
 
 module.exports = {
-  hash32: rng.hash32, dateKeyAt, currentVersions, getConfig, boardListCap, roster, generalIndex,
+  dateKeyAt, currentVersions, getConfig, boardListCap, roster,
   buildSheet, primaryTokens, replay, simulate, bestLineup, acceptDailySeed,
   normaliseLineup, lineupToIdx, finalTokens,
 };
