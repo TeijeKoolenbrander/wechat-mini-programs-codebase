@@ -27,7 +27,7 @@ function drawInto(ctx, L, hits) {
   const py = y + L.u(8);
   const px = s.x + L.u(14);
   W.token(ctx, px, py, tw, ph, { label: '蜀', color: T.FACTION_COLOR.shu }, 1);
-  W.token(ctx, px + tw + L.u(8), py, tw, ph, { label: '时代', color: C.lacquer, textColor: C.lacquerGold }, 1);
+  W.token(ctx, px + tw + L.u(8), py, tw, ph, { label: '时', color: C.lacquer, textColor: C.lacquerGold }, 1);
   W.text(ctx, '→', px + 2 * tw + L.u(28), py + ph / 2, { size: T.FS.title, weight: 700, color: C.sub, align: 'center' });
   const rx = px + 2 * tw + L.u(48);
   const roles = T.SLOT_ORDER;
