@@ -30,7 +30,7 @@ const V1 = {
   ],
 
   /** Opponent strength per battle and the logistic temperature. */
-  curve: [7.47, 7.734, 7.997, 8.261, 8.525, 8.788, 9.052, 9.315, 9.579, 9.843, 10.106, 10.37],
+  curve: [7.41, 7.674, 7.937, 8.201, 8.465, 8.728, 8.992, 9.255, 9.519, 9.783, 10.046, 10.31],
   tau: 0.7,
   /** Opponent jitter j_i is uniform in [-jitter, +jitter]. */
   jitter: 0.35,
@@ -95,7 +95,7 @@ const V1 = {
   },
 
   /** 复盘 (spec 7.4): token sets with more distinct general sets than this are asked of the server first. */
-  search: { heavySets: 2500 },
+  search: { heavySets: 2000 },
 
   /** Boards (spec 11.5). */
   boardListCap: 3000,
@@ -112,7 +112,7 @@ const V1 = {
    * sensible-player runs reaching w wins or better. Filled from the
    * simstats distribution.
    */
-  freeRarity: [1, 0.9959, 0.9814, 0.9482, 0.8884, 0.7962, 0.6705, 0.5074, 0.3303, 0.1773, 0.072, 0.0189, 0.0025],
+  freeRarity: [1, 0.998, 0.9896, 0.9667, 0.9219, 0.8476, 0.7346, 0.5817, 0.3975, 0.2204, 0.0929, 0.0253, 0.0033],
 };
 
 const CONFIGS = { 1: V1 };

@@ -24,7 +24,7 @@ const { simulate, moraleOf } = require('../core/sim');
 const { bestLineup, enumerateSets } = require('../core/search');
 const { randomSeed } = require('../core/rng');
 const { bandFor } = require('../core/config');
-const { beijingDateKey, issueNo: issueNoOf } = require('../core/date');
+const { beijingDateKey, issueNo: issueNoOf, dateKeyToMs, DAY_MS } = require('../core/date');
 const { lineupDetail, commentFor } = require('../core/score');
 const { parseEnter } = require('./share');
 const V = require('./vm');
@@ -79,7 +79,7 @@ function createController(deps) {
   function persistActive() {
     const r = c.r;
     if (!r || r.mode === 'free') return;
-    S.active = { mode: r.mode, clientRunId: r.clientRunId, dateKey: r.dateKey, issueNo: r.issueNo, challengeId: r.challengeId || null, rounds: r.rounds, actions: r.run.actions.slice(), startedAt: r.startedAt, started: r.started, startLogged: r.startLogged, countsAsDaily: !!r.countsAsDaily };
+    S.active = { mode: r.mode, clientRunId: r.clientRunId, dateKey: r.dateKey, issueNo: r.issueNo, challengeId: r.challengeId || null, rounds: r.rounds, actions: r.run.actions.slice(), startedAt: r.startedAt, started: r.started, startLogged: r.startLogged, countsAsDaily: !!r.countsAsDaily, dailySeed: !!r.dailySeed };
     store.save();
   }
 
@@ -100,6 +100,7 @@ function createController(deps) {
       startedAt: 0,
       source: opts.source || 'home',
       countsAsDaily: !!opts.countsAsDaily,
+      dailySeed: !!opts.dailySeed,
     };
   }
 
@@ -118,7 +119,7 @@ function createController(deps) {
   function restoreActive() {
     const a = S.active;
     if (!a) return null;
-    const r = newRunCtx({ mode: a.mode, rounds: a.rounds, clientRunId: a.clientRunId, dateKey: a.dateKey, issueNo: a.issueNo, challengeId: a.challengeId, countsAsDaily: a.countsAsDaily });
+    const r = newRunCtx({ mode: a.mode, rounds: a.rounds, clientRunId: a.clientRunId, dateKey: a.dateKey, issueNo: a.issueNo, challengeId: a.challengeId, countsAsDaily: a.countsAsDaily, dailySeed: a.dailySeed });
     for (const act of a.actions) draft.apply(r.run, act);
     r.started = a.started;
     r.startLogged = a.startLogged;
@@ -387,6 +388,7 @@ function createController(deps) {
       dateKey: r.dateKey,
       issueNo: r.issueNo,
       challengeId: r.challengeId,
+      dailySeed: !!r.dailySeed,
       record: o.record || null,
       band: o.band || null,
       battles: o.battles || [],
@@ -440,7 +442,7 @@ function createController(deps) {
       showResult(res, true);
       return;
     }
-    const pending = { mode: r.mode, clientRunId: r.clientRunId, dateKey: r.dateKey, issueNo: r.issueNo, challengeId: r.challengeId, rounds: r.rounds, actions: r.run.actions.slice(), startLogged: r.startLogged, startedAt: r.startedAt, finalTokens: r.run.finalTokens.map((t) => ({ faction: t.faction, era: t.era })), countsAsDaily: r.countsAsDaily };
+    const pending = { mode: r.mode, clientRunId: r.clientRunId, dateKey: r.dateKey, issueNo: r.issueNo, challengeId: r.challengeId, rounds: r.rounds, actions: r.run.actions.slice(), startLogged: r.startLogged, startedAt: r.startedAt, finalTokens: r.run.finalTokens.map((t) => ({ faction: t.faction, era: t.era })), countsAsDaily: r.countsAsDaily, dailySeed: r.dailySeed };
     const res = makeResult(r, { status: 'waitingServer', lineup });
     showResult(res, false);
     res.status = 'waitingServer';
@@ -508,7 +510,7 @@ function createController(deps) {
     res.comment = commentFor(content, lineup, r.record.w);
     res.rarityText = V.rarityText(res, config);
     res.shareNames = shareNamesOf(lineup);
-    if (r.challengeCompare) res.challenge = { theirRecord: r.challengeCompare.theirRecord, theirLineup: (r.challengeCompare.theirLineup || []).map((e) => ({ slot: e.slot, name: content.byId[e.generalId] ? content.byId[e.generalId].name : '' })) };
+    if (r.challengeCompare) res.challenge = { theirRecord: r.challengeCompare.theirRecord, lineupLocked: !!r.challengeCompare.lineupLocked, theirLineup: (r.challengeCompare.theirLineup || []).map((e) => ({ slot: e.slot, name: content.byId[e.generalId] ? content.byId[e.generalId].name : '' })) };
     res.status = 'revealing';
     c.ui.revealStart = now();
     c.ui.doneAt = 0;
@@ -598,12 +600,21 @@ function createController(deps) {
 
   // ---------------------------------------------------------------- 复盘
 
+  /** Spoiler rule: a daily-seed run's 复盘 stays sealed until the player has a ranked result for that date (or D+1 00:30). */
+  function replayLocked(res) {
+    if (!res || !res.dailySeed || res.ranked || !res.dateKey) return false;
+    const st = S.results[res.dateKey];
+    if (st && st.dailyDone) return false;
+    return now() + c.dailyOffsetMs < dateKeyToMs(res.dateKey) + DAY_MS + config.daily.graceMs;
+  }
+
   async function replayTap() {
     const res = c.res;
     if (res.replay.unlocked) {
       c.ui.sheet = 'replay';
       return invalidate();
     }
+    if (replayLocked(res)) return toast(V.REPLAY_LOCKED_TEXT); // no ad for a locked replay
     if (c.ui.replayAdState !== 'idle') return;
     c.ui.replayAdState = 'loading';
     invalidate();
@@ -628,7 +639,10 @@ function createController(deps) {
     } else {
       const g = await api.getReplay({ runId: res.runId });
       if (g && g.ok && g.best) best = g.best;
-      else toast('复盘暂时打不开');
+      else if (g && g.code === 'REPLAY_LOCKED') {
+        res.dailySeed = true;
+        toast(V.REPLAY_LOCKED_TEXT);
+      } else toast('复盘暂时打不开');
     }
     if (best) {
       res.replay = { unlocked: true, best: { lineup: lineupDetail(content, best.lineup).map((e) => ({ slot: e.slot, name: e.name, score: e.score })), record: best.record } };
@@ -644,7 +658,7 @@ function createController(deps) {
     go('challenge');
     const r = await api.getChallenge({ challengeId: id });
     if (r && r.ok) {
-      c.challenge = { id, status: r.status, theirRecord: r.theirRecord, mode: r.mode, countsAsDaily: r.countsAsDaily, isFriendly: r.isFriendly, answerCount: r.answerCount, bestRecord: r.bestAnswer !== undefined ? { w: r.bestAnswer, l: 12 - r.bestAnswer } : undefined, rounds: r.rounds, dateKey: r.dateKey };
+      c.challenge = { id, status: r.status, theirRecord: r.theirRecord, mode: r.mode, countsAsDaily: r.countsAsDaily, isFriendly: r.isFriendly, answerCount: r.answerCount, bestRecord: r.bestAnswer !== undefined ? { w: r.bestAnswer, l: 12 - r.bestAnswer } : undefined, rounds: r.rounds, dateKey: r.dateKey, lineupLocked: !!r.lineupLocked };
     } else if (r && (r.status === 'expired' || r.code === 'CHALLENGE_EXPIRED' || r.code === 'NOT_FOUND')) {
       c.challenge = { id, status: 'expired', theirRecord: { w: 0, l: 0 } };
     } else {
@@ -658,7 +672,7 @@ function createController(deps) {
   function acceptChallenge() {
     const ch = c.challenge;
     if (!ch || ch.status !== 'ready') return;
-    const r = newRunCtx({ mode: 'challenge', rounds: ch.rounds, dateKey: ch.dateKey, challengeId: ch.id, source: 'challenge', countsAsDaily: ch.countsAsDaily });
+    const r = newRunCtx({ mode: 'challenge', rounds: ch.rounds, dateKey: ch.dateKey, challengeId: ch.id, source: 'challenge', countsAsDaily: ch.countsAsDaily, dailySeed: ch.mode === 'daily' });
     beginDraft(r);
   }
 
@@ -1084,7 +1098,7 @@ function createController(deps) {
       case 'result': {
         const res = c.res;
         const stampT = res.status === 'done' && c.ui.doneAt ? Math.min(1, (t - c.ui.doneAt) / STAMP_MS) : 1;
-        vm = V.resultVm(res, { revealCount: revealCount(t), stampT, scrollY: c.ui.scrollY, sheet: c.ui.sheet, sheetScroll: c.ui.sheetScroll, replayAdState: c.ui.replayAdState, t });
+        vm = V.resultVm(res, { revealCount: revealCount(t), stampT, scrollY: c.ui.scrollY, sheet: c.ui.sheet, sheetScroll: c.ui.sheetScroll, replayAdState: c.ui.replayAdState, replayLocked: replayLocked(res), t });
         break;
       }
       case 'challenge':

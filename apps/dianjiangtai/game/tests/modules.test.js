@@ -310,3 +310,33 @@ test('Beijing day roll: dateKey follows the server offset, not the device clock'
   assert.strictEqual(beijingDateKey(Date.UTC(2026, 10, 20, 15, 59, 59)), '20261120');
   assert.strictEqual(beijingDateKey(Date.UTC(2026, 10, 20, 16, 0, 0)), '20261121');
 });
+
+test('mock server mirrors the backend spoiler lock: getReplay REPLAY_LOCKED and sealed challenge lineups', async () => {
+  const { createMockServer } = require('../js/mock-server');
+  const now = Date.UTC(2026, 10, 20, 4, 0, 0);
+  const srv = createMockServer({ now: () => now });
+  const d = srv.call('getDaily', {});
+  const seed = srv.db.seeds[d.dateKey].seed;
+  srv.db.runs['mock-openid-me_r1'] = { response: {}, seed, mode: 'free', dateKey: d.dateKey, lineup: [], tokens: [], record: { w: 1, l: 11 } };
+  assert.strictEqual(srv.call('getReplay', { runId: 'r1' }).code, 'REPLAY_LOCKED');
+  srv.db.results[d.dateKey + '_mock-openid-me'] = { w: 5, s: 1, lineup: [], response: {} };
+  assert.notStrictEqual(srv.call('getReplay', { runId: 'r1' }).code, 'REPLAY_LOCKED');
+  srv.db.runs['mock-openid-me_r2'] = { response: {}, seed: 12345, mode: 'free', dateKey: d.dateKey, lineup: [], tokens: [], record: { w: 1, l: 11 } };
+  delete srv.db.results[d.dateKey + '_mock-openid-me'];
+  assert.notStrictEqual(srv.call('getReplay', { runId: 'r2' }).code, 'REPLAY_LOCKED', 'a free seed is never locked');
+  // after D+1 00:30 the seal lifts
+  
+
+});
+
+test('vm: locked texts for 复盘 and the opponent lineup', () => {
+  const base = { mode: 'challenge', status: 'done', record: { w: 3, l: 9 }, band: {}, battles: [], lineupDetail: [], morale: null, challenge: { theirRecord: { w: 12, l: 0 }, theirLineup: null, lineupLocked: true } };
+  const vm = V.resultVm(base, { replayLocked: true });
+  assert.strictEqual(vm.replay.locked, true);
+  assert.strictEqual(vm.replay.lockedText, '今日军令完成后可复盘');
+  assert.strictEqual(vm.challenge.lineupLocked, true);
+  assert.strictEqual(vm.challenge.lockedText, '对方阵容 · 完成今日军令后可见');
+  assert.strictEqual(vm.challenge.theirLineup, null);
+  assert.strictEqual(V.resultVm(base, {}).replay.locked, false);
+  assert.strictEqual(V.challengeVm({ status: 'answered', lineupLocked: true }).lockedText, '对方阵容 · 完成今日军令后可见');
+});

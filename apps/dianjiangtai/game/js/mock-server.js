@@ -15,7 +15,7 @@ const { buildSheet } = require('../core/sheet');
 const { replay } = require('../core/validate');
 const { simulate } = require('../core/sim');
 const { bestLineup } = require('../core/search');
-const { beijingDateKey, issueNo, secondsSinceBeijingMidnight, beijingMidnightMs, DAY_MS } = require('../core/date');
+const { dateKeyToMs, beijingDateKey, issueNo, secondsSinceBeijingMidnight, beijingMidnightMs, DAY_MS } = require('../core/date');
 
 const ME = 'mock-openid-me';
 
@@ -64,6 +64,14 @@ function createMockServer(opts) {
     let n = 0;
     for (let w = wins; w <= 12; w++) n += st.hist[w];
     return { share: n / st.total, total: st.total };
+  }
+
+  /** Spoiler rule (backend dailyLocked): a daily-seed run stays sealed until the caller has a ranked daily for that date, or D+1 00:30. */
+  function dailyLocked(dateKey, seed) {
+    const s = db.seeds[dateKey];
+    if (!s || s.seed !== seed) return false;
+    if (db.results[dateKey + '_' + ME]) return false;
+    return now() < dateKeyToMs(dateKey) + DAY_MS + config.daily.graceMs;
   }
 
   const fns = {
@@ -151,9 +159,11 @@ function createMockServer(opts) {
       }
       if (challenge) {
         challenge.answers.push({ w: sim.record.w, lineup: rep.lineup, by: ME });
+        const locked = dailyLocked(challenge.dateKey, challenge.seed);
         response.challengeCompare = {
           theirRecord: challenge.record,
-          theirLineup: challenge.lineup.map((e) => ({ slot: e.slot, generalId: e.generalId })),
+          theirLineup: locked ? null : challenge.lineup.map((e) => ({ slot: e.slot, generalId: e.generalId })),
+          lineupLocked: locked,
           countsAsDaily: ranked,
         };
       }
@@ -208,6 +218,7 @@ function createMockServer(opts) {
       const run = db.runs[ME + '_' + d.runId];
       if (!run) return err('SEED_NOT_FOUND');
       if (run.mode === 'daily' && !db.results[run.dateKey + '_' + ME]) return err('NOT_YET');
+      if (dailyLocked(run.dateKey, run.seed)) return err('REPLAY_LOCKED');
       const best = bestLineup(run.seed, cv, run.tokens);
       return { ok: true, best: best ? { lineup: best.lineup, record: best.record } : null };
     },
@@ -253,7 +264,11 @@ function createMockServer(opts) {
         dateKey: c.dateKey,
       };
       if (c.owner === ME && c.answers.length) out.bestAnswer = Math.max.apply(null, c.answers.map((a) => a.w));
-      if (answered) out.theirLineup = c.lineup;
+      const locked = answered && dailyLocked(c.dateKey, c.seed);
+      if (answered) {
+        out.theirLineup = locked ? null : c.lineup;
+        out.lineupLocked = locked;
+      }
       return out;
     },
 

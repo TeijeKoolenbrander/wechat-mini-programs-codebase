@@ -479,3 +479,25 @@ test('first-ever run shows the coach marks once; skipping them marks them seen',
   assert.strictEqual(g.app.ctl.view().vm.coach, 0);
   assert.strictEqual(JSON.parse(g.storage.djt_state_v1).coachSeen, true);
 });
+
+test('locked 复盘 (daily-seed run before the daily is done): clear text, no ad; unlocks once the daily is ranked', async (t) => {
+  const g = await startUp(t);
+  g.tapId('sheet:close');
+  g.tapId('home:free');
+  await playDraft(g);
+  g.tapId('result:skip');
+  const res = g.app.ctl.state.res;
+  res.dailySeed = true;
+  res.dateKey = g.app.store.state.dailyCache.dateKey;
+  let v = g.app.ctl.view();
+  assert.strictEqual(v.vm.replay.locked, true);
+  assert.strictEqual(v.vm.replay.lockedText, '今日军令完成后可复盘');
+  g.tapId('result:replay');
+  assert.strictEqual(g.app.ads.overlay, null, "no ad for a locked replay");
+  assert.strictEqual(g.app.ctl.view().overlay.toast.text, '今日军令完成后可复盘');
+  assert.strictEqual(allEvents(g).filter((e) => e.name === 'ad_request').length, 0);
+  g.app.store.state.results[res.dateKey] = { dailyDone: true };
+  assert.strictEqual(g.app.ctl.view().vm.replay.locked, false);
+  g.tapId('result:replay');
+  assert.ok(g.app.ads.overlay, "unlocked: the ad plays");
+});

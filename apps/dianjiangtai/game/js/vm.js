@@ -9,6 +9,10 @@ const draft = require('../core/draft');
 const { lineupDetail } = require('../core/score');
 const { chanceText, LUCK } = require('./util');
 
+/** Shown when 复盘 or the opponent's lineup is sealed until today's daily is done (spoiler rule). */
+const REPLAY_LOCKED_TEXT = '今日军令完成后可复盘';
+const LINEUP_LOCKED_TEXT = '对方阵容 · 完成今日军令后可见';
+
 const BAND_SHARE_TEXT = (share, w) => (w >= 12 ? '今日仅 ' + (share * 100).toFixed(1) + '% 的主公一统天下' : '今日仅 ' + (share * 100).toFixed(1) + '% 的主公达到此战绩');
 
 // ---------------------------------------------------------------- home
@@ -149,7 +153,7 @@ function resultVm(res, ui) {
     })),
     lineup: (res.lineupDetail || []).map((e) => ({ slot: e.slot, name: e.name, score: e.score, fit: e.fit })),
     morale: res.morale ? moraleVm(res.morale) : { total: 0, lord: 0, bonds: [], cohesion: 0 },
-    replay: { unlocked: !!(res.replay && res.replay.unlocked), adState: ui.replayAdState || 'idle' },
+    replay: { unlocked: !!(res.replay && res.replay.unlocked), adState: ui.replayAdState || 'idle', locked: !!ui.replayLocked, lockedText: ui.replayLocked ? REPLAY_LOCKED_TEXT : null },
     interstitialDue: !!res.interstitialDue,
     revealCount: ui.revealCount === undefined ? 12 : ui.revealCount,
     stampT: ui.stampT === undefined ? 1 : ui.stampT,
@@ -161,7 +165,14 @@ function resultVm(res, ui) {
     t: ui.t || 0,
   };
   if (res.replay && res.replay.best) out.replay.best = res.replay.best;
-  if (res.challenge) out.challenge = { theirRecord: res.challenge.theirRecord, theirLineup: res.challenge.theirLineup || null };
+  if (res.challenge) {
+    out.challenge = { theirRecord: res.challenge.theirRecord, theirLineup: res.challenge.theirLineup || null };
+    if (res.challenge.lineupLocked) {
+      out.challenge.theirLineup = null;
+      out.challenge.lineupLocked = true;
+      out.challenge.lockedText = LINEUP_LOCKED_TEXT;
+    }
+  }
   return out;
 }
 
@@ -188,6 +199,10 @@ function challengeVm(c, t) {
   };
   if (c.answerCount !== undefined) out.answerCount = c.answerCount;
   if (c.bestRecord) out.bestRecord = c.bestRecord;
+  if (c.lineupLocked) {
+    out.lineupLocked = true;
+    out.lockedText = LINEUP_LOCKED_TEXT;
+  }
   return out;
 }
 
@@ -265,4 +280,4 @@ function cardVm(res, content) {
   };
 }
 
-module.exports = { homeVm, draftVm, resultVm, challengeVm, boardVm, boardMessage, cardVm, rarityText, respinVm, lineupVm, moraleVm };
+module.exports = { REPLAY_LOCKED_TEXT, LINEUP_LOCKED_TEXT, homeVm, draftVm, resultVm, challengeVm, boardVm, boardMessage, cardVm, rarityText, respinVm, lineupVm, moraleVm };

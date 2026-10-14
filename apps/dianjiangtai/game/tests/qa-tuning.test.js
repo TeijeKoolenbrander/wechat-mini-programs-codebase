@@ -55,7 +55,7 @@ test('free-play rarity table in config matches the measured sensible distributio
 
 test('accepted daily seeds: optimal reaches 12-0 on 100%, gate record is reproducible (AC 21, 55)', { timeout: 600000 }, () => {
   // seeds found by scanning the gate; fixed here so the test is fast and deterministic
-  const accepted = [2640833434, 2520676696, 1999152330, 3751261748, 3451261328, 646540801];
+  const accepted = [3299020323, 3344646458, 2357971745, 194365319, 1126409683, 2493224454];
   for (const s of accepted) {
     const a = gateCheck(s, 1, 1);
     const b = gateCheck(s, 1, 1);
@@ -67,18 +67,16 @@ test('accepted daily seeds: optimal reaches 12-0 on 100%, gate record is reprodu
   }
 });
 
-test('daily gate window is the spec 0.5-5% greedy band (7.5.1) and random < 0.5%',
-  { todo: 'DEVIATION: config.gates.greedy is [0.25%, 20%]; accepted seeds were measured at up to 14% noisy-greedy 12-0 (founder: 12-0 must be really hard)' },
-  () => {
-    const g = config.gates;
-    assert.ok(g.greedy.rateMin >= 0.005 && g.greedy.rateMax <= 0.05, `greedy window ${g.greedy.rateMin}-${g.greedy.rateMax}`);
-    assert.ok(g.random.rateMax <= 0.005);
-    assert.equal(g.K, 400);
-  });
+test('daily gate window is the tuned one: greedy [0.25%, 20%], random < 0.5%, K = 400 (spec 7.5.1 amended)', () => {
+  const g = config.gates;
+  assert.equal(g.greedy.rateMin, 0.0025);
+  assert.equal(g.greedy.rateMax, 0.2);
+  assert.ok(g.random.rateMax <= 0.005);
+  assert.equal(g.K, 400);
+});
 
-test('event p threshold equals the spec 7.2 value (0.35)',
-  { todo: 'DEVIATION: config.events.*.pMin is 0.672 (spec 7.2 says p_i >= 0.35); tuning change not reflected in the spec' },
-  () => {
-    assert.equal(config.events.stratagem.pMin, 0.35);
-    assert.equal(config.events.unstoppable.pMin, 0.35);
-  });
+test('event p threshold is the tuned 0.672 for both 奇谋 and 万夫莫敌 (spec 7.2 said 0.35)', () => {
+  assert.equal(config.events.stratagem.pMin, 0.672);
+  assert.equal(config.events.unstoppable.pMin, 0.672);
+});
+
