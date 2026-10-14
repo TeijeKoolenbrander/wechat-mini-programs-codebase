@@ -128,12 +128,6 @@ function createController(deps) {
 
   // ---------------------------------------------------------------- daily / home
 
-  function dailyView() {
-    const cache = S.dailyCache;
-    const d = c.home.daily;
-    return d;
-  }
-
   function bandLabelOf(w) {
     return bandFor(config, w).label;
   }
@@ -206,9 +200,7 @@ function createController(deps) {
 
   function act(a) {
     const r = c.r;
-    const before = r.run.phase;
     const res = draft.apply(r.run, Object.assign({ round: r.run.round }, a));
-    void before;
     if (res.ok) persistActive();
     return res;
   }
@@ -737,6 +729,11 @@ function createController(deps) {
   function handleEntry(options, cold) {
     const e = parseEnter(options);
     if (e.kind === 'none') return e;
+    // the launch options and the first onShow can be the same entry: count it once
+    const key = JSON.stringify([options.query, options.shareTicket, options.scene]);
+    if (key === c.lastEntryKey && now() - c.lastEntryAt < 3000) return e;
+    c.lastEntryKey = key;
+    c.lastEntryAt = now();
     if (e.kind === 'result' || e.kind === 'challenge') {
       track('card_open', { cardKind: e.kind, hasShareTicket: e.hasShareTicket, challengeId: e.challengeId });
     }

@@ -193,7 +193,15 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
       }
       if (count < bestCount) return;
       let metric = 0;
-      for (let i = 0; i < nb; i++) metric += 1 / (1 + Math.exp(-(P[i] - D[i]) / tau));
+      if (count === bestCount) {
+        // each term is < 1: abandon the sum as soon as it cannot beat the best tie-break
+        for (let i = 0; i < nb; i++) {
+          metric += 1 / (1 + Math.exp(-(P[i] - D[i]) / tau));
+          if (metric + (nb - 1 - i) <= bestMetric) return;
+        }
+      } else {
+        for (let i = 0; i < nb; i++) metric += 1 / (1 + Math.exp(-(P[i] - D[i]) / tau));
+      }
       if (beats(count, metric)) {
         bestCount = count;
         bestMetric = metric;

@@ -28,10 +28,10 @@ const V1 = {
   ],
 
   /** Opponent strength per battle and the logistic temperature. */
-  curve: [4.8, 5.2, 5.6, 6.0, 6.3, 6.6, 6.9, 7.2, 7.5, 7.8, 8.1, 8.5],
-  tau: 0.5,
+  curve: [8.479, 8.495, 8.511, 8.528, 8.544, 8.56, 8.576, 8.593, 8.609, 8.625, 8.641, 8.658],
+  tau: 1.343,
   /** Opponent jitter j_i is uniform in [-jitter, +jitter]. */
-  jitter: 0.3,
+  jitter: 0.322,
 
   /** Morale multiplier M (spec 7.2 step 2). */
   morale: { base: 0.85, perLord: 0.03, perBond: 0.04, cohesion4: 0.03, cohesion5: 0.05, cap: 1.25 },
@@ -39,8 +39,8 @@ const V1 = {
   /** Events (spec 7.2 step 8). */
   events: {
     wavering: { maxXin: 3, base: 4, perPoint: 0.1 },
-    stratagem: { minZhi: 9, pMin: 0.35, types: ['shuiZhan', 'qiXi'] },
-    unstoppable: { yong: 10, pMin: 0.35, types: ['yeZhan'] },
+    stratagem: { minZhi: 9, pMin: 0.67, types: ['shuiZhan', 'qiXi'] },
+    unstoppable: { yong: 10, pMin: 0.67, types: ['yeZhan'] },
   },
 
   /** 天时 label from the shared luck roll u (low u is lucky). */
