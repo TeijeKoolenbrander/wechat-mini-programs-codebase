@@ -21,7 +21,7 @@
 const { SLOTS } = require('../core/content');
 const draft = require('../core/draft');
 const { simulate, moraleOf } = require('../core/sim');
-const { bestLineup } = require('../core/search');
+const { bestLineup, enumerateSets } = require('../core/search');
 const { randomSeed } = require('../core/rng');
 const { bandFor } = require('../core/config');
 const { beijingDateKey, issueNo: issueNoOf } = require('../core/date');
@@ -612,9 +612,19 @@ function createController(deps) {
     if (out.toast) toast(out.toast);
     if (!out.granted) return invalidate();
     let best = null;
+    // Free-play 复盘 is computed on the client, except for token sets so large that a mid-range phone could
+    // take too long (spec 7.4): those ask the server first and fall back to the local search.
+    const heavy = res.mode === 'free' && enumerateSets(content, res.finalTokens).length > config.search.heavySets;
+    if (heavy) {
+      if (c.submits[res.runId]) await c.submits[res.runId];
+      const g = await api.getReplay({ runId: res.runId });
+      if (g && g.ok && g.best) best = g.best;
+    }
     if (res.mode === 'free') {
-      const b = bestLineup(res.seed, cvNum, res.finalTokens, { configVersion: config.configVersion });
-      if (b) best = { lineup: b.lineup, record: b.record };
+      if (!best) {
+        const b = bestLineup(res.seed, cvNum, res.finalTokens, { configVersion: config.configVersion });
+        if (b) best = { lineup: b.lineup, record: b.record };
+      }
     } else {
       const g = await api.getReplay({ runId: res.runId });
       if (g && g.ok && g.best) best = g.best;

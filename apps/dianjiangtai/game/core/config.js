@@ -3,7 +3,9 @@
  * cloud functions. Anything that changes a sim outcome bumps `configVersion`
  * (the seed bank and stored runs pin to it); the server keeps the last 2.
  *
- * Tuned with tools/simstats.js, see tools/simstats-report.md.
+ * Tuned with tools/simstats.js, see tools/simstats-report.md. Deviations from the spec 7.2/7.5 starting values (all reported to the CTO):
+ * curve (flatter and higher: 7.7 -> 10.3), tau 0.7, jitter 0.35, event pMin 0.672 (was 0.35), band targets (12-0 is really hard:
+ * founder decision), gate greedy window [0.0025, 0.2]. Formula weights, role weights, morale constants are unchanged.
  */
 
 const V1 = {
@@ -28,10 +30,10 @@ const V1 = {
   ],
 
   /** Opponent strength per battle and the logistic temperature. */
-  curve: [8.479, 8.495, 8.511, 8.528, 8.544, 8.56, 8.576, 8.593, 8.609, 8.625, 8.641, 8.658],
-  tau: 1.343,
+  curve: [7.7, 7.936, 8.173, 8.409, 8.645, 8.882, 9.118, 9.355, 9.591, 9.827, 10.064, 10.3],
+  tau: 0.7,
   /** Opponent jitter j_i is uniform in [-jitter, +jitter]. */
-  jitter: 0.322,
+  jitter: 0.35,
 
   /** Morale multiplier M (spec 7.2 step 2). */
   morale: { base: 0.85, perLord: 0.03, perBond: 0.04, cohesion4: 0.03, cohesion5: 0.05, cap: 1.25 },
@@ -39,8 +41,8 @@ const V1 = {
   /** Events (spec 7.2 step 8). */
   events: {
     wavering: { maxXin: 3, base: 4, perPoint: 0.1 },
-    stratagem: { minZhi: 9, pMin: 0.67, types: ['shuiZhan', 'qiXi'] },
-    unstoppable: { yong: 10, pMin: 0.67, types: ['yeZhan'] },
+    stratagem: { minZhi: 9, pMin: 0.672, types: ['shuiZhan', 'qiXi'] },
+    unstoppable: { yong: 10, pMin: 0.672, types: ['yeZhan'] },
   },
 
   /** 天时 label from the shared luck roll u (low u is lucky). */
@@ -48,12 +50,12 @@ const V1 = {
 
   /** Grade bands (spec 7.5), by wins. */
   bands: [
-    { key: 'yitong', label: '一统天下', min: 12, max: 12, target: [0.01, 0.03] },
-    { key: 'baye', label: '霸业将成', min: 10, max: 11, target: [0.12, 0.18] },
-    { key: 'xiongju', label: '雄踞一方', min: 8, max: 9, target: [0.25, 0.3] },
-    { key: 'dingli', label: '三分鼎立', min: 6, max: 7, target: [0.25, 0.3] },
-    { key: 'pianan', label: '偏安一方', min: 4, max: 5, target: [0.12, 0.18] },
-    { key: 'bingwei', label: '兵微将寡', min: 2, max: 3, target: [0.04, 0.08] },
+    { key: 'yitong', label: '一统天下', min: 12, max: 12, target: [0.002, 0.005] },
+    { key: 'baye', label: '霸业将成', min: 10, max: 11, target: [0.06, 0.1] },
+    { key: 'xiongju', label: '雄踞一方', min: 8, max: 9, target: [0.22, 0.32] },
+    { key: 'dingli', label: '三分鼎立', min: 6, max: 7, target: [0.25, 0.36] },
+    { key: 'pianan', label: '偏安一方', min: 4, max: 5, target: [0.15, 0.25] },
+    { key: 'bingwei', label: '兵微将寡', min: 2, max: 3, target: [0.05, 0.12] },
     { key: 'tubai', label: '一败涂地', min: 0, max: 1, target: [0, 0.02] },
   ],
 
@@ -71,7 +73,7 @@ const V1 = {
   /** Gate populations (spec 7.5.1). */
   gates: {
     K: 400,
-    greedy: { respinP: 0.3, gainBelow: 7.0, takeBest: 0.8, rateMin: 0.005, rateMax: 0.05 },
+    greedy: { respinP: 0.3, gainBelow: 7.0, takeBest: 0.8, rateMin: 0.0025, rateMax: 0.2 },
     random: { respinP: 0.5, rateMax: 0.005 },
     maxCandidates: 50,
   },
@@ -92,6 +94,9 @@ const V1 = {
     stubDelayMs: 3000,
   },
 
+  /** 复盘 (spec 7.4): token sets with more distinct general sets than this are asked of the server first. */
+  search: { heavySets: 2500 },
+
   /** Boards (spec 11.5). */
   boardListCap: 3000,
   showUnverified: true,
@@ -107,7 +112,7 @@ const V1 = {
    * sensible-player runs reaching w wins or better. Filled from the
    * simstats distribution.
    */
-  freeRarity: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  freeRarity: [1, 0.9959, 0.9814, 0.9482, 0.8884, 0.7962, 0.6705, 0.5074, 0.3303, 0.1773, 0.072, 0.0189, 0.0025],
 };
 
 const CONFIGS = { 1: V1 };

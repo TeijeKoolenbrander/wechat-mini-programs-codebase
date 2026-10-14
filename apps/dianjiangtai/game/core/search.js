@@ -18,12 +18,15 @@
  *  - per set, slots are filled depth-first and the 12 partial team-power
  *    sums are reused across permutations;
  *  - wins are decided by precomputed thresholds (no exp in the hot loop);
- *  - sets are visited best-upper-bound first, and a set or a partial
- *    assignment is skipped when its per-battle upper bound cannot beat the
- *    best record (or the best tie-break) found so far. The bound never
- *    undercuts a reachable lineup, so the optimum is never skipped. This
- *    subsumes the spec's dominated-pick pruning without its exchange-
- *    argument caveats when the same general appears in several pools.
+ *  - sets are visited best-upper-bound first, and a set is skipped when its
+ *    per-battle upper bound cannot beat the best record (or the best
+ *    tie-break) found so far. The bound never undercuts a reachable lineup,
+ *    so the optimum is never skipped. This subsumes the spec's dominated-pick
+ *    pruning without its exchange-argument caveats when the same general
+ *    appears in several pools. (Per-node bounds inside a set were measured
+ *    and cost more than they saved.)
+ *  - a leaf is abandoned as soon as it has lost too many battles to tie the
+ *    best record.
  *
  * `opts.stopAt12` returns at the first lineup that wins every battle (gate
  * check); the stored daily `best` uses the full search.
@@ -43,25 +46,42 @@ function enumerateSets(content, finalTokens) {
   const seen = new Set();
   const sets = [];
   const pick = [0, 0, 0, 0, 0];
-  (function rec(r, mask, key) {
+  const taken = new Uint8Array(nR);
+  const POW = [];
+  for (let g = 0; g < nR; g++) POW.push(Math.pow(2, g));
+  (function rec(r, mask) {
     if (r === NS) {
-      const k = bigRoster ? key : mask;
+      let k = mask;
+      if (bigRoster) {
+        k = pick.slice().sort((a, b) => a - b).join(',');
+      }
       if (!seen.has(k)) {
         seen.add(k);
-        sets.push(pick.slice().sort((a, b) => a - b));
+        // insertion sort of 5 ints
+        const set = pick.slice();
+        for (let i = 1; i < NS; i++) {
+          const v = set[i];
+          let j = i - 1;
+          while (j >= 0 && set[j] > v) {
+            set[j + 1] = set[j];
+            j--;
+          }
+          set[j + 1] = v;
+        }
+        sets.push(set);
       }
       return;
     }
     const pool = pools[r];
     for (let i = 0; i < pool.length; i++) {
       const g = pool[i];
-      if (bigRoster) {
-        if (pick.slice(0, r).indexOf(g) >= 0) continue;
-      } else if (Math.floor(mask / Math.pow(2, g)) % 2 === 1) continue;
+      if (taken[g]) continue;
+      taken[g] = 1;
       pick[r] = g;
-      rec(r + 1, bigRoster ? 0 : mask + Math.pow(2, g), bigRoster ? key + ',' + g : '');
+      rec(r + 1, bigRoster ? 0 : mask + POW[g]);
+      taken[g] = 0;
     }
-  })(0, 0, '');
+  })(0, 0);
   return sets;
 }
 
@@ -82,22 +102,44 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
   if (rawSets.length === 0) return null;
 
   // --- per-set constants and upper bounds ------------------------------------
+  // per-general lookups, no allocation per set
+  const nR = roster.length;
+  const facOf = new Int8Array(nR);
+  const factionKeys = content.factions.map((f) => f.key);
+  const waverG = new Uint8Array(nR);
+  const stratG = new Uint8Array(nR);
+  const unstG = new Uint8Array(nR);
+  for (let g = 0; g < nR; g++) {
+    facOf[g] = factionKeys.indexOf(roster[g].faction);
+    waverG[g] = roster[g].stats.xin <= ev.wavering.maxXin ? 1 : 0;
+    stratG[g] = roster[g].stats.zhi >= ev.stratagem.minZhi ? 1 : 0;
+    unstG[g] = roster[g].stats.yong >= ev.unstoppable.yong ? 1 : 0;
+  }
+  const bondIdx = content.bonds.map((b) => ({ members: b.members.map((id) => content.indexOf[id]), bonus: b.bonus === undefined ? m.perBond : b.bonus }));
+  const facCount = new Int8Array(factionKeys.length);
+
   const infos = [];
   for (let si = 0; si < rawSets.length; si++) {
     const set = rawSets[si];
-    const ids = set.map((g) => roster[g].id);
     let bondBonus = 0;
-    for (const b of content.bonds) {
+    for (let bi = 0; bi < bondIdx.length; bi++) {
+      const mem = bondIdx[bi].members;
       let all = true;
-      for (const mem of b.members) if (ids.indexOf(mem) < 0) all = false;
-      if (all) bondBonus += b.bonus === undefined ? m.perBond : b.bonus;
+      for (let k = 0; k < mem.length; k++) {
+        let found = false;
+        for (let j = 0; j < NS; j++) if (set[j] === mem[k]) found = true;
+        if (!found) {
+          all = false;
+          break;
+        }
+      }
+      if (all) bondBonus += bondIdx[bi].bonus;
     }
-    const counts = {};
+    facCount.fill(0);
     let top = 0;
-    for (const g of set) {
-      const f = roster[g].faction;
-      counts[f] = (counts[f] || 0) + 1;
-      if (counts[f] > top) top = counts[f];
+    for (let j = 0; j < NS; j++) {
+      const c = ++facCount[facOf[set[j]]];
+      if (c > top) top = c;
     }
     const cohesion = top >= 5 ? m.cohesion5 : top >= 4 ? m.cohesion4 : 0;
     const M0 = m.base + bondBonus + cohesion;
@@ -105,12 +147,13 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
     let canStrat = 0;
     let canUnst = 0;
     const maxRS = [0, 0, 0, 0, 0];
-    for (const g of set) {
-      const st = roster[g].stats;
-      if (st.xin <= ev.wavering.maxXin) canWaver = true;
-      if (st.zhi >= ev.stratagem.minZhi) canStrat = 1;
-      if (st.yong >= ev.unstoppable.yong) canUnst = 1;
-      for (let s = 0; s < NS; s++) if (rs[g][s] > maxRS[s]) maxRS[s] = rs[g][s];
+    for (let j = 0; j < NS; j++) {
+      const g = set[j];
+      if (waverG[g]) canWaver = true;
+      if (stratG[g]) canStrat = 1;
+      if (unstG[g]) canUnst = 1;
+      const row = rs[g];
+      for (let s = 0; s < NS; s++) if (row[s] > maxRS[s]) maxRS[s] = row[s];
     }
     const Mub = Math.min(m.cap, M0 + m.perLord * maxRS[0]);
     let ubCount = 0;
@@ -129,14 +172,14 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
   // --- search state ---------------------------------------------------------
   const T = [];
   for (let d = 0; d <= NS; d++) T.push(new Float64Array(nb));
+  const bwCol = [0, 1, 2, 3, 4].map((k) => Float64Array.from(bw, (row) => row[k]));
   const S = [0, 0, 0, 0, 0];
-  const P = new Array(nb);
-  const win = new Array(nb);
-  const fin = new Array(nb);
+  const P = new Float64Array(nb);
+  const win = new Uint8Array(nb);
+  const fin = new Uint8Array(nb);
   const xin = [0, 0, 0, 0, 0];
   const used = [false, false, false, false, false];
   const assign = [0, 0, 0, 0, 0];
-  const maxR = [0, 0, 0, 0, 0];
 
   let bestCount = -1;
   let bestMetric = -Infinity;
@@ -150,42 +193,26 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
     return count > bestCount || (count === bestCount && metric > bestMetric);
   }
 
-  /** Upper bound on the count for a partial assignment of slots 0..s-1. */
-  function partialUbCount(s) {
-    for (let k = s; k < NS; k++) {
-      let mx = 0;
-      for (let a = 0; a < NS; a++) if (!used[a] && rs[set[a]][k] > mx) mx = rs[set[a]][k];
-      maxR[k] = mx;
-    }
-    const M = Math.min(m.cap, info.M0 + m.perLord * (s > 0 ? S[0] : maxR[0]));
-    const t = T[s];
-    let c = 0;
-    for (let i = 0; i < nb; i++) {
-      const b = bw[i];
-      let sum = t[i];
-      for (let k = s; k < NS; k++) sum += b[k] * maxR[k];
-      if (M * sum + EPS > need[i]) c++;
-    }
-    return c + info.gain;
-  }
-
   function dfs(s) {
     if (done) return;
     if (s === NS) {
       evaluated++;
       const M = Math.min(m.cap, info.M0 + m.perLord * S[0]);
       const T5 = T[NS];
-      let w0 = 0;
+      // abandon the leaf once it has lost too many battles to tie the best record
+      const allowed = bestCount < 0 ? nb : nb - (bestCount - info.gain);
+      let losses = 0;
       for (let i = 0; i < nb; i++) {
         const p = M * T5[i];
         P[i] = p;
-        const ok = p > need[i];
-        win[i] = ok;
-        if (ok) w0++;
+        if (p > need[i]) win[i] = 1;
+        else {
+          win[i] = 0;
+          if (++losses > allowed) return;
+        }
       }
-      let count = w0;
+      let count = nb - losses;
       if (!info.plain) {
-        if (w0 + info.gain < bestCount) return;
         for (let k = 0; k < NS; k++) xin[k] = roster[assign[k]].stats.xin;
         applyEvents(scn, S, P, win, fin, xin, roster[assign[1]].stats.zhi, roster[assign[3]].stats.yong);
         count = 0;
@@ -210,7 +237,6 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
       }
       return;
     }
-    if ((s === 2 || s === 3) && bestCount >= 0 && partialUbCount(s) < bestCount) return;
     const prev = T[s];
     const cur = T[s + 1];
     for (let a = 0; a < NS; a++) {
@@ -220,7 +246,8 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
       assign[s] = g;
       const sc = rs[g][s];
       S[s] = sc;
-      for (let i = 0; i < nb; i++) cur[i] = prev[i] + bw[i][s] * sc;
+      const col = bwCol[s];
+      for (let i = 0; i < nb; i++) cur[i] = prev[i] + col[i] * sc;
       dfs(s + 1);
       used[a] = false;
       if (done) return;

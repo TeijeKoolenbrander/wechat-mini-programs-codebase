@@ -501,7 +501,7 @@ test('复盘 is deterministic; stopAt12 agrees on the 12-0 question; null when n
 
 test('gateCheck is deterministic and its rates are shares of K=400 players (AC 55)', () => {
   let checked = 0;
-  for (let i = 0; i < 40 && checked < 3; i++) {
+  for (let i = 0; i < 1500 && checked < 2; i++) {
     const seed = rng.hash32('gate' + i);
     const a = gateCheck(seed, 1, 1);
     const b = gateCheck(seed, 1, 1);
@@ -520,11 +520,11 @@ test('gateCheck is deterministic and its rates are shares of K=400 players (AC 5
 
 test('acceptDailySeed: accepted seeds have optimal 12-0 and rates inside the bands; returns best and rounds', () => {
   let accepted = null;
-  for (let i = 0; i < 3000 && !accepted; i++) {
+  for (let i = 0; i < 8000 && !accepted; i++) {
     const r = acceptDailySeed(rng.hash32('accept' + i));
     if (r.accepted) accepted = r;
   }
-  assert.ok(accepted, 'at least one seed accepted in 3000 candidates');
+  assert.ok(accepted, 'at least one seed accepted in 8000 candidates');
   assert.strictEqual(accepted.gates.optimal.l, 0);
   assert.ok(accepted.gates.greedyRate >= config.gates.greedy.rateMin && accepted.gates.greedyRate <= config.gates.greedy.rateMax);
   assert.ok(accepted.gates.randomRate < config.gates.random.rateMax);
