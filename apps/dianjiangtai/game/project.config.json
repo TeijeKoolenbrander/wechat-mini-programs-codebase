@@ -1,0 +1,39 @@
+{
+  "_TODO": "The founder supplies the real AppID (D9). 'touristappid' is a placeholder: cloud, ads, share tickets and the open data domain do not work with it. Do not commit the real AppID's private config.",
+  "appid": "touristappid",
+  "compileType": "game",
+  "projectname": "dianjiangtai-game",
+  "libVersion": "latest",
+  "setting": {
+    "es6": true,
+    "enhance": false,
+    "minified": false,
+    "postcss": false,
+    "compileWorklet": false,
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "useCompilerPlugins": false,
+    "condition": false,
+    "babelSetting": { "ignore": [], "disablePlugins": [], "outputPath": "" }
+  },
+  "packOptions": {
+    "ignore": [
+      { "value": "tests", "type": "folder" },
+      { "value": "tools", "type": "folder" },
+      { "value": "node_modules", "type": "folder" },
+      { "value": "package.json", "type": "file" },
+      { "value": "package-lock.json", "type": "file" },
+      { "value": "core/README.md", "type": "file" }
+    ],
+    "include": []
+  },
+  "simulatorPluginLibVersion": {},
+  "isGameTourist": false,
+  "editorSetting": {}
+}
