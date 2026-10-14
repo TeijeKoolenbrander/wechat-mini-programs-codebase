@@ -19,8 +19,9 @@ exports.main = store.handler(async (event, { openid }) => {
   }
   const answered = await rules.priorAnswer(openid, id);
   if (answered) {
+    const locked = await rules.dailyLocked(ch.mode === 'daily' ? ch.dateKey : null, openid, nowMs);
     return {
-      ...base, status: 'answered', theirLineup: ch.lineup, myRecord: answered.serverRecord,
+      ...base, status: 'answered', theirLineup: locked ? null : ch.lineup, lineupLocked: locked, myRecord: answered.serverRecord,
       countsAsDaily: false, isFriendly: true,
     };
   }

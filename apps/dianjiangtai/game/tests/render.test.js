@@ -232,6 +232,41 @@ test('share card render() sizes the canvas 500 x 400 (5:4)', () => {
   assert.strictEqual(c2.width, 1000);
 });
 
+test('text is never overlapped by a pinned primary button (320x568 and 375x667)', () => {
+  const ids = new Set(['home:daily', 'home:retry', 'primary', 'undo', 'board:retry', 'board:goPlay', 'board:share', 'board:agree', 'board:openSetting', 'challenge:accept', 'challenge:retry', 'challenge:compare', 'result:retry']);
+  let checked = 0;
+  eachState((screen, name, hits, calls, L) => {
+    if (!((L.W === 320 && L.H === 568) || (L.W === 375 && L.H === 667))) return;
+    if (hits.some((h) => /^(sheet:body|dialog:block|adstub:block|coach:block|privacy:block)$/.test(h.id))) return; // covered by a modal on purpose
+    hits.filter((h) => ids.has(h.id) && h.h < L.H / 2 && h.w < L.W).forEach((r) => {
+      calls.forEach((c) => {
+        const intersects = c.y + c.size / 2 > r.y + 1 && c.y - c.size / 2 < r.y + r.h - 1 && c.x >= r.x - 5 && c.x <= r.x + r.w + 5;
+        if (!intersects) return;
+        // button labels are centred in the rect; anything else must stay outside it
+        assert.ok(c.y >= r.y && c.y <= r.y + r.h, screen + '/' + name + ' "' + c.s + '" overlaps ' + r.id + ' at ' + L.W + 'x' + L.H);
+      });
+      checked++;
+    });
+  });
+  assert.ok(checked > 40);
+});
+
+test('home daily card: text clears the primary button at 320x568 (all states)', () => {
+  const L = layoutFor(SIZES[1]);
+  const fx = buildFixtures({ createCanvas: mockCreateCanvas, L }).home;
+  ['available', 'available_group', 'inProgress', 'done', 'pendingSubmit', 'offline', 'error'].forEach((name) => {
+    const ctx = mockCtx();
+    const hits = render.screens.home.draw(ctx, fx[name], L);
+    const btn = hits.find((h) => h.id === 'home:daily' || h.id === 'home:retry');
+    assert.ok(btn, name);
+    ctx.__calls
+      .filter((c) => c.y < btn.y + btn.h && c.y > btn.y - 120 && c.x < btn.x + 5)
+      .forEach((c) => assert.ok(c.y + c.size / 2 <= btn.y - 2, name + ': "' + c.s + '" bottom ' + (c.y + c.size / 2).toFixed(1) + ' vs button top ' + btn.y.toFixed(1)));
+    assert.ok(btn.y + btn.h / 2 >= L.H * 0.6, name + ' primary in thumb zone');
+    assert.ok(btn.h >= 48);
+  });
+});
+
 test('no screen module touches wx, timers or the network', () => {
   const dir = path.join(__dirname, '..', 'js', 'render');
   fs.readdirSync(dir)

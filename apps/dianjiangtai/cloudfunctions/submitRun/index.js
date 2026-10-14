@@ -24,7 +24,11 @@ async function respond(run) {
   }
   if (run.challengeId) {
     const ch = await store.getDoc('challenges', run.challengeId);
-    if (ch) out.challengeCompare = { theirRecord: ch.record, theirLineup: ch.lineup, myRecord: run.serverRecord };
+    if (ch) {
+      // the sharer's lineup on a still-playable daily seed is a spoiler until the caller has their ranked daily
+      const locked = await rules.dailyLocked(ch.mode === 'daily' ? ch.dateKey : null, run.openid, now());
+      out.challengeCompare = { theirRecord: ch.record, theirLineup: locked ? null : ch.lineup, lineupLocked: locked, myRecord: run.serverRecord };
+    }
   }
   return out;
 }

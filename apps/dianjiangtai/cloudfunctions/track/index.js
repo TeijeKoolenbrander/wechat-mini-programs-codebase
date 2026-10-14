@@ -46,8 +46,11 @@ exports.main = store.handler(async (event, { openid }) => {
   for (const e of list) {
     if (!isPlainObject(e) || !CLIENT_EVENTS.has(e.name)) continue; // drop unknown, never fail the batch
     const props = clean(isPlainObject(e.props) ? e.props : {}, 0) || {};
+    // the client sends sessionId inside props; accept the top-level field first, store it top-level, strip from props
+    const rawSession = e.sessionId !== undefined ? e.sessionId : props.sessionId;
+    delete props.sessionId;
     if (JSON.stringify(props).length > MAX_PROPS_BYTES) continue;
-    const sessionId = typeof e.sessionId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(e.sessionId) ? e.sessionId : null;
+    const sessionId = typeof rawSession === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(rawSession) ? rawSession : null;
     docs.push({
       openid, sessionId, name: e.name, props, ts,
       clientTs: isInt(e.clientTs, 0, 4102444800000) ? e.clientTs : null,
