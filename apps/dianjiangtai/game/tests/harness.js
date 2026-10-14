@@ -133,7 +133,8 @@ function boot(t, opts) {
       log.text = [];
       const cb = raf;
       cb();
-      return log.text.join('|');
+      // the real renderer may draw spaced text a glyph at a time, so join without a separator
+      return log.text.join('');
     },
     down(x, y) {
       const id = nextId++;
@@ -151,6 +152,12 @@ function boot(t, opts) {
     tapId(idOrFn) {
       g.frame();
       const test = typeof idOrFn === 'function' ? idOrFn : (h) => h.id === idOrFn;
+      // the first-run coach marks block the draft screen: a player skips them (coach tests tap them explicitly)
+      if (!g.keepCoach && app.hits.some((h) => h.id === 'coach:skip') && !String(idOrFn).startsWith('coach:')) {
+        const sk = app.hits.find((h) => h.id === 'coach:skip');
+        g.tap(sk.x + sk.w / 2, sk.y + sk.h / 2);
+        g.frame();
+      }
       const hit = app.hits.slice().reverse().find(test);
       if (!hit) throw new Error('no hit ' + idOrFn + ' among ' + app.hits.map((h) => h.id).join(','));
       g.tap(hit.x + hit.w / 2, hit.y + hit.h / 2);

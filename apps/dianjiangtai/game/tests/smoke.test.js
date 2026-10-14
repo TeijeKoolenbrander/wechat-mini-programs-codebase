@@ -27,7 +27,7 @@ async function finishReveal(g) {
 test('boots to home, first launch shows the how-to sheet, no authorization prompts', async (t) => {
   const g = await startUp(t);
   const text = g.frame();
-  assert.ok(text.indexOf('点将台') >= 0);
+  assert.ok(text.indexOf('今日军令') >= 0 && text.indexOf('自由点将') >= 0, text.slice(0, 300)); // the real title is drawn spaced, glyph by glyph
   assert.ok(g.has('sheet:close'), 'how-to sheet auto-opens once');
   g.tapId('sheet:close');
   assert.ok(!g.has('sheet:close'));
@@ -465,4 +465,17 @@ test('code search: wx.getShareInfo and wx.reportEvent are never referenced (AC 3
     }
   }
   assert.ok(/createRewardedVideoAd\(\{[^}]*disableFallbackSharePage: true/.test(adsSrc));
+});
+
+test('first-ever run shows the coach marks once; skipping them marks them seen', async (t) => {
+  const g = await startUp(t);
+  g.tapId('sheet:close');
+  g.tapId('home:free');
+  g.keepCoach = true;
+  assert.ok(g.has('coach:skip'));
+  g.tapId('coach:next');
+  assert.strictEqual(g.app.ctl.view().vm.coach, 2);
+  g.tapId('coach:skip');
+  assert.strictEqual(g.app.ctl.view().vm.coach, 0);
+  assert.strictEqual(JSON.parse(g.storage.djt_state_v1).coachSeen, true);
 });
