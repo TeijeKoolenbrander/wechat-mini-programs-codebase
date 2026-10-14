@@ -30,7 +30,7 @@ const V1 = {
   ],
 
   /** Opponent strength per battle and the logistic temperature. */
-  curve: [7.7, 7.936, 8.173, 8.409, 8.645, 8.882, 9.118, 9.355, 9.591, 9.827, 10.064, 10.3],
+  curve: [7.47, 7.734, 7.997, 8.261, 8.525, 8.788, 9.052, 9.315, 9.579, 9.843, 10.106, 10.37],
   tau: 0.7,
   /** Opponent jitter j_i is uniform in [-jitter, +jitter]. */
   jitter: 0.35,

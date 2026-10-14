@@ -25,10 +25,11 @@ const { playRun } = require('../core/players');
 const { gateCheck, acceptDailySeed } = require('../core/gates');
 
 function parseArgs(argv) {
-  const a = { seeds: 100000, optseeds: 3000, gateseeds: 200, sets: [], out: null, bank: 0, check: false, curve: null };
+  const a = { offset: 0, seeds: 100000, optseeds: 3000, gateseeds: 200, sets: [], out: null, bank: 0, check: false, curve: null };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--seeds') a.seeds = +argv[++i];
+    else if (k === '--offset') a.offset = +argv[++i];
     else if (k === '--optseeds') a.optseeds = +argv[++i];
     else if (k === '--gateseeds') a.gateseeds = +argv[++i];
     else if (k === '--set') a.sets.push(argv[++i]);
@@ -52,7 +53,8 @@ function applySets(config, args) {
   }
 }
 
-const seedOf = (i) => hash32('simstats:' + i);
+let seedBase = 0;
+const seedOf = (i) => hash32('simstats:' + (i + seedBase));
 const pct = (x) => (100 * x).toFixed(2) + '%';
 const q = (arr, p) => {
   const s = arr.slice().sort((a, b) => a - b);
@@ -88,6 +90,7 @@ function bandShares(config, hist, n) {
 }
 
 function run(args) {
+  seedBase = args.offset || 0;
   const config = getConfig(LATEST_CONFIG_VERSION);
   applySets(config, args);
   const cv = LATEST_CONTENT_VERSION;
