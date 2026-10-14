@@ -30,6 +30,11 @@ function currentVersions() {
 function getConfig(version) {
   return config.getConfig(version) || null;
 }
+/** low-bank warning threshold (days of seeds), single source: core config daily.bankLowWarn */
+function bankLowWarn() {
+  const c = getConfig(currentVersions().configVersion) || {};
+  return (c.daily && c.daily.bankLowWarn) || 10;
+}
 function boardListCap() {
   const c = getConfig(currentVersions().configVersion) || {};
   return Number.isInteger(c.boardListCap) && c.boardListCap > 0 ? c.boardListCap : 3000;
@@ -111,7 +116,7 @@ function finalTokens(rounds, actions, replayResult) {
 }
 
 module.exports = {
-  dateKeyAt, currentVersions, getConfig, boardListCap, roster,
+  dateKeyAt, currentVersions, getConfig, boardListCap, bankLowWarn, roster,
   buildSheet, primaryTokens, replay, simulate, bestLineup, acceptDailySeed,
   normaliseLineup, lineupToIdx, finalTokens,
 };

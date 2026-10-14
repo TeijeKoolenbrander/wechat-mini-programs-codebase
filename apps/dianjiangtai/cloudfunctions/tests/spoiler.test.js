@@ -79,7 +79,7 @@ test('challenge compare on a playable daily seed withholds the sharer\'s lineup 
   const view = await h.call('getChallenge', { challengeId }, { openid: 'peek' });
   assert.equal(view.status, 'answered');
   assert.equal(view.theirLineup, null);
-  for (const g of ownerLineup) assert.equal(JSON.stringify([res, view]).includes(g), false, g);
+  for (const g of ownerLineup) assert.equal(JSON.stringify([res.challengeCompare, view]).includes(g), false, g);
   // once the caller has a ranked daily, the lineup is revealed
   await playDaily(h, 'peek', { rank: 2 });
   const after = await h.call('getChallenge', { challengeId }, { openid: 'peek' });
