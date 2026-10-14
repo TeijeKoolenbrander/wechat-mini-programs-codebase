@@ -1,6 +1,6 @@
 # 点将台 (working title): spec, Phase 1 prototype
 
-Status: **approved by the founder as the Phase 1 scope (2026-10-14)**, revised the same day with the founder decisions and CTO review changes below. Author: product-ux.
+Status: **approved by the founder as the Phase 1 scope (2026-10-14)**, revised the same day with the founder decisions and CTO review changes below, and amended (same day) to match the implemented, CTO-approved tuning, seed-bank and spoiler-lock decisions (D15, C5). Author: product-ux.
 Type: WeChat 小游戏 (mini game). Slug: `dianjiangtai`. Companion: `docs/dianjiangtai/direction.md` (vision, pillars, art, phased plan, risks).
 
 Labels:
@@ -33,17 +33,19 @@ Founder decisions, 2026-10-14. These are closed; do not reopen them without the 
 | D12 | Distribution: the founder posts the **Phase 1 prototype** into **15-20 WeChat groups** for ≥ 7 days. | §1, direction §10 |
 | D13 | Scope: the game is **三国 only**. Phase 0 is platform-API verification plus a compliance/legal check (about 3-5 days, before any code); the compliance/legal part is now done (D14), so Phase 0 is platform-API verification only. Concept validation rests entirely on the Phase 1 prototype and the §1 go/kill thresholds. | §1, §17, direction §10 |
 | D14 | **Compliance/legal check completed by the founder (2026-10-14):** 版号 (IAA-only), 备案, 软著, 诱导分享, ads, AIGC labelling, content review, privacy. **Cleared.** The compliance-only Phase 0 items are closed ("cleared by founder D14", §17). The [COMPLIANCE] design rules in this spec stay in force, and release still runs its normal pre-submission rules check before any upload. | §4, §12, §16, §17, direction §10 |
+| D15 | **"12-0 is really hard"** (founder, 2026-10-14). 一统天下 is a rare event: sensible-player 12-0 at 0.2-0.5%, greedy ≤ 1%, naive < 0.2%, random < 0.01%. Optimal play reaches 12-0 on 100% of accepted daily seeds (a gate) but on only about 1-2% of free seeds, which is accepted. The random/naive/greedy mean-win targets become soft (reported, not gating). Consequence: accepted daily seeds are rare (about 0.5% of candidates), so the offline seed bank is the primary and practically mandatory daily source (§5.2). General stats are unchanged (Appendix B is authoritative). | §2, §5.2, §7.2, §7.5, §8.3, §18, AC 15, 21, 53, 54 |
 
-D9 (update) and D14 were relayed to product-ux by the CTO on 2026-10-14 as founder confirmations.
+D9 (update), D14 and D15 were relayed to product-ux by the CTO on 2026-10-14 as founder confirmations.
 
 CTO review changes, 2026-10-14 (also applied):
 
 | # | Change | Where |
 |---|---|---|
 | C1 | **Leaderboard trust.** Open-data-domain boards are written by the client and can be tampered with. Phase 0 checks for a server-side write path; if none, the risk is accepted for Phase 1, documented, and made detectable. **Superseded by C3.** | (§11) |
-| C2 | **Daily seed generation cost.** `genDaily` gets a measured time budget, a 30-day offline seed bank fallback, and a precise definition of per-seed gate rates. | §5.2, §7.5.1, §14, §17 #20, AC 53-55 |
+| C2 | **Daily seed generation cost.** `genDaily` gets a measured time budget, an offline seed bank, and a precise definition of per-seed gate rates. (Amended by D15/C5: the bank is the primary path, live generation is last resort, and no "relaxed" seed is ever published.) | §5.2, §7.5.1, §14, §17 #20, AC 53-55 |
 | C3 | **Server-authoritative leaderboard** (replaces the old §11.4 Path A/B). Phase 0 found that a server write (`setUserStorage`) exists, but the client can overwrite the same key and the server cannot read it back (phase0-platform.md §3). So **ranks come only from our server**: the client's KV holds a minimal display marker that is never trusted for ranking; `getBoard` returns today's server-validated results as `{h: hash(openid + per-day salt), w, …}`; the open data domain hashes each friend/group row's openid and ranks with the server values. Group context comes from `getGroupEnterInfo`, decrypted server-side by `joinGroup` (cloudID). Raw openids never reach the client. Fallback if the device spike fails: §11.8 fallbacks (1: Ed25519-signed values; 2: B-lite). | §11, §13, §14, §15, §16, §17, §17.1, AC 56, 60-63 |
 | C4 | **Phase 0 findings applied** (phase0-platform.md): `getGroupEnterInfo` instead of the deprecated `getShareInfo`; 微信朋友关系 privacy declaration and the friend-scope flow; rewarded video `disableFallbackSharePage: true`; interstitial errors 2001-2003; cloud functions run in UTC+0 (`TZ=Asia/Shanghai`), explicit timeouts, idempotent `genDaily`, uniqueness by deterministic `_id`; `track` kept (no `wx.reportEvent`); package 4 MB/30 MB; Phase 2 updatable cards and 擂台赛 reworded. Phase 1 opens with a 1-2 day device spike (§17.1). | §5.2, §9, §12, §14, §15, §16, §17, §21, AC 64-68 |
+| C5 | **Daily spoiler lock** (implemented). Nothing reveals a daily seed's best or rival lineup to someone who could still play that daily. For any run on a daily seed, `getReplay` returns `REPLAY_LOCKED`, and `submitRun.challengeCompare` / `getChallenge` return `theirLineup: null, lineupLocked: true`, until the caller has a ranked daily result for that date **or** the date's submit window has closed (after D+1 00:30 BJT). `getBoard` lineups (`x`) follow the same rule (`viewerPlayed`). Free seeds are never locked. Client copy: "今日军令完成后可复盘" and "对方阵容 · 完成今日军令后可见". Also recorded with it: the seed bank is the primary `genDaily` path and a failed live generation publishes no seed (`DAILY_UNAVAILABLE` plus an alert), replacing C2's "relaxed" seed; `track` reads `sessionId` top-level. | §5.2, §5.4, §7.4, §8.1, §8.3, §8.5, §9.3, §13, §14 (incl. §14.4 error codes), §15, §18, AC 21, 32, 51, 53, 54 |
 
 ---
 
@@ -92,7 +94,7 @@ A run takes about 40-90 s (draft 30-60 s, reveal about 9 s, result 10-30 s).
 5. **Place the general.** Tap an open role slot (主公/军师/先锋/猛将/守将). 撤回 (undo) is allowed until the next 翻令.
 6. Repeat steps 2-5 until all five slots are filled (five rounds, one general per round, one general per slot).
 7. **Campaign.** Tap 出征. The simulator runs 12 battles (§7). The reveal animates one battle row at a time (about 0.7 s each, tap to skip), each with a one-line cause.
-8. **Verdict.** The record (for example 10胜2负), the grade band (for example 霸业将成), the 说书人 评语 and a rarity line ("今日仅 0.8% 的主公一统天下").
+8. **Verdict.** The record (for example 10胜2负), the grade band (for example 霸业将成), the 说书人 评语 and a rarity line ("今日仅 0.3% 的主公一统天下"; 12-0 is meant to be very rare, D15).
 9. **Next actions** (all optional): 分享战报 · 发起挑战 · 复盘 (rewarded video) · 看群榜/好友榜 · 再来一局 (goes to free play).
 
 Interstitials appear only on 再来一局 in free play, under the caps in §12.
@@ -238,14 +240,14 @@ A run is fully defined by `(seed, contentVersion, actions[])`, where `actions` i
 - **Seed:** generated by a scheduled cloud function at 23:00 BJT for the next day (timer trigger `0 0 23 * * * *`; triggers are evaluated in UTC+8; one trigger per function), with a fallback of generating lazily on the first `getDaily` request. It is stored in `daily_seeds`. The same seed applies to all players. Issue number 第 N 期 = days since launch.
 - **Idempotency.** WeChat may deliver a timer trigger more than once, and the lazy path can race the timer. `daily_seeds` uses the fixed `_id = YYYYMMDD` and is created with `add` of that `_id` inside a transaction that also marks the bank entry used; a second writer's `add` fails on the duplicate `_id`, its transaction rolls back (the bank entry stays unused), and it returns the existing document. Uniqueness never relies on console unique indexes (unverified, phase0-platform.md §9).
 - **Timeouts.** The default cloud function timeout (3 s per CloudBase docs) is far too short. Each function's timeout is set explicitly in its config (§14.2); `genDaily`'s value is set from the spike's measurement (§17.1). The live loop's 70% cut-off is computed from the configured value, read from config, not hard-coded.
-- **Seed acceptance:** a daily seed is accepted only if it passes the daily gates in §7.5 (the best lineup for the primary tokens reaches 12-0, and the greedy and random 12-0 rates, computed as defined in §7.5.1, are inside their bands).
-- **Where accepted seeds come from (C2).** Running the gates live can be expensive (up to 50 candidate seeds, each needing an exhaustive optimal search plus 800 simulated players), and may exceed the cloud function timeout [SPIKE, §17 #20]. So there are two sources, tried in order:
-  1. **Seed bank (primary).** `tools/simstats.js --bank 30` generates and gate-checks seeds offline, writing up to 30 days of accepted seeds with their `gates` record. The file is imported into the `daily_seed_bank` collection (client access denied) through the cloud console, by whoever holds console access. `genDaily` takes the next unused bank entry whose `contentVersion` and `configVersion` match the live ones, re-runs only the cheap check (rebuilds `rounds` and verifies that the stored best lineup still scores 12-0), marks the entry used and writes `daily_seeds`. The bank file contains future daily seeds, so it is a spoiler: **it is never committed to the repo** and is deleted locally after import.
-  2. **Live generation (fallback).** If the bank has no matching entry (empty, or a content/config version bump), `genDaily` runs the gates live in a loop that stops at 50 candidates **or** at 70% of the function timeout, whichever comes first. If no candidate passes, it stores the best candidate that at least reaches optimal 12-0, sets `gates.relaxed = true`, and logs an `error` alert so the bank gets refilled. If no candidate even reaches 12-0, it keeps the last one and also sets `relaxed`; the daily still opens (a missing daily is worse than a slightly easy or hard one).
-  - `genDaily` records `source: bank|live`, `attempts` and `genMs` on the `daily_seeds` document. A bank with < 7 entries left logs a warning so it is refilled in time.
+- **Seed acceptance:** a daily seed is accepted only if it passes the daily gates in §7.5 (the best lineup for the primary tokens reaches 12-0, and the greedy and random 12-0 rates, computed as defined in §7.5.1, are inside their windows). Because 12-0 is meant to be rare (D15), only about **0.5%** of candidate seeds pass (measured 0.53% over 1,500 candidates: about **190 candidates per accepted seed**; about 98.5% fail the optimal-12-0 gate alone).
+- **Where accepted seeds come from (C2, amended by D15/C5).** At that acceptance rate a live loop of 50 candidates finds a seed on only about 20% of days (measured: about 23%), and 50 candidates take about 12 s at p99. So:
+  1. **Seed bank (primary, practically mandatory).** Seeds are generated and gate-checked offline, then imported into the `daily_seed_bank` collection (client access denied). The exact commands are in `apps/dianjiangtai/cloudfunctions/README.md` ("Seed bank flow"): `tools/simstats.js --bank <days> --bank-file <tmp>` generates accepted seeds with their `gates` record, `cloudfunctions/scripts/prepare-bank.js` re-verifies every entry with the real core and writes a JSON Lines import file with deterministic `_id = bank_<seed>` (re-imports cannot duplicate), and the file is imported in the cloud console (skip on conflict). **Who runs it:** an ops step done by whoever holds cloud console access (the founder, or a developer the founder delegates), with backend preparing the files: **before launch** (at least 60 days), then **monthly**, and also whenever the low-bank warning fires or after any content/config/gate version bump (old entries become unusable). `genDaily` takes the next unused bank entry (by `_id`) whose `contentVersion`, `configVersion` and `gateVersion` match the live ones, re-runs only the cheap check (rebuilds `rounds` and verifies that the stored best lineup still scores 12-0), and marks the entry used in the same transaction that writes `daily_seeds`. The bank files contain future daily seeds, so they are spoilers: **never committed to the repo**, deleted locally after import.
+  2. **Live generation (last resort only).** Only if the bank has no matching entry (empty, or a version bump) does `genDaily` (or the lazy `getDaily` path) run the strict gates live, in a loop that stops at 50 candidates **or** at 70% of the function timeout, whichever comes first. If no candidate passes, **no seed is published**: the function returns `DAILY_UNAVAILABLE`, logs an `[ALERT]`, and writes a `daily_gen` event with `failed: true`. There is no "relaxed" seed: a daily without a 12-0 optimum is never published (`gates.relaxed` is always `false`). Clients then show the daily fetch-failed state ("今日军令需联网获取" plus 重试); free play is unaffected.
+  - `genDaily` records `source: bank|live`, `attempts` and `genMs` on the `daily_seeds` document, and `bankLeft` on the `daily_gen` event. **Low-bank warning:** fewer than **10** matching entries left logs a warning so the bank is refilled in time. (The unused `config.daily.bankLowWarn = 7` in `core/config.js` is stale; the backend constant `BANK_LOW_WATER = 10` is what runs.)
 - **One attempt:** the attempt starts at the first `flip` (the server logs `startRun`). One official result per openid per date. An in-progress daily is saved locally and resumes on relaunch.
 - **Authoritative result:** the client receives only the token sheet (`rounds`), never the battle stream or the best lineup. On 出征, the client sends `actions[]`. The server replays, simulates and returns the record and battle log. This prevents precomputing the optimum from the seed.
-- **复盘** for the daily is only returned after the player's daily result exists.
+- **Daily spoiler lock (C5).** For any run on a daily seed (daily, or a challenge/friendly played on a daily seed), `getReplay` returns `REPLAY_LOCKED` until the caller has a ranked daily result for that date **or** D+1 00:30 BJT has passed (the end of the submit window). The client shows "今日军令完成后可复盘" and offers no ad for a locked 复盘. The same rule withholds rival lineups in challenges (§5.4, §9.3) and on boards (§11.4). Free seeds are never locked.
 
 ### 5.3 Free play
 
@@ -255,7 +257,7 @@ A run is fully defined by `(seed, contentVersion, actions[])`, where `actions` i
 
 ### 5.4 Challenge run
 
-Plays the sharer's seed and token sheet (daily or free), with 1+1 free re-spins and no ad re-spins. See §9.3 for counting rules.
+Plays the sharer's seed and token sheet (daily or free), with 1+1 free re-spins and no ad re-spins. See §9.3 for counting rules. On a **daily** seed the spoiler lock (C5, §5.2) applies: after a friendly answer by someone who has not yet played that day's daily, the comparison shows the sharer's record but `theirLineup: null, lineupLocked: true` ("对方阵容 · 完成今日军令后可见"), and 复盘 is locked, until the caller has a ranked daily result for that date or D+1 00:30 BJT has passed.
 
 ---
 
@@ -269,7 +271,7 @@ Plays the sharer's seed and token sheet (daily or free), with 1+1 free re-spins 
 - `lineup`: 5 × `{slot, generalId}`, with all slots filled
 - `contentVersion` (the stats table)
 - `battleStream` from `sub(seed, "battle")` and `eventStream` from `sub(seed, "event")`
-- `config` (all weights, curve and τ in `core/config.js`, versioned)
+- `config` (all weights, curve, τ, jitter and event thresholds in `core/config.js`, versioned by `configVersion`). **`core/config.js` is authoritative** for every tuning value; the numbers quoted in §7.2-§7.5 are the tuned configVersion 1 values, recorded here for reference. If they ever differ, config.js wins and this spec is updated.
 
 ### 7.2 Formula sketch
 
@@ -277,7 +279,7 @@ Plays the sharer's seed and token sheet (daily or free), with 1+1 free re-spins 
 2. **Morale multiplier.**
    `M = 0.85 + 0.03 × S_zhugong + 0.04 × (active bonds) + cohesion`
    cohesion = +0.03 if 4 drafted generals share a faction, +0.05 if all 5 do. M is capped at 1.25.
-3. **The campaign: 12 battles.** For battle i, the battle stream draws a type `T_i` from {野战, 攻城, 守城, 水战, 奇袭, 安民}, with ≥ 1 of each guaranteed and the rest random. It also draws a **shared luck roll** `u_i ∈ [0,1)` (天时) and an opponent jitter `j_i ∈ [-0.3, 0.3]`.
+3. **The campaign: 12 battles.** For battle i, the battle stream draws a type `T_i` from {野战, 攻城, 守城, 水战, 奇袭, 安民}, with ≥ 1 of each guaranteed and the rest random. It also draws a **shared luck roll** `u_i ∈ [0,1)` (天时) and an opponent jitter `j_i`, uniform in `[-jitter, +jitter]` with tuned **jitter = 0.35** (starting value was 0.3).
 4. **Team power.** `P_i = M × Σ_r b[T_i][r] × S_r`
 
    | Type | 主公 | 军师 | 先锋 | 猛将 | 守将 |
@@ -289,13 +291,14 @@ Plays the sharer's seed and token sheet (daily or free), with 1+1 free re-spins 
    | 奇袭 | .10 | .30 | .35 | .20 | .05 |
    | 安民 | .45 | .25 | .05 | .05 | .20 |
 
-5. **Opponent.** `D_i = curve[i] + j_i`. Starting curve (tune with §7.5): `[4.8, 5.2, 5.6, 6.0, 6.3, 6.6, 6.9, 7.2, 7.5, 7.8, 8.1, 8.5]`.
-6. **Win chance.** `p_i = 1 / (1 + exp(-(P_i - D_i) / τ))`, with τ = 0.5 to start.
+5. **Opponent.** `D_i = curve[i] + j_i`. Tuned curve (configVersion 1, D15): `[7.41, 7.674, 7.937, 8.201, 8.465, 8.728, 8.992, 9.255, 9.519, 9.783, 10.046, 10.31]` (linear, about +0.264 per battle; flatter and higher than the starting curve `[4.8 … 8.5]`).
+6. **Win chance.** `p_i = 1 / (1 + exp(-(P_i - D_i) / τ))`, with tuned **τ = 0.7** (starting value was 0.5).
 7. **Outcome.** The battle is won if `u_i < p_i`. Because `u_i` is the same for every lineup on the same seed, a stronger lineup never does worse in any battle than a weaker one, before events. That is what makes daily comparisons fair.
 8. **Events** (deterministic from the event stream; at most one of each kind per run; each one logged by name):
    - **临阵生变 (wavering):** each drafted general with 信 ≤ 3 has a `(4 − 信) × 10%` chance to turn one won battle into a loss. If several qualify, only the first triggered event applies. Kept by founder decision D8. [COMPLIANCE: content review] Its log lines come only from a fixed, reviewed template list (neutral wording such as "吕布临阵生变，阵脚动摇", never insults), and release reviews that list before submission (AC 59). In the 32-general roster the qualifying generals are 吕布 (信2), 董卓 (信2) and 韩遂 (信3).
-   - **奇谋 (stratagem):** if the 军师 has 智 ≥ 9, the first lost 水战 or 奇袭 battle with `p_i ≥ 0.35` becomes a win.
-   - **万夫莫敌 (unstoppable):** if the 猛将 has 勇 = 10, the first lost 野战 with `p_i ≥ 0.35` becomes a win.
+   - **奇谋 (stratagem):** if the 军师 has 智 ≥ 9, the first lost 水战 or 奇袭 battle with `p_i ≥ pMin` becomes a win.
+   - **万夫莫敌 (unstoppable):** if the 猛将 has 勇 = 10, the first lost 野战 with `p_i ≥ pMin` becomes a win.
+   - Tuned **pMin = 0.672** for both (starting value was 0.35); with it, events fire in about 28% of sensible runs (target 15-30%).
 9. **Record** = wins − losses out of 12.
 
 ### 7.3 Bonds (羁绊), Phase 1 set
@@ -309,47 +312,52 @@ Bonds apply only when all members are drafted, in any slots: 桃园 (刘备, 关
   - prune dominated picks within a round: drop general B if another general A in the same pool has every role score ≥ B's, 信 ≥ B's (or both > 3), 智 ≥ B's and 勇 ≥ B's, and B is not in any bond (all pool members share a faction, so cohesion is unaffected);
   - reuse per-battle partial sums across permutations;
   - report the evaluation count and time distribution, including the worst case, in `tools/simstats.js`.
-  If the measured worst case still exceeds 300 ms on the reference device, the free-play 复盘 is also served by `getReplay` (with a client spinner), as the daily 复盘 already is. The free-play 复盘 is computed on the client by default; the daily 复盘 comes from the server.
+  If the measured worst case still exceeds 300 ms on the reference device, the free-play 复盘 is also served by `getReplay` (with a client spinner), as the daily 复盘 already is. The free-play 复盘 is computed on the client by default; the daily 复盘 comes from the server. **As implemented:** token sets with more than `search.heavySets` (2,000) distinct general sets are asked of `getReplay` first (about 10% of free runs); measured client-side search p99 about 115 ms, max about 245 ms in Node.
+- **Daily 复盘 is spoiler-locked (C5, §5.2).** For any run on a daily seed, `getReplay` returns `REPLAY_LOCKED` until the caller has a ranked daily result for that date or D+1 00:30 BJT has passed. The 复盘 button then reads "今日军令完成后可复盘" and no rewarded video is offered.
 - **No per-player adjustment, ever.** No rubber-banding, no pity, no effect from ads watched, run count, new-user status or spending. QA-testable via determinism (§20).
 
 ### 7.5 Grade bands and tuning targets
 
-| Record (wins) | Band | Target share of free-play runs (sensible-player model) |
-|---|---|---|
-| 12-0 | **一统天下** (seal stamp, 编钟) | 1-3% |
-| 10-11 | 霸业将成 | 12-18% |
-| 8-9 | 雄踞一方 | 25-30% |
-| 6-7 | 三分鼎立 | 25-30% |
-| 4-5 | 偏安一方 | 12-18% |
-| 2-3 | 兵微将寡 | 4-8% |
-| 0-1 | 一败涂地 | ≤ 2% |
+Targets set by founder decision **D15 ("12-0 is really hard")**. Band targets live in `core/config.js` (`bands[].target`); the "achieved" column is two 100k-seed runs of `tools/simstats.js` (configVersion 1: `simstats-report.md`, `simstats-run2.md`).
 
-**Player models** for the tuning tool `tools/simstats.js` (pattern: cheatshaizi `tools/stats.js`), run over ≥ 100k seeds:
-- *random*: a random pick into a random open slot. Target mean wins 4.5-5.5.
-- *naive*: the highest-tier pick into its `primaryRole`, or else the best open slot. Target mean 7-8.
-- *greedy*: the pick and slot that maximise the current `S_r` sum. Target mean 8-9, with a 12-0 rate ≤ 5%.
-- *sensible* = a 50/50 mix of naive and greedy. Used for the table above. Median of 7 wins.
-- *optimal* (复盘): reaches 12-0 on ≥ 95% of free seeds, and on 100% of accepted daily seeds (a seed-acceptance gate).
+| Record (wins) | Band | Target share of free-play runs (sensible-player model) | Achieved (run 1 / run 2) |
+|---|---|---|---|
+| 12-0 | **一统天下** (seal stamp, 编钟) | **0.2-0.5%** | 0.33% / 0.35% |
+| 10-11 | 霸业将成 | **6-10%** | 8.96% / 9.12% |
+| 8-9 | 雄踞一方 | 22-32% | 30.46% / 30.16% |
+| 6-7 | 三分鼎立 | 25-36% | 33.72% / 33.60% |
+| 4-5 | 偏安一方 | 15-25% | 18.73% / 19.00% |
+| 2-3 | 兵微将寡 | 5-12% | 6.76% / 6.71% |
+| 0-1 | 一败涂地 | **≤ 2%** | 1.04% / 1.06% |
 
-**Daily seed gates:** optimal = 12-0; greedy 12-0 rate 0.5-5%; random 12-0 rate < 0.5%.
+**Player models** for the tuning tool `tools/simstats.js` (pattern: cheatshaizi `tools/stats.js`), run over ≥ 100k seeds. **Hard** targets (the tool fails if missed) are the 12-0 rates, the sensible median and the band shares; the mean-win targets for random, naive and greedy are **soft** (reported as NOTE, not gating, D15).
+- *random*: a random pick into a random open slot. 12-0 rate **< 0.01%** (achieved 0.00%). Soft: original mean 4.5-5.5 (achieved about 2.2).
+- *naive*: the highest-tier pick into its `primaryRole`, or else the best open slot. 12-0 rate **< 0.2%** (achieved 0.13%). Soft: original mean 7-8 (achieved about 5.9).
+- *greedy*: the pick and slot that maximise the current `S_r` sum. 12-0 rate **≤ 1%** (achieved 0.55-0.59%). Soft: original mean 8-9 (achieved about 7.7).
+- *sensible* = a 50/50 mix of naive and greedy. Used for the table above. 12-0 rate **0.2-0.5%** (achieved about 0.33-0.35%); median **6-7** wins (achieved 7).
+- *optimal* (复盘): reaches 12-0 on **100% of accepted daily seeds** (a seed-acceptance gate). On free seeds optimal 12-0 is low, **about 1-2%** (measured 1.8% over 3,000 seeds), and this is accepted (D15): on most free token sheets no lineup can sweep, so 复盘 shows the best achievable record, not necessarily 12-0.
+
+Formula weights, role weights and morale constants are unchanged from §3.4/§7.2; only the curve, τ, jitter and event pMin were retuned (§7.2).
+
+**Daily seed gates** (`core/config.js` `gates`): optimal = 12-0; greedy-population 12-0 rate in **[0.25%, 20%]** (`rateMin 0.0025`, `rateMax 0.2`); random-population 12-0 rate **< 0.5%** (`rateMax 0.005`). Measured acceptance about 0.5% of candidates (§5.2).
 
 #### 7.5.1 How the gates are computed for a single seed (C2)
 
 A daily seed fixes the token sheet and the battle and event streams, so a deterministic greedy player would score either 0% or 100%. The per-seed "rates" therefore come from a population of simulated players whose *choices* vary while the seed stays fixed:
 
-- `gateCheck(seed, contentVersion, configVersion)` lives in `core/gate.js`, shared by `tools/simstats.js` and `genDaily` (same drift test as the rest of `core/`).
+- `gateCheck(seed, contentVersion, configVersion)` lives in `core/gates.js`, shared by `tools/simstats.js` and `genDaily` (same drift test as the rest of `core/`).
 - **Optimal:** exhaustive search (§7.4) over the **primary tokens with no re-spins**. Gate: best record = 12-0. The search may stop at the first 12-0 for the gate itself, but the stored `best` uses the full search (tie-break: highest Σ p_i).
 - **Greedy population:** K = 400 players. Player j uses its own stream `sub(seed, "gate:greedy:" + j)` only for its choices: in each round it re-spins a dimension (within the daily allowance, free only) with probability 0.3 when the best available `S_r` gain is < 7.0; then it takes the greedy pick and slot (max current `S_r` sum) with probability 0.8, otherwise the second-best pick-and-slot. Ties are broken by its stream.
 - **Random population:** K = 400 players, each with `sub(seed, "gate:random:" + j)`, using re-spins with probability 0.5 per available re-spin, then a random pick into a random open slot.
-- **Rates** = the share of each population reaching 12-0. With K = 400, the greedy band 0.5-5% means 2-20 players, and random < 0.5% means at most 1 player.
-- All players share the seed's battle and event streams, exactly like real players. The record is `gates = {optimal: {w,l}, greedyRate, randomRate, K: 400, gateVersion, relaxed}`.
+- **Rates** = the share of each population reaching 12-0. With K = 400, the greedy window [0.25%, 20%] (inclusive) means 1-80 players, and random < 0.5% means at most 1 player. The greedy and random populations run only for seeds that pass the optimal gate.
+- All players share the seed's battle and event streams, exactly like real players. The record is `gates = {optimal: {w,l}, greedyRate, randomRate, K: 400, gateVersion, relaxed: false, pass}`. `relaxed` is kept for format compatibility and is always `false`, since no relaxed seed is ever published (§5.2).
 - `gateVersion` is bumped whenever these population rules change; bank entries with an old `gateVersion` are not used.
-- The parameters (K, 0.3, 7.0, 0.8, 0.5) are INFERENCE starting values, versioned in `core/config.js` and tuned so that the population means match the §7.5 player-model means over 100k seeds.
-- **Time budget.** `tools/simstats.js` reports `gateCheck` time per seed (median and p99, cloud-function-equivalent Node runtime). Live generation of 50 candidates must fit within the cloud function timeout (AC 53); if the measured p99 × 50 does not fit, the bank (§5.2) is mandatory rather than primary, and the live loop relies on its 70% cut-off.
+- The population parameters (K = 400, re-spin 0.3, gain threshold 7.0, take-best 0.8, random re-spin 0.5) and the gate windows are versioned in `core/config.js` (`gates`), which is authoritative. The greedy window was widened from the starting 0.5-5% to [0.25%, 20%] after the D15 retune.
+- **Time budget (measured).** `gateCheck` per seed: median about 21 ms, p99 about 230-240 ms (Node, cloud-function equivalent), so p99 × 50 candidates ≈ 12 s. With about 0.5% acceptance, 50 live candidates succeed on only about 20% of days, so **the bank (§5.2) is mandatory in practice**; the live loop is a last resort bounded by its 50-candidate / 70%-of-timeout cut-off and publishes nothing if it fails.
 
-**Arguability checks** (reported by the tool): no single general appears in > 60% of optimal lineups; each role's best occupant varies across seeds; events fire in 15-30% of runs.
+**Arguability checks** (reported by the tool): no single general appears in > 60% of optimal lineups; each role's best occupant varies across seeds; events fire in **15-30%** of runs. Achieved: most frequent general in optimal lineups about 48% (≤ 60%), 8-16 different best occupants per role, events in about 28% of sensible runs.
 
-**Rarity line.** Daily: the live share of today's submitted daily runs at that record or better (from `daily_stats`), shown once ≥ 30 runs exist, otherwise hidden. Free: the precomputed share from the tool's distribution, written as "约 x% 的阵容能达到".
+**Rarity line.** Daily: the live share of today's submitted daily runs at that record or better (from `daily_stats`), shown once ≥ 30 runs exist, otherwise hidden; for example "今日仅 0.3% 的主公一统天下" or "今日仅 9.3% 的主公达到此战绩" (10-2). Free: the precomputed share from the tool's distribution (`config.freeRarity`, cumulative share of sensible runs reaching w wins or better), written as "约 x% 的阵容能达到"; with the tuned config that is about 0.3% for 12-0, 2.5% for 11+, 9.3% for 10+ and 22% for 9+.
 
 ---
 
@@ -393,7 +401,7 @@ General layout rules (mini game, single canvas):
 | Daily in progress | "第 3/5 轮" plus 继续出征 |
 | Daily done | "今日 10胜2负 · 霸业将成" plus 查看战报; card subline "明日 0:00 换新令" |
 | Daily pending submit (offline at the end) | "战报待发送" plus 重试 |
-| Daily fetch failed / offline | "今日军令需联网获取" plus 重试; 自由点将 still enabled |
+| Daily fetch failed / offline (also `DAILY_UNAVAILABLE`, §5.2) | "今日军令需联网获取" plus 重试; 自由点将 still enabled |
 
 - **First launch:** no consent screen and no login. The 玩法 sheet auto-opens once (three lines plus a picture, dismissible) and stays reachable through 玩法 afterwards.
 - **隐私与设置:** sound toggle, the 用户隐私保护指引 link, and 联系我们/反馈 (`wx.createFeedbackButton`, a native overlay button positioned over the canvas; verdict OK, phase0-platform.md §12).
@@ -457,7 +465,7 @@ The first-ever run shows coach marks (three bubbles: 翻令 → 选将 → 放�
 │          十 胜 二 负                │
 │        〔霸业将成〕                   │
 │  "猛将如云，可惜城头少一员稳将。"       │
-│  今日仅 6.2% 的主公达到此战绩          │
+│  今日仅 9.3% 的主公达到此战绩          │
 │ [主公 刘备 8.2][军师 诸葛亮 9.4] …    │ ← tap for breakdown
 │                                   │
 │ [ 分享战报 ]        [ 发起挑战 ]       │
@@ -473,8 +481,10 @@ The first-ever run shows coach marks (three bubbles: 翻令 → 选将 → 放�
 | Reveal playing | 9 s; tapping anywhere skips to the verdict |
 | 12-0 | the seal stamp 一统天下 slams in, 编钟 sounds, a light vibration (`vibrateShort`) |
 | Breakdown open | sheet with S_r per slot, M parts, per-battle p_i and 天时 |
-| 复盘 unlocked | sheet: best lineup vs yours, slot by slot, with the record difference |
+| 复盘 unlocked | sheet: best lineup vs yours, slot by slot, with the record difference. The best record is often below 12-0 (D15: on most free seeds no lineup sweeps) |
+| 复盘 locked (run on a daily seed, caller has no ranked daily result for that date, before D+1 00:30 BJT; C5) | the 复盘 button shows "今日军令完成后可复盘"; tapping it shows the same text as a toast; no rewarded video is offered |
 | Challenge run | adds a comparison block: 你 10-2 vs 好友 11-1, both lineups revealed, and "同一手令牌" |
+| Challenge run on a daily seed, lineup locked (`lineupLocked: true`, C5) | the comparison block shows both records and your lineup; the sharer's lineup is replaced by "对方阵容 · 完成今日军令后可见" |
 | Ranked daily result, first board marker write (§11.2) | the verdict is already on screen; WeChat's privacy popup may appear over it (first time only, §11.6). Agree or refuse, the verdict stays; on refusal a small line under the record reads "未同意隐私指引，好友暂看不到你的战绩" (no button, no nagging) |
 
 再来一局 always starts **free play** (the daily is done). In free play, the interstitial rule in §12 applies to this button.
@@ -527,7 +537,7 @@ Share title (text, ≤ 2 lines): daily "我今日 10胜2负，同一手令牌，
 | Loading challenge | "展开战书…" skeleton |
 | Not found / expired (> 7 days) | "这封战书已经过期了" plus 去自由点将 / 今日军令 |
 | Own challenge | "这是你发出的战书" plus the list of who has answered (count only, plus the best record) |
-| Already answered | goes straight to the comparison view (8.3, challenge block) |
+| Already answered | goes straight to the comparison view (8.3, challenge block); on a daily seed the sharer's lineup may still be locked ("对方阵容 · 完成今日军令后可见", C5) |
 | Daily-seed challenge, daily already played | "你已完成今日军令，本局为友谊赛，不计入榜单" |
 | Daily-seed challenge from a past date | plays as a friendly match, not ranked |
 | Offline | "战书需联网展开" plus 重试 plus free play |
@@ -625,6 +635,7 @@ Tap 分享战报 → render the card (§8.4) → `shareAppMessage({title, imageU
 2. `shareAppMessage({title: "同一手令牌，我 10胜2负，敢接战书吗？", imageUrl: card, query: "c=<challengeId>"})`. The query carries the **id only**: no lineup, no record, no seed.
 3. Recipient opens the card → `query.c` → challenge entry screen (8.5) → `getChallenge(c)` returns the record, mode, date and the token sheet. The sharer's lineup is returned **only after** the recipient's run on this challenge exists.
 4. Recipient plays the same token sheet → `submitRun({challengeId, actions})` → comparison view.
+   - **Daily spoiler lock (C5).** If the challenge is on a daily seed, `submitRun.challengeCompare` and `getChallenge` return `theirLineup: null, lineupLocked: true` (records still shown) until the caller has a ranked daily result for that date or D+1 00:30 BJT has passed. A friendly answer therefore never reveals a lineup for a daily the caller can still play. Client copy: "对方阵容 · 完成今日军令后可见". 复盘 for that run is locked by the same rule (`REPLAY_LOCKED`, §5.2).
 5. **Counting rule:** if the challenge seed is *today's* daily seed and the recipient has not yet played today's daily, the run **is** their daily attempt. The entry screen states this, and the result goes to the group and friend boards. Otherwise it is a friendly match and is never ranked. This prevents previewing today's daily through a friend's card.
 6. If `createChallenge` fails (offline or error), the button falls back to a plain result share with a toast "战书未能生成，已改为分享战报".
 
@@ -791,13 +802,16 @@ These are view models that frontend-ui (rendering) and minigame-dev (logic and s
   record: {w,l}, band: {key,label}, comment: string, rarityText: string|null,
   battles: [{ i, typeLabel, win:boolean, chanceText, luckText, cause, event:string|null }],
   lineup: [{ slot, name, score, fit }], morale: { total, lord, bonds:[string], cohesion },
-  replay: { unlocked:boolean, adState, best?: { lineup:[{slot,name,score}], record:{w,l} } },
-  challenge?: { theirRecord:{w,l}, theirLineup:[{slot,name}]|null },
+  replay: { unlocked:boolean, adState, locked:boolean /* REPLAY_LOCKED, C5 */, lockedText:'今日军令完成后可复盘'|null,
+            best?: { lineup:[{slot,name,score}], record:{w,l} } },
+  challenge?: { theirRecord:{w,l}, theirLineup:[{slot,name}]|null,
+                lineupLocked?:boolean /* C5: shows '对方阵容 · 完成今日军令后可见' */ },
   interstitialDue: boolean }
 
 // Challenge entry
 { status: 'loading'|'ready'|'expired'|'own'|'answered'|'offline'|'error',
-  theirRecord:{w,l}, mode, countsAsDaily:boolean, isFriendly:boolean, answerCount?:number }
+  theirRecord:{w,l}, mode, countsAsDaily:boolean, isFriendly:boolean, answerCount?:number,
+  lineupLocked?:boolean /* answered, daily seed, C5 */ }
 
 // Group context (memory only, per entry; §9.2)
 { status:'none'|'checking'|'ok'|'failed', groupRef:string|null, shareTicket:string|null,
@@ -834,7 +848,7 @@ Identity is always `OPENID` from the cloud function context (`cloud.getWXContext
 
 **Runtime rules (phase0-platform.md §9):**
 - Every function sets `TZ=Asia/Shanghai` in its environment variables, and all date keys go through `core/date.js` (explicit UTC+8 arithmetic, §5.2).
-- Every function has an **explicit timeout** in its config (the default is about 3 s). Starting values: `genDaily` from the spike measurement (target ≥ 60 s if the console allows it; the 900 s maximum is unverified for WeChat), `getDaily` 20 s (its lazy path uses the bank, else a live loop cut at 70% of 20 s, else a relaxed seed), `submitRun`/`getReplay` 10 s, all others 5 s.
+- Every function has an **explicit timeout** in its config (the default is about 3 s). Starting values: `genDaily` from the spike measurement (target ≥ 60 s if the console allows it; the 900 s maximum is unverified for WeChat), `getDaily` 20 s (its lazy path uses the bank, else a live loop cut at 70% of 20 s, else `DAILY_UNAVAILABLE`; no relaxed seed), `submitRun`/`getReplay` 10 s, all others 5 s.
 - **Uniqueness is enforced by deterministic `_id`s**, created with `add` of that `_id` (a duplicate `add` fails), never by console unique indexes. Multi-document updates use `db.runTransaction` (single-record operations only, no `where` batches); counters use `db.command.inc`.
 - Secrets in environment variables only: `GROUP_REF_PEPPER` (§11.3). The C3 design needs **no AppSecret** and no `session_key` (they would only be needed for the optional server-side marker write, §11.2).
 
@@ -850,22 +864,22 @@ Identity is always `OPENID` from the cloud function context (`cloud.getWXContext
 | `group_members` | `_id: <openGId>_<openid>`, `openGId`, `openid`, `groupRef`, `firstSeen`, `lastSeen` (dateKeys) | written only by `joinGroup` from **server-decrypted** group data (§11.3). Index on `groupRef`. Deleted 180 days after `lastSeen` (D7) |
 | `challenges` | `_id: challengeId`, `ownerOpenid`, `runId`, `mode`, `seed`, `dateKey`, `rounds`, `record`, `lineup`, `createdAt`, `expiresAt (+7d)`, `answerCount`, `bestAnswer` | lineup is withheld from the recipient until they have answered. One per run: `createChallenge` derives the id deterministically from `runId` (base32 of a keyed hash) and uses `add`, so repeats return the same id |
 | `daily_stats` | `_id: YYYYMMDD`, `hist[13]`, `total` | incremented atomically (`inc`) on each ranked submit |
-| `events` | `openid`, `sessionId`, `name`, `props`, `ts`, `clientTs` | analytics (§15) |
+| `events` | `openid`, `sessionId`, `name`, `props`, `ts`, `clientTs` | analytics (§15). `sessionId` is stored **top-level**: `track` takes it from the event's top level, falling back to `props.sessionId` (then removed from `props`). `ts` is server time; `clientTs` (the client's timestamp) is kept |
 
 ### 14.2 Cloud functions
 
 | Function | In | Out | Notes |
 |---|---|---|---|
-| `getDaily` | `{}` | `{dateKey, issueNo, rounds, serverNow, myStatus: none/started/done, myRecord?}` | creates the seed lazily if the scheduled job missed |
-| `genDaily` (timer `0 0 23 * * * *`, UTC+8 trigger time) | | | writes the next day's seed: next matching `daily_seed_bank` entry first, live §7.5.1 gate loop as fallback (stops at 50 candidates or 70% of the configured timeout); **idempotent via the fixed `_id`** (a double-fired trigger or a racing lazy `getDaily` creates one document and consumes at most one bank entry, §5.2); explicit timeout set from the spike measurement [SPIKE] |
+| `getDaily` | `{}` | `{dateKey, issueNo, rounds, serverNow, myStatus: none/started/done, myRecord?}` | creates the seed lazily if the scheduled job missed (bank first, live as last resort); returns `DAILY_UNAVAILABLE` if neither yields an accepted seed |
+| `genDaily` (timer `0 0 23 * * * *`, UTC+8 trigger time) | | | writes the next day's seed: **the seed bank is the primary path** (next matching `daily_seed_bank` entry); the live §7.5.1 gate loop is a last resort (stops at 50 candidates or 70% of the configured timeout) and, if nothing passes, publishes no seed (`DAILY_UNAVAILABLE`, `[ALERT]` log, `daily_gen` with `failed: true`); warns when < 10 bank entries are left; **idempotent via the fixed `_id`** (a double-fired trigger or a racing lazy `getDaily` creates one document and consumes at most one bank entry, §5.2); explicit timeout set from the spike measurement [SPIKE] |
 | `startRun` | `{mode, clientRunId, dateKey?, challengeId?}` | `{ok, resumed}` | creates `daily_starts` (`_id: <dateKey>_<openid>`) for ranked runs |
 | `submitRun` | `{clientRunId, mode, dateKey?, seed?, challengeId?, actions[], clientRecord?}` | `{record, battles[], band, rarity, ranked, challengeCompare?}` | §14.3. Idempotent: the same `clientRunId` returns the stored result |
 | `joinGroup` | `{groupData: CloudID}` | `{ok, groupRef}` or `{ok:false, code}` | §11.3. Decrypts group-entry data server-side (cloudID); rejects non-group chats; upserts `group_members`; never returns openids. [SPIKE] |
 | `getBoard` | `{kind: group/friend, dateKey, groupRef?}` | §11.4 payload `{dateKey, issueNo, contentVersion, salt, selfHash, mode, viewerPlayed, rows}` | rows are hashed (`h`), never openids; lineups only if the caller has a ranked result for `dateKey`; `groupRef` accepted only if the caller is a member; capped at `boardListCap` (§11.5); 60 s in-memory cache per date |
-| `getReplay` | `{runId}` | `{best}` | only for the caller's own completed run |
+| `getReplay` | `{runId}` | `{best}` (`best` may be null) | only for the caller's own completed run. **Spoiler lock (C5):** for a run on a daily seed, returns `REPLAY_LOCKED` until the caller has a ranked daily result for that date or D+1 00:30 BJT has passed |
 | `createChallenge` | `{runId}` | `{challengeId}` | only for the caller's own validated run; one challenge per run (repeat calls return the same id) |
-| `getChallenge` | `{challengeId}` | §13 challenge entry model plus `rounds` | lineup only if the caller has answered |
-| `track` | `{events[]}` (≤ 50 per batch) | `{ok}` | rate-limited per openid |
+| `getChallenge` | `{challengeId}` | §13 challenge entry model plus `rounds` | lineup only if the caller has answered **and**, on a daily seed, the C5 lock is open; otherwise `theirLineup: null, lineupLocked: true`. `submitRun.challengeCompare` follows the same rule |
+| `track` | `{events[]}` (≤ 50 per batch); each event `{name, sessionId, clientTs, props}` | `{ok}` | rate-limited per openid. `sessionId` is read top-level, with `props.sessionId` as a fallback, and stored top-level; `clientTs` is kept alongside the server `ts` |
 | `cleanup` (timer `0 0 4 * * * *`, its own function because each function allows only one trigger) | | | D7 retention: deletes `runs`, `daily_starts`, `daily_results`, `challenges`, `events` older than 180 days and `group_members` with `lastSeen` older than 180 days; keeps `daily_stats`. Idempotent (re-running deletes nothing new) |
 
 ### 14.3 Server-side score validation (`submitRun`)
@@ -877,11 +891,29 @@ Identity is always `OPENID` from the cloud function context (`cloud.getWXContext
 
 Error codes: `INVALID_ACTIONS`, `ALREADY_PLAYED`, `SEED_NOT_FOUND`, `CHALLENGE_EXPIRED`, `LATE_SUBMIT`, `RATE_LIMITED`.
 
+### 14.4 Error codes (all functions)
+
+Every function returns `{ok: true, …}` or `{ok: false, code, message}` and never throws to the client.
+
+| Code | Returned by | Meaning / client handling |
+|---|---|---|
+| `INVALID_ACTIONS`, `ALREADY_PLAYED`, `SEED_NOT_FOUND`, `CHALLENGE_EXPIRED`, `LATE_SUBMIT`, `RATE_LIMITED` | as in §14.3 | as in §14.3, §8, §18 |
+| **`REPLAY_LOCKED`** (C5) | `getReplay` | run on a daily seed; the caller has no ranked daily result for that date and D+1 00:30 BJT has not passed. Client: "今日军令完成后可复盘", no ad offered |
+| **`DAILY_UNAVAILABLE`** (D15/C5) | `genDaily`, `getDaily` (lazy path) | no matching bank entry and no live candidate passed the gates; no seed published, `[ALERT]` logged. Client: daily fetch-failed state ("今日军令需联网获取" plus 重试), free play available |
+| `UNAUTHENTICATED`, `FORBIDDEN` | all; `FORBIDDEN` also for a timer function called from the client | no OPENID / not allowed |
+| `NOT_STARTED` | `submitRun` | ranked daily without a `daily_starts` row |
+| `OWN_CHALLENGE` | `submitRun` | answering one's own challenge |
+| `RUN_NOT_FOUND` | `getReplay`, `createChallenge` | unknown run or not the caller's |
+| `NOT_MEMBER`, `NOT_GROUP`, `BAD_CLOUDID` | `getBoard`, `joinGroup` | §11.3, §9.2 |
+| `SERVER_CONFIG`, `INTERNAL` | any | missing env config (e.g. `GROUP_REF_PEPPER`) / unexpected error |
+
+Not error codes: the challenge lineup lock is a successful response with `theirLineup: null, lineupLocked: true` (C5).
+
 ---
 
 ## 15. Analytics events
 
-Sent through our own `track` cloud function (batched, flushed on result, on hide, and every 20 s); it is the single source for the go/kill metrics. **`wx.reportEvent` is not used**: its event ids belong to the MP experiment system, not a general event store (phase0-platform.md §8). Optional extra: mirror `error` events to `wx.getGameLogManager().log({level: 'error', key, value})` (base library 3.7.4; ≤ 999 entries per session, ≤ 16 KB each) for free visibility in MP 游戏日志分析; never relied on for metrics. Common props: `sessionId` (a new uuid on each cold start, or a warm start after > 30 min in the background), `ts`, `isNewUser` (first-ever session on this Beijing date), `contentVersion`, `appVersion`.
+Sent through our own `track` cloud function (batched, flushed on result, on hide, and every 20 s); it is the single source for the go/kill metrics. **`wx.reportEvent` is not used**: its event ids belong to the MP experiment system, not a general event store (phase0-platform.md §8). Optional extra: mirror `error` events to `wx.getGameLogManager().log({level: 'error', key, value})` (base library 3.7.4; ≤ 999 entries per session, ≤ 16 KB each) for free visibility in MP 游戏日志分析; never relied on for metrics. Each event carries a **top-level `sessionId`** (a new uuid on each cold start, or a warm start after > 30 min in the background; `track` falls back to `props.sessionId` and always stores it top-level, §14.1) and `clientTs` (client time, kept next to the server `ts`). Common props: `isNewUser` (first-ever session on this Beijing date), `contentVersion`, `appVersion`.
 
 | Event | Props | Fires when |
 |---|---|---|
@@ -905,7 +937,7 @@ Sent through our own `track` cloud function (batched, flushed on result, on hide
 | `interstitial_show` | `runsThisSession` | |
 | `board_write` | `dateKey`, `result: ok/privacyDenied/error`, `w` | after the `d_<date>` display marker write (§11.2) |
 | `board_list` (server-side) | `dateKey`, `kind`, `mode`, `rows`, `bytes`, `cached:boolean` | each `getBoard` response; watches the §11.5 cap and cost |
-| `daily_gen` (server-side) | `dateKey`, `source: bank/live`, `attempts`, `genMs`, `relaxed`, `bankLeft` | each `genDaily` run (§5.2) |
+| `daily_gen` (server-side) | `dateKey`, `source: bank/live`, `attempts`, `genMs`, `bankLeft`, `failed?` (`true` when no seed was published, `DAILY_UNAVAILABLE`) | each `genDaily` run (§5.2) |
 | `error` | `where`, `code` | any handled error state shown |
 
 **Metric definitions (go/kill)**
@@ -1019,19 +1051,20 @@ Scope:
 14. **Small screens (320 × 568) and large system font settings:** the pool list scrolls, the lineup collapses to two rows, and no text is truncated in the record or band.
 15. **Server/client record mismatch:** the server value is shown; the event is logged with both values.
 16. **Content version bump while a run is in progress:** the run keeps its pinned `contentVersion`, and the server keeps the last 2 versions.
-17. **Seed bank empty or out of date** (content/config/gate version bump): `genDaily` falls back to live generation (§5.2); if nothing passes, the relaxed seed is used and an alert is logged. The daily always opens.
+17. **Seed bank empty or out of date** (content/config/gate version bump): `genDaily` falls back to live generation (§5.2), which succeeds on only about 20% of days. If nothing passes, **no seed is published**: `DAILY_UNAVAILABLE`, an `[ALERT]` log and a `daily_gen` event with `failed: true`; clients show the daily fetch-failed state and free play continues. Prevention: the bank refill ops step (before launch, monthly, and on the < 10 entries warning).
 18. **Unverified board row** (a KV marker with no matching server result, e.g. a tampered client or a hash collision): the row shows "未验证" without a rank number, below all ranked rows (§11.4). A KV marker that disagrees with the server shows the server value.
 19. **Privacy refused at the first ranked result:** the result shows normally; the marker write is pending and retried only after a later agreement (§11.2). The player is missing from friends' boards until then.
 20. **Friend scope refused, then enabled in settings:** on return (`onShow`), the board re-checks `getSetting` and renders without restarting.
 21. **Board open across midnight:** the board keeps the date it was opened for (5c); a refresh after midnight loads the new date with the new salt.
 22. **Over `boardListCap`:** group board switches to `group` mode, friend board to `selfOnly` (§11.5); no tampered value gains a rank in either.
 23. **Timer double-fire or lazy-path race on `genDaily`:** one `daily_seeds` document, at most one bank entry used (§5.2).
+24. **Friendly or challenge run on today's daily seed before the caller's own daily** (C5): 复盘 returns `REPLAY_LOCKED` ("今日军令完成后可复盘") and the sharer's lineup is withheld (`lineupLocked`, "对方阵容 · 完成今日军令后可见") until the caller has a ranked daily result for that date or D+1 00:30 BJT has passed.
 
 ---
 
 ## 19. Open questions for the founder
 
-No open founder questions. All earlier questions are decided (§0, D1-D14). The operational setup steps for the founder are listed in D9: game-category access, WeChat 认证, 流量主 activation, declaring 微信朋友关系 in the 用户隐私保护指引 and enabling the privacy popup, and (Phase 2 portraits) an ICP-filed CDN domain in the MP domain whitelist or cloud-storage hosting.
+No open founder questions. All earlier questions are decided (§0, D1-D15). The operational setup steps for the founder are listed in D9: game-category access, WeChat 认证, 流量主 activation, declaring 微信朋友关系 in the 用户隐私保护指引 and enabling the privacy popup, and (Phase 2 portraits) an ICP-filed CDN domain in the MP domain whitelist or cloud-storage hosting.
 
 ---
 
@@ -1058,7 +1091,7 @@ QA tests these against this spec. "Daily" means the daily 军令. Tests may use 
 12. The record always sums to 12, and the band shown matches the §7.5 table for every value 0-12.
 13. Monotonicity: for a fixed seed with events disabled, raising any stat of any drafted general never lowers the number of wins.
 14. Events fire only under their stated conditions, at most once each per run, and every firing shows a named log row.
-15. The tuning tool over 100k seeds reports results within the §7.5 bands for the sensible model, random mean 4.5-5.5, greedy 12-0 ≤ 5%, and optimal 12-0 on ≥ 95% of free seeds. The build fails CI if not.
+15. The tuning tool over 100k seeds, with the `core/config.js` values, reports (hard targets, D15): sensible 12-0 in 0.2-0.5%, sensible median 6-7, every sensible band share within its §7.5 target (10-11 in 6-10%, 0-1 ≤ 2%, others per the table), greedy 12-0 ≤ 1%, naive 12-0 < 0.2%, random 12-0 < 0.01%, and events firing in 15-30% of sensible runs. The build fails CI if any hard target is missed. The random/naive/greedy mean wins and the optimal 12-0 rate on free seeds (about 1-2%) are reported but soft (NOTE, never a failure).
 16. 复盘 returns a lineup that is drawable from the player's final tokens and whose record is ≥ the player's record. It completes in < 300 ms on the reference mid-range Android for Phase 1 content (32 generals), including the worst case reported by `tools/simstats.js`; otherwise the free-play 复盘 is served by `getReplay` (§7.4).
 17. The reveal shows 12 rows sequentially in ≤ 10 s total. A tap skips to the verdict, and the verdict is identical whether or not the reveal was skipped.
 18. Outcomes do not depend on ads watched, run count, new-user status or mode, beyond the documented re-spin allowance (a test runs the same seed and actions under each condition).
@@ -1066,7 +1099,7 @@ QA tests these against this spec. "Daily" means the daily 军令. Tests may use 
 **Daily seed**
 19. Two different users calling `getDaily` on the same Beijing date receive an identical `rounds` and `issueNo`. The response contains no battle stream and no best lineup.
 20. The date key is derived from server time in UTC+8, independent of the cloud function's runtime timezone (see AC 66). A device set to another timezone or a wrong date still gets the server's date.
-21. Each accepted daily seed satisfies the §7.5 daily gates as computed in §7.5.1 (recorded in `gates`), unless `gates.relaxed = true`, which is logged as an alert.
+21. Every published daily seed satisfies the §7.5 daily gates as computed in §7.5.1 and recorded in `gates`: optimal (primary tokens, no re-spins) = 12-0, greedy-population 12-0 rate in [0.25%, 20%], random-population 12-0 rate < 0.5%; `gates.relaxed` is always `false`. A seed that fails any gate is never published (D15/C5).
 22. One ranked daily result per openid per date. A second `submitRun` with a new `clientRunId` returns `ALREADY_PLAYED` and the original result. A resubmission with the same `clientRunId` returns the same result without incrementing `daily_stats`.
 23. A daily started at 23:59 BJT on D and submitted at 00:10 on D+1 is ranked for D. One submitted at 00:31 returns `LATE_SUBMIT`, and the client shows the friendly-match message.
 24. After midnight BJT, bringing the app to the foreground refreshes the home daily card to the new issue without a restart.
@@ -1081,7 +1114,7 @@ QA tests these against this spec. "Daily" means the daily 军令. Tests may use 
 29. No reward, re-spin, attempt, rank or content is granted or unlocked by sharing anywhere in the game (code search plus manual test of every share entry point).
 30. Every share is started by an explicit user tap or by the capsule menu. Nothing calls `shareAppMessage` automatically.
 31. The daily share card contains no general names. The free share card contains the names. Both render the record and band, and fall back to the static image if rendering fails.
-32. A challenge card's query contains only `c=<id>`. Opening it shows the challenge entry with the sharer's record and **without** their lineup. The lineup appears only after the recipient's run on that challenge is submitted.
+32. A challenge card's query contains only `c=<id>`. Opening it shows the challenge entry with the sharer's record and **without** their lineup. The lineup appears only after the recipient's run on that challenge is submitted. On a daily seed it additionally stays hidden (`theirLineup: null, lineupLocked: true`, shown as "对方阵容 · 完成今日军令后可见") until the recipient has a ranked daily result for that date or D+1 00:30 BJT has passed; likewise `getReplay` returns `REPLAY_LOCKED` (shown as "今日军令完成后可复盘", no ad offered) for any run on a daily seed under the same rule. Free seeds are never locked (C5).
 33. A challenge on today's daily seed, opened by a user who has not played today's daily, states that it counts as the daily, and on completion it appears on the boards. If the user has already played, it is labelled a friendly match and is not ranked.
 34. Expired, non-existent and own challenges each show their specific state from §8.5.
 35. Opening a result card from a group chat (a `shareTicket` is present) calls `getGroupEnterInfo` and `joinGroup`; on success home shows the group banner. With no ticket, or when `joinGroup` fails, no banner shows and play is unaffected. `wx.getShareInfo` is never called (code search).
@@ -1108,12 +1141,12 @@ QA tests these against this spec. "Daily" means the daily 军令. Tests may use 
 50. The forbidden-terms check (item 7 list, plus 82-0/NBA/三国志/三国杀/光荣/Koei) passes on all user-visible strings, share titles and store copy.
 
 **Analytics**
-51. Every event in §15 fires exactly once per its trigger, with the listed props (verified in the harness by capturing `track` payloads through a scripted session: card open → challenge run → share → 2 free runs → interstitial → board view).
+51. Every event in §15 fires exactly once per its trigger, with the listed props, a non-null top-level `sessionId` stored on the `events` document (also when the client sends it only in `props`) and `clientTs` (verified in the harness by capturing `track` payloads through a scripted session: card open → challenge run → share → 2 free runs → interstitial → board view).
 52. The four go/kill metrics can be computed from the `events` collection using the §15 definitions (QA provides one query per metric, run against the harness session data).
 
 **Daily seed generation (C2)**
-53. `genDaily` completes within its explicitly configured timeout (value set from the spike, §17 #20, recorded in §14) on both paths: the bank path, and the live path with an empty bank and a forced worst case (no candidate passes). The live loop stops at 50 candidates or 70% of the timeout, and `genMs` is recorded on the `daily_seeds` document.
-54. With a seeded `daily_seed_bank`, `genDaily` uses the next unused entry whose `contentVersion`, `configVersion` and `gateVersion` match, re-verifies the stored best lineup scores 12-0, marks the entry `used`, and records `source: bank`. Non-matching entries are skipped. With < 7 entries left it logs a warning; with none it falls back to live generation and records `source: live`. No bank file is present in the repo (CI check).
+53. `genDaily` completes within its explicitly configured timeout (value set from the spike, §17 #20, recorded in §14) on both paths: the bank path, and the live path with an empty bank and a forced worst case (no candidate passes). The live loop stops at 50 candidates or 70% of the timeout, and `genMs` is recorded on the `daily_seeds` document. In the worst case **no `daily_seeds` document is written**: the call returns `DAILY_UNAVAILABLE`, logs an `[ALERT]` and writes a `daily_gen` event with `failed: true`; `getDaily` then returns `DAILY_UNAVAILABLE` and the client shows the daily fetch-failed state with free play available.
+54. With a seeded `daily_seed_bank`, `genDaily` uses the next unused entry (by `_id`) whose `contentVersion`, `configVersion` and `gateVersion` match, re-verifies the stored best lineup scores 12-0, marks the entry `used`, and records `source: bank`. Non-matching entries are skipped. With **< 10** matching entries left it logs a low-bank warning (and `bankLeft` is on the `daily_gen` event); with none it tries live generation (`source: live` on success, AC 53 on failure). No bank file is present in the repo (CI check).
 55. `gateCheck` for a given seed returns an identical `gates` record in `tools/simstats.js` and in the cloud function. Greedy and random rates are the share of K = 400 simulated players reaching 12-0, each player using its own `sub(seed, "gate:greedy:"/"gate:random:" + j)` stream for choices only, sharing the seed's battle and event streams (§7.5.1).
 
 **Leaderboard trust, retention, content (C3, D7, D10, D8)**
