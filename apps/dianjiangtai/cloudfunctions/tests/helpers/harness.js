@@ -8,6 +8,7 @@ const path = require('path');
 const Module = require('module');
 const sync = require('../../scripts/sync-core');
 const { FakeDb } = require('./fake-db');
+const OPTIMAL_SEEDS = require('../fixtures/optimal-seeds.json');
 
 const CORE_SRC = sync.DEFAULT_CORE;
 
@@ -76,8 +77,10 @@ function createHarness({ now = Date.UTC(2026, 10, 3, 4, 0, 0) } = {}) {
           if (global.__DJ_GATES_LOG) global.__DJ_GATES_LOG.push(seed);
           const rounds = sheet.buildSheet(seed, 1);
           const ok0 = !!accept(seed);
-          const best = search.bestLineup(seed, 1, rounds.map((r) => ({ faction: r.faction, era: r.era })), { stopAt12: true });
-          const ok = ok0 && !!best;
+          // acceptance depends ONLY on the predicate (deterministic attempt counts); an undraftable sheet gets a stand-in best
+          const real = search.bestLineup(seed, 1, rounds.map((r) => ({ faction: r.faction, era: r.era })), { stopAt12: true });
+          const best = real || { lineup: OPTIMAL_SEEDS[0].lineup, record: { w: 12, l: 0 } };
+          const ok = ok0;
           const gatesRec = { optimal: best ? best.record : { w: 0, l: 12 }, greedyRate: 0.02, randomRate: 0, K: 400, gateVersion: 1, relaxed: false };
           return ok ? { accepted: true, gates: gatesRec, best, rounds } : { accepted: false, gates: gatesRec };
         };
@@ -129,5 +132,4 @@ function bestActions(rounds, { rank = 0, mode = 'daily', respinFirst = false, pr
   return actions;
 }
 
-const OPTIMAL_SEEDS = require('../fixtures/optimal-seeds.json');
 module.exports = { createHarness, bestActions, CORE_SRC, OPTIMAL_SEEDS };

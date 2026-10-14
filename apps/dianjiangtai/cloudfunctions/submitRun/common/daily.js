@@ -7,7 +7,6 @@ const { AppError, isDateKey, daysBetween, randomSeed, now } = require('./util');
 
 const MAX_LIVE_CANDIDATES = 50;
 const LIVE_BUDGET_FRACTION = 0.7;
-const BANK_LOW_WATER = 10; // days of seeds
 const BANK_SCAN = 20;
 
 /** Launch date key: env override, else the first seed ever created (stored once in `meta`). */
@@ -92,7 +91,8 @@ async function tryBank(dateKey, v, issueNo, t0) {
       throw e;
     }
     const left = await bankLeft(v);
-    if (left < BANK_LOW_WATER) console.warn(`[daily] WARNING seed bank low: ${left} entries left (< ${BANK_LOW_WATER}); generate and import a new bank`);
+    const lowWater = core.bankLowWarn();
+    if (left < lowWater) console.warn(`[daily] WARNING seed bank low: ${left} entries left (< ${lowWater}); generate and import a new bank`);
     return { doc, created: true, bankLeft: left };
   }
   return null;
@@ -147,4 +147,4 @@ async function ensureDaily(dateKey, { startedAt = now(), timeoutMs } = {}) {
   return live(dateKey, v, issueNo, t0, startedAt, timeoutMs);
 }
 
-module.exports = { ensureDaily, issueNoFor, MAX_LIVE_CANDIDATES, LIVE_BUDGET_FRACTION, BANK_LOW_WATER };
+module.exports = { ensureDaily, issueNoFor, MAX_LIVE_CANDIDATES, LIVE_BUDGET_FRACTION };

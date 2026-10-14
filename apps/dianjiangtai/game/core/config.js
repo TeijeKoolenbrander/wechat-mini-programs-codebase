@@ -105,7 +105,7 @@ const V1 = {
   analytics: { flushMs: 20000, maxBatch: 50, sessionGapMs: 30 * 60 * 1000 },
 
   /** Daily 军令 (spec 5.2). */
-  daily: { launchDateKey: '20261101', graceMs: 30 * 60 * 1000, bankLowWarn: 7 },
+  daily: { launchDateKey: '20261101', graceMs: 30 * 60 * 1000, bankLowWarn: 10 },
 
   /**
    * Free-play rarity (spec 7.5 "Rarity line"): freeRarity[w] is the share of
