@@ -1,0 +1,319 @@
+PUBLIC BUILD - EVERYTHING THAT NEEDS TO CHANGE
+==============================================
+
+Goal: a version of 骰盅 that can pass WeChat review and stay live.
+mini-program/ and mini-game/ stay as they are (private, 体验版 only).
+The public build is a separate copy. Do not submit the private builds.
+
+Target: the MINI GAME build (小游戏), under the company account.
+All file references below are to the public copy of mini-game/.
+mini-program/ is not made public.
+
+Principle: every mode stays, but every mode is visible and explained.
+Nothing in the app is reachable only through a secret tap.
+
+Status: sections 1-4 are implemented in this folder (public/), with
+tests (npm test). Still to do by hand: 0 (licensing), 2.4 (name),
+3.4 (AppID), 3.5 (privacy guide), and submission.
+
+
+0. LICENSING - CHECK THIS FIRST
+-------------------------------
+
+A Mini Game is treated as a game, not a tool. Before building anything,
+check the current Mini Game publishing rules (小游戏运营规范 / 游戏类目
+资质要求) in the 微信公众平台 admin console:
+
+    - 软著 (software copyright registration): expect to need it. The
+      company can apply itself. Takes weeks to a few months.
+    - 版号 (game publishing license): required for games with in-app
+      purchases, and WeChat's requirements for free games have been
+      tightening. A 版号 is applied for through a licensed publisher,
+      not by the company directly, and takes months. Check whether a
+      free game with no ads / no purchases currently needs one.
+    - Category: avoid 棋牌 (board / card / dice gambling-style) categories,
+      which are the strictest. Look for a 休闲 / 益智 / party-game style
+      category, and check which 资质 each one requires.
+    - If the company is registered outside mainland China, use the 海外主体
+      path and check which game categories it allows.
+
+If a 版号 turns out to be required, the Mini Program build is the fallback
+(tool category, no 版号). Everything in sections 1-3 applies to both.
+
+
+1. NEW FLOW
+-----------
+
+    First launch:
+    Home scene  --PLAY-->  Modes scene  --pick a mode-->  Cup scene
+                                                (controlled: explanation first)
+
+    After that:
+    Home scene  --PLAY-->  Cup scene, in the last mode played
+    Home scene  --切换模式-->  Modes scene  (to change mode)
+    Home scene  --玩法说明-->  Help scene
+    Cup scene   --⚙-->  Home scene
+
+Scenes are switched with app.go(name, arg) in js/main.js.
+Add a 'modes' and a 'help' scene next to home and cup:
+    const scenes = { home, modes, help, cup }
+
+1.1 Home scene (js/home.js)
+    - 摇骰子 title is drawn as plain text. No hit target.
+      (remove titleRect hit-testing and the 'title' entry in MODE_OF)
+    - 玩法说明 no longer opens a mode. It opens the help scene (3.2).
+      (howtoRect -> app.go('help'))
+    - Remove the "generous padding" on the title. 玩法说明 keeps a normal
+      tap area and gets a visible pressed state, like a real link.
+    - PLAY -> the last mode played (app.go('cup', lastMode)), or
+      app.go('modes') on first launch. See 1.5.
+    - 切换模式 link, to the left of 玩法说明 on the same row (with a dot
+      between them) -> app.go('modes'). Always opens the mode screen.
+
+1.2 Modes scene (new: js/modes.js)
+    Heading 选择模式, with a line under it:
+        选好的模式会被记住，以后点 PLAY 直接进入
+    Four visible buttons, each with a one-line description:
+        1. 普通模式  Regular  - 公平随机
+        2. 好运模式  Lucky    - 更容易出好牌
+        3. 豹子模式  Crazy    - 必出四个或五个相同
+        4. 自定义模式 Controlled - 自己设定点数
+    - Each button -> app.go('cup', 'regular' | 'lucky' | 'crazy' | 'controlled').
+    - A back control -> app.go('home').
+    - Regular is a FAIR roll (each face 1/6). New in core/: rollFair(rng).
+    - Lucky = the existing Lucky generator (LUCKY_GOOD_CHANCE).
+    - Crazy = the existing Insane generator, renamed everywhere (3.6).
+    - Controlled = the existing override mode (fair base roll + override),
+      renamed everywhere (3.6).
+    - Never 作弊 or "cheat" in the UI, the listing or the code.
+    - Sizes go in js/layout.js; buttons reuse redButton / spacedText from
+      js/draw.js so the scene matches the existing look.
+
+1.3 Controlled mode explanation overlay (new, drawn in js/cup.js)
+    - Shown when Controlled mode is entered, BEFORE the cup scene takes input,
+      until the user ticks 不再显示 (don't show again) and confirms.
+      Store that choice with wx.setStorageSync('controlledIntroSeen', true).
+      Local only - nothing leaves the device.
+    - The same explanation is always on the help scene, so a user who
+      hid the overlay can still find it.
+    - Draws the 3x2 grid over the screen in the same positions as the
+      real zones (same rects zoneAt uses), labelled with both readings:
+          first tap  = quantity  (1 2 / 3 4 / 5 0)
+          second tap = face      (1 2 / 3 4 / 5 6)
+    - Explains, in short lines:
+          长按「摇」开启自定义
+          第一次点击：选择数量
+          第二次点击：选择点数
+          1 是万能（飞），数量包含 1
+          设置一次后自动关闭，再次设置需重新长按
+          开盅后也可以设置
+    - Explains the 🍶 toggle (kept, bottom-left in Controlled mode instead of
+      mute):
+          🍶 亮：设定的数量里会混入 1（飞）
+          🍶 暗：只出现你选的点数，不混入 1
+    - 不再显示 checkbox + 确定 button. On 确定 the overlay disappears and
+      the cup scene works exactly as the current override mode:
+          long-press 摇 -> double vibration -> invisible 3x2 grid ->
+          tap quantity, tap face -> hand set -> override disarms.
+    - While the overlay is up, every touch goes to the overlay only:
+      no roll, no long-press arming, no swipe, no zone taps.
+
+1.4 Cup scene (js/cup.js)
+    - Unchanged gameplay for all four modes: tap 摇 to roll, swipe up to
+      open, swipe down to close, shake animation, sound + mute.
+    - ⚙ -> app.go('home'). The mode list is not shown on the way out.
+    - Entering the cup scene stores the mode as the last mode played.
+
+1.5 Keeping the mode screen out of the way (not hidden)
+    The mode screen only appears when the player chooses to change mode.
+    It stays one visible, labelled tap away, so nothing is hidden:
+    - PLAY remembers the last mode played (local storage key 'lastMode',
+      js/storage.js) and goes straight into it.
+    - ⚙ on the cup scene returns to the launch screen, not the mode screen.
+    - 切换模式 on the launch screen always opens the mode screen.
+    - The help scene says so: "PLAY 会直接进入上次使用的模式。首页点
+      「切换模式」可以更换。"
+    - The review notes must say the same, so the reviewer knows where the
+      four modes are.
+    Do not go further than this: no unlabelled or disguised way to reach
+    the mode screen. That is the hidden-feature problem again.
+
+
+2. MUST CHANGE (review blockers)
+--------------------------------
+
+2.1 Hidden entries removed - covered by 1.1.
+
+2.2 Odds are honest
+    - Regular is genuinely fair.
+    - Lucky and Crazy say on their button what they do.
+    - The help scene describes all four modes, including that Lucky and
+      Crazy are weighted.
+
+2.3 Controlled mode is disclosed
+    - The explanation overlay (1.3) and the help scene both describe it.
+    - The review notes (提审备注) explain how to use it step by step, so
+      the reviewer can find and test it. A disclosed feature with a
+      discreet gesture is fine; an undisclosed one is not.
+
+2.4 Name
+    - Pick a game name that does not contain or imitate another app's
+      name or trademark.
+
+2.5 Game-specific requirements
+    - 健康游戏忠告 (the standard healthy-gaming notice) - in the help
+      scene's 提示 section, after the disclaimers:
+          抵制不良游戏，拒绝盗版游戏。注意自我保护，谨防受骗上当。
+          适度游戏益脑，沉迷游戏伤身。合理安排时间，享受健康生活。
+      It is not on the launch screen. The rules usually expect it on the
+      launch or splash screen, so check the current requirement before
+      submitting, and move it back there if review asks for it.
+    - If the game gets a 版号 / 软著, show the numbers where the rules
+      require (usually the splash / home screen).
+    - Age rating (适龄提示) if the category requires it. Given the drinking
+      context, expect 18+ or at least 16+.
+    - Anti-addiction / real-name (防沉迷): handled by WeChat for most mini
+      games, but check whether the chosen category requires anything
+      from the game itself.
+
+
+3. SHOULD CHANGE (lower the risk)
+---------------------------------
+
+3.1 Disclaimers (help scene only, in its 提示 section)
+    - 本游戏仅供娱乐，禁止用于赌博
+    - 理性饮酒，未成年人禁止饮酒
+    - Not on the launch screen. Neither is the 健康游戏忠告 (2.5).
+    - Do not mention alcohol in the name, icon or screenshots.
+    - No money, betting, stakes or "bet" wording anywhere.
+
+3.2 Help scene (new: js/help.js, opened from 玩法说明)
+    - What the game is: a virtual dice cup for playing with friends in
+      person.
+    - Controls: tap 摇 to roll, swipe up to open, swipe down to close.
+    - The four modes and what each does.
+    - Controlled mode instructions (same content as the overlay, including
+      the grid diagram and the 🍶 toggle).
+    - The disclaimers from 3.1.
+    - Canvas only, so long text needs simple line wrapping (and scrolling
+      if it does not fit on small screens). Add a wrapText helper to
+      js/draw.js. A back control -> app.go('home').
+
+3.3 Remove anything that reveals the private intent
+    - Comments in js/home.js like "Three ways in, and only PLAY looks like
+      a button: the title opens Insane..." and the "generous padding"
+      notes - remove. The uploaded package contains your code.
+    - Comments in js/cup.js like "the only signal the override gives
+      you" - rewrite neutrally or remove.
+    - console.log('[...]') debug lines in js/cup.js - remove.
+    - project.config.json: uploadWithSourceMap: true -> false.
+    - The credits line "TK · EW" is fine to keep.
+
+3.4 Config / listing
+    - New Mini Game AppID under the company account (do not reuse
+      wx554df5d818dc209a unless it is migrated to the company).
+    - project.config.json: new appid and projectname.
+    - game.json: unchanged (portrait, no status bar) unless needed.
+
+3.5 Privacy
+    - The game collects nothing and makes no network requests. Local
+      storage holds only 'controlledIntroSeen' and 'lastMode'. Still fill in the 用户隐私保护指引 in the admin console
+      stating that no personal data is collected.
+
+3.6 No "cheat" anywhere
+    The four modes are Regular, Lucky, Crazy, Controlled - in the UI, the
+    listing, the review notes AND the code. The words "cheat", "insane"
+    and "作弊" must not appear anywhere in the uploaded package.
+
+    Rename (code):
+        core/cheat.js           -> core/controlled.js
+        core/insane.js          -> core/crazy.js
+        applyCheat()            -> applyControlled()
+        rollInsane()            -> rollCrazy()
+        CHEAT_SPLIT             -> CONTROLLED_SPLIT
+        CHEAT_WILD_P            -> CONTROLLED_WILD_P
+        CHEAT_ALL_FACE_CHANCE   -> CONTROLLED_ALL_FACE_CHANCE
+        CHEAT_LONGPRESS_MS      -> CONTROLLED_LONGPRESS_MS
+        INSANE_*                -> CRAZY_*
+        pureCheat               -> noWilds
+        mode 'cheat' / 'insane' -> 'controlled' / 'crazy'
+        storage key             -> 'controlledIntroSeen'
+        tests/cheat.test.js     -> tests/controlled.test.js
+        tests/insane.test.js    -> tests/crazy.test.js
+
+    Rename (project):
+        project.config.json  projectname "cheatshaizi-game" -> new name
+        project.private.config.json, package.json  "cheatshaizi" -> new name
+
+    Also rewrite every comment that says cheat / insane / secret / hidden
+    (js/cup.js, js/home.js, js/layout.js, js/dice.js, core/config.js and
+    the tests). Verify before upload:
+        grep -rniE "cheat|insane|作弊|secret|hidden" .
+    should return nothing.
+
+    The repo folder (cheatshaizi/) and the private builds are not uploaded,
+    so they can keep their names.
+
+4. CODE CHANGES (per file)
+--------------------------
+
+core/
+    - Add rollFair(rng) for Regular mode (or reuse the existing fair roll
+      used as Controlled's base).
+    - Keep lucky.js, hands.js, rng.js, config.js.
+    - cheat.js -> controlled.js, insane.js -> crazy.js (3.6).
+
+js/main.js
+    - Register the modes and help scenes.
+
+js/home.js
+    - Remove the title hit target and MODE_OF.
+    - PLAY -> last mode, or app.go('modes') on first launch.
+    - 切换模式 -> app.go('modes'); 玩法说明 -> app.go('help').
+    - No notices: the disclaimers and 健康游戏忠告 are in help.
+
+js/storage.js (new)
+    - lastMode / rememberMode, introSeen / rememberIntroSeen.
+    - Ignores anything that is not one of the four mode ids, and never
+      throws if storage is unavailable.
+
+js/modes.js (new)
+    - Four buttons + descriptions + back (1.2).
+
+js/help.js (new)
+    - Help content (3.2), wrapped and scrollable.
+
+js/cup.js
+    - Modes: 'regular' (rollFair), 'lucky', 'crazy' (rollCrazy),
+      'controlled' (applyControlled).
+    - Controlled: explanation overlay on enter unless 'controlledIntroSeen';
+      blocks all other input until 确定.
+    - Stores the mode as the last mode played on enter.
+    - ⚙ -> app.go('home').
+
+js/layout.js
+    - Sizes for the modes scene, help scene and overlay.
+
+js/draw.js
+    - wrapText helper; checkbox drawing for 不再显示.
+
+tests/
+    - game.test.js checks that core/ is byte-identical to
+      mini-program/core/. The public copy has its own core/ - remove
+      that check (or point it at nothing).
+    - Regular: each face ~1/6 over 10k rolls.
+    - Home: tapping the title does nothing; 玩法说明 opens help, never a
+      mode; PLAY opens modes.
+    - Modes: each button opens the cup scene in the right mode; back
+      returns home.
+    - Controlled: input is ignored until the overlay is confirmed; after
+      confirm, long-press + two taps sets the hand as before.
+    - Controlled: overlay is skipped once 不再显示 has been confirmed.
+    - ⚙ on the cup scene returns to the launch screen, not the modes.
+    - PLAY goes straight into the last mode played; 切换模式 always opens
+      the mode screen; PLAY skips the introduction once dismissed.
+    - Stored last mode ignores invalid values; storage errors are not fatal.
+    - Update smoke.test.js for the new flow (home -> modes -> cup).
+    - Existing lucky / hands / layout / anim tests stay; the insane and
+      cheat tests stay but are renamed (3.6).
+
