@@ -170,3 +170,24 @@ test('every collection a function writes has deny-all rules AND every function c
     assert.ok(c.timeout >= 5, `${fn.name} timeout ${c.timeout} must be explicit and not the 3 s default`);
   }
 });
+
+test('regression BUG-1 chain: nothing before the caller has a ranked daily carries the daily optimum or the sharer lineup', async () => {
+  const challengeId = await dailyChallenge();
+  const secret = h.db.all('daily_seeds')[0].best.lineup.map((l) => l.generalId);
+  const owner = h.db.all('challenges')[0].lineup.map((l) => l.generalId);
+  const view = await h.call('getChallenge', { challengeId }, { openid: 'cheat' });
+  const clientRunId = runId();
+  const res = await h.call('submitRun', { mode: 'challenge', clientRunId, challengeId, actions: bestActions(view.rounds) }, { openid: 'cheat' });
+  const rep = await h.call('getReplay', { runId: clientRunId }, { openid: 'cheat' });
+  const again = await h.call('getChallenge', { challengeId }, { openid: 'cheat' });
+  for (const r of [view, res, rep, again]) {
+    const text = JSON.stringify(r);
+    for (const id of secret) if (!owner.includes(id)) assert.equal(text.includes(id), false, `${id} leaked`);
+  }
+  assert.equal(rep.ok, false);
+  assert.equal(rep.code, 'REPLAY_LOCKED');
+  assert.ok(!(res.challengeCompare && res.challengeCompare.theirLineup && res.challengeCompare.theirLineup.length), 'sharer lineup sealed');
+  await playDaily(h, 'cheat');
+  const open = await h.call('getReplay', { runId: clientRunId }, { openid: 'cheat' });
+  assert.equal(open.ok, true, JSON.stringify(open));
+});
