@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const sync = require('../scripts/sync-core');
-const { FAKE_CORE } = require('./helpers/harness');
+const FAKE_CORE = sync.DEFAULT_CORE; // any directory tree works as drift-test input
 
 const CF = sync.CF_ROOT;
 const read = (p) => fs.readFileSync(p, 'utf8');

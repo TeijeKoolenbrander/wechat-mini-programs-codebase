@@ -2,14 +2,14 @@
 
 WeChat Cloud Development backend for the mini game `dianjiangtai`. Spec: `docs/dianjiangtai/spec.md` §5, §9.2-9.4, §11, §14, §15, §16, §18, §20. Platform facts: `docs/dianjiangtai/phase0-platform.md`.
 
-Status: code and tests complete against a **test double** of the game core. Not deployed (no AppID or cloud environment yet).
+Status: code and tests complete and passing against the **real game core** (`apps/dianjiangtai/game/core`). Not deployed (no AppID or cloud environment yet).
 
 ## Functions
 
 | Function | Trigger | Timeout (s) | Purpose |
 |---|---|---|---|
 | `getDaily` | client | 20 | today's `rounds` + caller status; lazily creates the seed if `genDaily` missed |
-| `genDaily` | timer `0 0 23 * * * *` (UTC+8) | 60 (set from the spike) | next day's seed: seed bank first, live gate loop second; idempotent |
+| `genDaily` | timer `0 0 23 * * * *` (UTC+8) | 60 (set from the spike) | next day's seed: **seed bank is the primary path**, live generation is a last resort that publishes nothing if it fails; idempotent |
 | `startRun` | client | 5 | anchors the one daily attempt (`daily_starts`) |
 | `submitRun` | client | 10 | §14.3 validation, authoritative sim, ranked result, challenge answers |
 | `getReplay` | client | 10 | best lineup (复盘) for the caller's own run |
@@ -32,7 +32,7 @@ cloudfunctions/
   <fn>/index.js, package.json, function.config.json, config.json (timers only)
   scripts/sync-core.js
   database/rules.json
-  tests/             node --test; fake-core/ is the test double; helpers/ has the fake db + harness
+  tests/             node --test; helpers/ has the fake db + harness; fixtures/ has real 12-0 optimum seeds (NOT a bank)
 ```
 
 A cloud function deploys as one folder, so shared code is copied in:
@@ -43,8 +43,8 @@ npm run check    # fails if any copy is missing or differs (drift check)
 npm test         # runs everything, incl. the common drift test
 ```
 
-- `<fn>/common/` copies are committed (source: `common/`). `<fn>/core/` copies are **git-ignored**: run `npm run sync` before deploying, which copies the real `game/core`. The test suite stages its own temp copy with `tests/fake-core`, so it never touches the working tree. `DJ_CORE=real npm test` stages with the real core instead (integration run).
-- Only `common/coreapi.js` touches the core. Core shapes the core spec left open are assumed there (see Spec gaps).
+- `<fn>/common/` copies are committed (source: `common/`). `<fn>/core/` copies are **generated, git-ignored**: the core is owned and changed by the game, so committing 11 copies would create constant merge noise. `npm test` runs `sync` first (pretest), so the tests always run against the current real core; `npm run check` (drift) must pass before a deploy. The harness stages its own temp copy of functions + real core, so tests never depend on working-tree state.
+- Only `common/coreapi.js` touches the core. Contract: `apps/dianjiangtai/game/core/README.md`.
 
 ## Environment variables (cloud environment config; never committed)
 
@@ -64,7 +64,7 @@ No AppSecret, no `session_key`, no `code2Session` anywhere (cloudID decryption n
 3. Set env var `GROUP_REF_PEPPER` (random, 32+ chars) on `joinGroup`, `createChallenge`, and keep a copy in the team secret store. Rotating it changes every `groupRef` and challenge id (old challenges stay valid, they are looked up by id).
 4. Upload the timer triggers (`genDaily/config.json`, `cleanup/config.json`): one trigger per function, evaluated in UTC+8.
 5. Create the 11 collections (below) and paste the rules from `database/rules.json`; add the indexes.
-6. Import the 30-day seed bank into `daily_seed_bank` (console import), then delete the local file. **Never commit it** (it is a spoiler). Fields: `_id, seed, contentVersion, configVersion, gateVersion, best:{lineup,record}, gates, used:false, importedAt`.
+6. Seed bank (the primary daily source, see "Seed bank flow"): generate at least 60 days, import into `daily_seed_bank`, delete the local files. **Never commit them** (spoiler).
 7. Spike items that touch the backend: the real `genDaily` timeout and measured `gateCheck` time (E6), the `callFunction` response size (sets `boardListCap`, config), the cloudID decrypt (E1), `doc.get()`/duplicate-`add` error text on the real DB (see Risks).
 
 ## Collections
@@ -106,9 +106,22 @@ File: `database/rules.json`. **Every collection is `{"read": false, "write": fal
 
 All point reads use the deterministic `_id`.
 
+## Seed bank flow (mandatory: 12-0 daily seeds are rare)
+
+Do this before launch and again whenever fewer than 10 days are left (the `genDaily` log warns) or after any core retune (a content/config/gate version bump makes old entries unusable):
+
+```
+node apps/dianjiangtai/game/tools/simstats.js --bank 60 --bank-file <tmp>/bank.json    # ~27 s per 5 seeds, ~6 min for 60
+node apps/dianjiangtai/cloudfunctions/scripts/prepare-bank.js <tmp>/bank.json <tmp>/bank.import.jsonl
+# console: database > daily_seed_bank > import <tmp>/bank.import.jsonl (JSON Lines, skip on conflict)
+# then delete both files from disk
+```
+
+`prepare-bank.js` re-verifies every entry with the real core (live versions, stored best lineup scores 12-0), assigns `_id = bank_<seed>` (re-importing cannot duplicate) and sets `used:false`. Never commit either file. Each day consumes one entry; 60 entries last 60 days.
+
 ## Behaviour notes
 
-- **Daily seed (§5.2).** `genDaily` runs at 23:00 BJT for the next date. Bank first (matching content/config/gate version, cheap re-check that the stored best lineup still scores 12-0, entry marked used in the same transaction as the `daily_seeds` add). Live fallback: up to 50 candidates or 70% of the configured timeout; if nothing passes, the best candidate that reaches optimal 12-0 is stored with `gates.relaxed = true` and an `[ALERT]` is logged. A double-fired trigger or a racing lazy `getDaily` creates one document and consumes at most one bank entry (tests run both races).
+- **Daily seed (§5.2).** `genDaily` runs at 23:00 BJT for the next date. **Bank first**: the next unused `daily_seed_bank` entry (by `_id`) whose content/config/gate versions match; cheap re-check that the stored best lineup still scores 12-0 on the rebuilt sheet; entry marked used in the same transaction as the `daily_seeds` add. **Live is a last resort** (bank empty or version-mismatched): up to 50 candidates or 70% of the configured timeout through the strict gate (about 0.4% of seeds pass, so this succeeds on only ~18% of days). If nothing passes it logs `[ALERT]`, writes a `daily_gen` event with `failed:true`, and returns `DAILY_UNAVAILABLE`: **no seed without a 12-0 optimum is ever published**. Fewer than 10 bank entries left logs a low-bank warning. A double-fired trigger or a racing lazy `getDaily` creates one document and consumes at most one bank entry (tests run both races).
 - **submitRun (§14.3).** Order: input whitelist, idempotency lookup by `clientRunId`, rate limit, per-mode seed resolution, replay, authoritative sim, mismatch flag/log, transaction (`runs` + `daily_results` + `daily_stats.inc`). Daily window: today, or yesterday until D+1 00:30 BJT (`LATE_SUBMIT` after); needs a `daily_starts` row (`NOT_STARTED`); a second distinct run returns `ALREADY_PLAYED` with the first result; the same `clientRunId` returns the stored result even under concurrency.
 - **Challenges.** Challenge on a daily seed is the recipient's daily attempt only if they started it (`startRun` with `mode: 'challenge'`) inside the submit window and have no result yet; otherwise a friendly. Answers are validated like any run; the answer count only grows on a caller's first answer.
 - **getBoard (§11.4-11.5).** Rows `[h, w, s, x?]`, `h = sha256(openid|boardSalt)[0..12)`, `s` = seconds after 00:00 BJT, `x` = `lineupIdx.join(',')` only if the caller has a ranked result. Date must be today or yesterday. Over `boardListCap` (core config, default 3000): group board -> `mode: group` (members' results), friend board -> `selfOnly`. The 60 s cache holds the date's rows in function memory; the caller's own row is always read fresh.
@@ -116,12 +129,12 @@ All point reads use the deterministic `_id`.
 
 ## Tests
 
-`npm test` (Node >= 20): in-memory fake DB with duplicate-`_id` errors, throwing `doc.get`, the 100/1000 row query limits and rolled-back transactions; the SDK is mocked; Date.now is controlled. Covers validation rejections, idempotency (incl. concurrent), ALREADY_PLAYED, midnight grace, challenge lineup withholding and counting rules, getBoard (no openids, salts, membership, cap modes, cache), joinGroup, track, cleanup, genDaily double-fire/bank/live/relaxed, TZ=UTC date keys, security rules, drift.
+`npm test` (Node >= 20; 75 tests): in-memory fake DB with duplicate-`_id` errors, throwing `doc.get`, the 100/1000 row query limits and rolled-back transactions; the SDK is mocked; Date.now is controlled. Functions run against the real core. Only the daily gate is patched (`h.patchGates`) because the real one accepts ~0.4% of seeds; bank tests use real 12-0 optimum seeds from `tests/fixtures/optimal-seeds.json` (a guard test fails if a core retune makes them stale; regenerate by scanning seeds with `search.bestLineup(..., {stopAt12:true})`). Covers validation rejections, idempotency (incl. concurrent), ALREADY_PLAYED, midnight grace, challenge lineup withholding and counting rules, getBoard, joinGroup, track, cleanup, genDaily double-fire/bank/live-failure, TZ=UTC date keys, security rules, drift, prepare-bank.
 
 ## Spec gaps decided (flag if you disagree)
 
-1. **Core shapes** not pinned by the core spec, assumed in `common/coreapi.js`: `config.js` exports `CONTENT_VERSION`, `CONFIG_VERSION`, `GATE_VERSION`, `getConfig(v)` with `boardListCap`; `content.getContent(v)` returns `{generals:[{id,...}]}` and throws or returns null for an unknown version; `validate.replay` may also return `tokens` (final tokens per round) for 复盘, otherwise they are derived from the sheet and actions; `lineup` entries are `{slot, generalId}`; `gates.acceptDailySeed(seed)` returns `gates.optimal.w` for the relaxed fallback.
-2. **Fallback re-flip on an empty pool needs the seed** (spec §4), but the daily client never receives the seed (§5.2). `getDaily` returns only `rounds`. Either `sheet.js` must bake the fallback tokens into `rounds`, or the client cannot reproduce them. Needs a decision from minigame-dev; the backend returns whatever `rounds` contains.
+1. **Core integration** (all in `common/coreapi.js`): versions come from `content.LATEST_CONTENT_VERSION`, `config.LATEST_CONFIG_VERSION`, `getConfig(v).gateVersion`; `getContent/getConfig` return null for an unknown version (-> `INVALID_ACTIONS` / `CHALLENGE_EXPIRED`); `replay` failures carry `reason` (+`index`), final tokens come from `finalTokens`; `bestLineup` may return null (`getReplay` then returns `best:null`); `acceptDailySeed` returns `{accepted, gates, best, rounds}`.
+2. The empty-pool re-flip is solved by the core: `rounds[n].fallback` carries the fallback tokens, and `getDaily` returns `rounds` unchanged. The daily client never gets the seed.
 3. Extra error codes (listed above) and a `rate_limits` collection.
 4. `submitRun` takes an optional `contentVersion` (free mode) so a client on the previous content version validates against it (edge 16); daily and challenge runs use the version pinned on the seed/challenge.
 5. A daily start must exist (`startRun`) before a ranked `submitRun`; there is no auto-start.

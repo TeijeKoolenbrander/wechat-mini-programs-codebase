@@ -13,6 +13,7 @@ exports.main = store.handler(async (event, { openid }) => {
   let best = run.best;
   if (!best) {
     const r = core.bestLineup(run.seed, run.contentVersion, run.finalTokens);
+    if (!r) return { ok: true, best: null }; // five distinct generals cannot be drafted from these tokens
     best = { lineup: core.normaliseLineup(r.lineup) || r.lineup, record: r.record };
     await store.db().collection('runs').doc(run._id).update({ data: { best } });
   }
