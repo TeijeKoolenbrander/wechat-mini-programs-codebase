@@ -1,0 +1,11 @@
+{
+  "name": "bibiyi-game",
+  "version": "0.1.0",
+  "private": true,
+  "description": "比一比 (bibiyi) WeChat mini game: game core and client logic. See docs/bibiyi/spec.md.",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "build-content": "node tools/build-content.js",
+    "deckstats": "node tools/deckstats.js"
+  }
+}

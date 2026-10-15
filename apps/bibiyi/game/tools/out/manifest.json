@@ -1,0 +1,81 @@
+{
+  "contentVersion": 1,
+  "placeholder": true,
+  "generatedFrom": "bibiyi/game/tools/fixtures/content-src",
+  "total": 1040,
+  "free": 520,
+  "daily": 520,
+  "perMeasure": {
+    "city_pop": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "prov_pop": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "mountain": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "river": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "lake": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "year": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "animal_weight": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "animal_life": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "space_diameter": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "structure_len": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "structure_height": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "food_kcal": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    },
+    "distance": {
+      "total": 80,
+      "free": 40,
+      "daily": 40
+    }
+  },
+  "licences": {
+    "CC0": 1040
+  },
+  "publishers": {
+    "样例出版方": 1040
+  }
+}
