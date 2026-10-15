@@ -77,8 +77,10 @@ function createHarness({ now = NOON } = {}) {
       current = { db, openid, sent: h.sent, sendFails: current.sendFails };
       return mod.main(event);
     },
+    /** point the mocked SDK at this harness (for tests that call common/ modules directly) */
+    bind(openid) { current = { db, openid, sent: h.sent, sendFails: current.sendFails }; return h; },
     /** load n synthetic daily facts per measure into daily_facts (content version 1) */
-    loadDailyFacts(perMeasure = 20) {
+    loadDailyFacts(perMeasure = 36) {
       const facts = fakeContent.synth('daily', perMeasure, 'D');
       for (const f of facts) db.put('daily_facts', { ...f, _id: `v1_${f.id}`, contentVersion: 1 });
       return facts;

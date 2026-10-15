@@ -50,7 +50,7 @@ exports.main = store.handler(async (event, { openid }) => {
   const nowMs = now();
 
   const run0 = await runs.findRun(openid, clientRunId, nowMs);
-  if (!run0) fail('RUN_NOT_FOUND', 'no such run');
+  if (!run0) fail('NOT_STARTED', 'no such run: call startRun first');
   const deck = await daily.getDeck(run0.dateKey);
   if (!deck) fail('DECK_NOT_FOUND', 'deck missing');
 

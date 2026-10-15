@@ -64,18 +64,23 @@ function buildDeck(opts) {
   const recent = [];
   const segCount = {};
   let lastMeasure = null;
+  let failures = 0;
   while (questions.length < opts.length) {
     const k0 = questions.length + 1;
     const cats = opts.categories && k0 <= 20 ? opts.categories : null;
-    let cand = usable(cats).filter((m) => m !== lastMeasure && (segCount[m] || 0) < opts.maxSegmentsPerMeasure);
+    // themed phase (questions 1-20): the theme's measures may repeat; the per-measure segment cap applies to the mixed phase
+    const capOk = (m) => !!cats || (segCount[m] || 0) < opts.maxSegmentsPerMeasure;
+    let cand = usable(cats).filter((m) => m !== lastMeasure && capOk(m));
+    if (!cand.length && cats) cand = usable(cats).filter(capOk);
     if (!cand.length) cand = usable(null).filter((m) => m !== lastMeasure && (segCount[m] || 0) < opts.maxSegmentsPerMeasure);
+    if (!cand.length) cand = usable(null).filter((m) => (segCount[m] || 0) < opts.maxSegmentsPerMeasure);
     if (!cand.length) return null;
     const mkey = pick(cand);
     const measure = measures[mkey];
     const segLen = Math.min(opts.segMin + Math.floor(rand() * (opts.segMax - opts.segMin + 1)), opts.length - questions.length);
     const free = (f) => !used.has(f.id) && !recent.includes(f.id);
     let top = pick(byMeasure[mkey].filter(free));
-    if (!top) return null;
+    if (!top) { if (++failures > 30) return null; continue; }
     let made = 0;
     for (let i = 0; i < segLen; i++) {
       const k = questions.length + 1;
@@ -96,7 +101,7 @@ function buildDeck(opts) {
       top = bottom;
       made++;
     }
-    if (made === 0) return null;
+    if (made === 0) { if (++failures > 30) return null; continue; }
     segCount[mkey] = (segCount[mkey] || 0) + 1;
     lastMeasure = mkey;
   }

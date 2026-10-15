@@ -1,3 +1,6 @@
 # synced copies of the game core (source: apps/bibiyi/game/core, or tests/fake-core until it lands). Run: npm run sync
 */core/
 node_modules/
+# the daily-facts export is a server-only answer key: never commit it or its import file
+*.import.jsonl
+daily-facts*

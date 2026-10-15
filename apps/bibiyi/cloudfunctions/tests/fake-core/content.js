@@ -30,7 +30,7 @@ function synth(pool, perMeasure, tag) {
       const jitter = 1 + ((i * 7919) % 13) / 100; // 1.00..1.12, deterministic
       const value = m.kind === 'year' ? -1500 + i * 190 + (i % 3) * 11 : Math.round(100 * Math.pow(1.42, i) * jitter) * (m.scale === 1e-4 ? 1000 : 1);
       out.push({
-        id, measure: m.key, pool, label: `${tag}${m.key.slice(0, 4)}${i}`, sub: null, value, approx: false, uncertainty: 0,
+        id, measure: m.key, pool, label: `${tag}${m.key}${i}`, sub: null, value, approx: false, uncertainty: 0,
         year: 2020, source: '测试来源', publisher: '测试机构', url: 'https://example.cn/x', licence: 'CN-GOV-OTHER',
         retrievedAt: '2026-10-20', verifiedBy: ['author:product-ux', 'verifier:qa'], note: null, tags: [], status: 'active', since: 1,
       });
@@ -38,7 +38,7 @@ function synth(pool, perMeasure, tag) {
   }
   return out;
 }
-const FREE = synth('free', 14, 'F');
+const FREE = synth('free', 30, 'F');
 const BY_ID = Object.fromEntries(FREE.map((f) => [f.id, f]));
 
 function getContent(v) {

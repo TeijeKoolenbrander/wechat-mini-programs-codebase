@@ -74,10 +74,10 @@ async function answeredPairs(deck, run) {
 }
 
 // ---------------------------------------------------------------- run lookup
-/** the caller's run by clientRunId: friendly id, else ranked today/yesterday. Verifies ownership. */
+/** the caller's run by clientRunId: ranked today, else friendly, else ranked yesterday. Verifies ownership. */
 async function findRun(openid, clientRunId, nowMs) {
   const today = core.dateKeyAt(nowMs);
-  const ids = [friendlyId(openid, clientRunId), rankedId(today, openid), rankedId(addDaysKey(today, -1), openid)];
+  const ids = [rankedId(today, openid), friendlyId(openid, clientRunId), rankedId(addDaysKey(today, -1), openid)]; // ranked-today first: the hot path
   for (const id of ids) {
     const run = await store.getDoc('run_progress', id);
     if (run && run.openid === openid && run.clientRunId === clientRunId) return run;
