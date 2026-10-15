@@ -7,7 +7,6 @@
 
 const V = require('../vm');
 const Sh = require('../share');
-const S_ = require('../../core/score');
 const { clamp } = require('../util');
 
 module.exports = function createRound(c) {
@@ -384,6 +383,5 @@ module.exports = function createRound(c) {
     );
   };
 
-  void S_;
   return f;
 };

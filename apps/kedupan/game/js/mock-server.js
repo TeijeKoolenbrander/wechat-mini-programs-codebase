@@ -12,7 +12,7 @@
  *   srv.db, srv.offline, srv.fail       -> test hooks (srv.fail[name] = { code, times })
  */
 
-const { hash32, sub, mulberry32 } = require('../core/rng');
+const { hash32, sub } = require('../core/rng');
 const S = require('../core/score');
 const { getContent } = require('../core/content');
 const { getConfig, LATEST_CONFIG_VERSION, normalizeFeatures } = require('../core/config');
@@ -786,7 +786,6 @@ function createMockServer(opts) {
   srv.todayKey = todayKey;
   srv.rowHash = rowHash;
   srv.ME = ME;
-  void mulberry32;
   return srv;
 }
 

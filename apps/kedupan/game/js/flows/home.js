@@ -3,6 +3,7 @@
  */
 
 const V = require('../vm');
+const S_ = require('../../core/score');
 const { normalizeFeatures } = require('../../core/config');
 
 module.exports = function createHome(c) {
@@ -174,7 +175,7 @@ module.exports = function createHome(c) {
       settings: h.sheet === 'settings' ? V.settingsVm(S, privacy.status()) : null,
       t,
     };
-    if (today && d && d.complete && d.refs.every((x) => x !== null)) model.total = require('../../core/score').dayTotal(d.pos, d.refs);
+    if (today && d && d.complete && d.refs.every((x) => x !== null)) model.total = S_.dayTotal(d.pos, d.refs);
     return V.homeVm(model, c.display(), c.featuresVm());
   };
 

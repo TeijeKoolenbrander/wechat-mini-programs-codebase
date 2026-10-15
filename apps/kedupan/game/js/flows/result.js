@@ -4,6 +4,7 @@
  */
 
 const S_ = require('../../core/score');
+const { dateKeyToMs, DAY_MS } = require('../../core/date');
 const V = require('../vm');
 const Sh = require('../share');
 
@@ -12,7 +13,7 @@ module.exports = function createResult(c) {
   const r = { sheet: null, bonusAd: 'idle', distAd: 'idle', group: null, stale: false, bonusGrant: false, open_: false };
   const f = {};
 
-  const closeMs = (dk) => require('../../core/date').dateKeyToMs(dk) + 86400e3 + c.config.daily.graceMs;
+  const closeMs = (dk) => dateKeyToMs(dk) + DAY_MS + c.config.daily.graceMs;
   const bonusLeft = () => {
     if (S.bonus.day !== c.todayKey()) return c.config.extras.bonusPerDay;
     return Math.max(0, c.config.extras.bonusPerDay - S.bonus.used);

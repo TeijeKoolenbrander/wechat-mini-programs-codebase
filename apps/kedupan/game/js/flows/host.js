@@ -10,7 +10,7 @@ const V = require('../vm');
 const Sh = require('../share');
 
 module.exports = function createHost(c) {
-  const { S, api, ads, content, track } = c;
+  const { api, ads, content, track } = c;
   const cfg = c.config.rounds;
   const f = {};
   let h = null;
@@ -174,6 +174,5 @@ module.exports = function createHost(c) {
     if (!h) h = fresh();
     return V.createVm(toModel(), c.display(), c.featuresVm());
   };
-  void S;
   return f;
 };

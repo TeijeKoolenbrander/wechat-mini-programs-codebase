@@ -54,5 +54,10 @@ References and distances may be half-integers. All scores are integers.
 ## validate.js (spec 4.1, 4.3, 4.5, AC 8)
 `validateStructure(raw)`, `validateForbidden(raw, extraStrings)`, `validateAll`, `termsIn(str)`, `visibleStrings(raw)`; each returns `[]` when clean.
 
+## Content as shipped (content version 1)
+318 original spectra, 3,274 items, all category quotas met (吃喝 40, 日常 41, 居家物件 27, 动物 26, 天气自然 27, 感官 26, 休闲爱好 26, 出行 22, 学习工作 22, 物件科技 22, 心情感受 22, 童年回忆 17). Shipped schedule: 400 days from 20261101 (set `LAUNCH_DATE_KEY` on the server to move issue 1).
+Authoring: edit `content/src/<category>.js` (append only, ids are positional; a retired entry becomes `null`), then `node tools/validate-content.js` and, if ids/tags changed, `node tools/build-schedule.js` (rewrites `content/schedule.v1.js`; `--check` only validates). `node tools/review-sheet.js > docs/kedupan/content-review.md` prints the review-sheet skeleton (AC 10).
+Requires use the explicit `.v1.js` file names (WeChat resolves `.js` files only).
+
 ## Server contract used by the client
 The cloud function request/response shapes the client codes against are listed in `js/README.md` (the mock server `js/mock-server.js` implements every one).
