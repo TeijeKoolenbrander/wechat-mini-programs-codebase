@@ -2,12 +2,14 @@
 
 This studio's engineering work is done by a team of Claude agents. The founder works with one agent, the **CTO**, which plans the work, hands it to specialist subagents, and checks their results.
 
+The team operates under [`docs/constitution.md`](constitution.md), which overrides any conflicting instruction here or in the agent definitions.
+
 Agent definitions live in `.claude/agents/<name>.md`. To change a role, edit its file. To add a role, add a new file and list it in the CTO's team table in `cto.md`.
 
 ## Org chart
 
 ```
-Founder (goals, approvals, credentials)
+Founder (what to build, credentials, uploads/releases, filings)
  └─ cto: orchestrator, plans, delegates, reviews
      ├─ Research
      │   ├─ market-researcher   (several run in parallel)
@@ -47,7 +49,8 @@ The founder's single point of contact.
 - Writes a full brief for each subagent and runs independent work in parallel.
 - Reviews every change for correctness, security, and fit before reporting it done.
 - Has no Edit/Write tools, so it has to delegate. It raises compliance blockers (版号, 软著, 备案, privacy) at the idea stage.
-- **Asks the founder before:** choosing what to build, signing off a spec, any upload, anything that needs credentials or money, scope changes, or anything irreversible.
+- Once an idea is approved, delivers the complete, release-ready app without interim approvals, logging its decisions in `docs/<app>/decisions.md`.
+- **Leaves to the founder** (constitution Article 4): choosing what to build, credentials, any upload or release, money, legal filings, merges into `main`, and irreversible actions. These are collected in one Founder Handoff (`docs/<app>/release/HANDOFF.md`).
 
 ### market-researcher: Market research
 Researches a single angle of the WeChat mini program / mini game market.
@@ -115,12 +118,12 @@ Gets builds onto the platform safely.
 `market-researcher` ×2–4 (parallel) → `opportunity-analyst` → CTO presents the top 3–5 → founder picks one.
 
 **Build**
-`product-ux` spec → founder approves → `backend` + `frontend-ui` + `miniprogram-dev`/`minigame-dev` (parallel, without overlapping files) → `qa` → CTO review → `release` rules check → founder approves the upload → `release` uploads → founder submits for review.
+`product-ux` spec (CTO signs off) → `backend` + `frontend-ui` + `miniprogram-dev`/`minigame-dev` (parallel, without overlapping files) → `qa` → CTO review → `release` pack and Founder Handoff in `docs/<app>/release/` → founder approves the upload → `release` uploads → founder submits for review.
 
 ## Founder responsibilities
-- Decide what to build, and approve specs and uploads.
+- Decide what to build, and approve uploads. Work through the Founder Handoff at the end of each build.
 - Provide the AppIDs and the upload private key (stored outside the repo, with its path in the `MP_UPLOAD_KEY_PATH` environment variable).
-- Handle filings and licences: 备案, 软著, and 版号 where needed.
+- Handle filings and licences: 认证, 备案, 软著, and 版号 where needed; merge into `main`.
 - Submit for review and publish in the WeChat admin console.
 
 ## Running the team
