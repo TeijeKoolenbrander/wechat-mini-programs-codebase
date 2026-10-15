@@ -35,24 +35,24 @@ N1 alone is worth one try only if the founder wants the bare brand; expect a cla
 
 ---
 
-## 2. Introduction (介绍), 20-120 characters
+## 2. Introduction (介绍), ≤ 60 characters
 
-Must describe the gameplay plainly; review rejects vague marketing.
+Must describe the gameplay plainly; review rejects vague marketing. Founder limit: ≤ 60 characters including punctuation, aim ≥ 30. Counts below are every character (with punctuation) and CJK characters only (without).
 
-**I1 (recommended), 103 字 (88 without punctuation)**
-> 三国题材选将策略小游戏。每天一道军令，所有人令牌相同：翻令五轮，每轮按翻出的势力与时代点一员武将，排入主公、军师、先锋、猛将、守将五个位置，出征十二战，按战绩评定。另有自由模式、群排行、好友排行和同局挑战。
+**I1 (recommended), 56 字 (47 without punctuation)**
+> 三国选将策略游戏。每日军令人人相同：翻令定势力与时代，点五将任主公、军师、先锋、猛将、守将，出征十二战评定战绩。
 
-Why: names the genre in the first sentence, then states the full loop (5 rounds, faction and era, 5 roles, 12 battles, graded) and every mode. A reviewer can tell exactly what the game is.
+Why: genre first, then the full loop in order (daily shared 军令, faction/era, 5 roles, 12 battles, graded), with 4 characters of headroom.
 
-**I2, 82 字 (69 without punctuation)**
-> 每日军令，同题对决。翻五次势力与时代，点五员三国武将，分任主公、军师、先锋、猛将、守将，出征十二战定成败。可自由练习，可看群排行与好友排行，也可向好友发起同局挑战。
+**I2, 46 字 (40 without punctuation)**
+> 三国选将游戏：每日同一道军令，翻令点五员武将，排兵出征十二战评定战绩；另有群排行与好友挑战。
 
-Why: shorter and punchier, same facts. Use if the form displays truncated text.
+Why: drops the role names to fit the social features (group ranking, friend challenge); use if the founder wants those in the listing.
 
-**I3, 99 字 (83 without punctuation)**
-> 一座点将台，五员三国大将。每天一道军令，人人令牌相同：翻令得势力与时代，点将排入主公、军师、先锋、猛将、守将，出征十二战。十二战全胜方为一统天下，并不容易。另有自由模式、群排行、好友排行与同局挑战。
+**I3, 54 字 (44 without punctuation)**
+> 一道军令，人人相同。翻令得势力与时代，点五员三国武将任主公、军师、先锋、猛将、守将，出征十二战，按战绩评定。
 
-Why: most literary and carries the "12-0 is hard" tension (D15) in neutral words. Slightly riskier with a strict reviewer because the opening sentence is mood, not mechanics.
+Why: leads with the fair daily hook in a more literary voice; all facts still mechanical, but 三国 comes later than in I1.
 
 ---
 
