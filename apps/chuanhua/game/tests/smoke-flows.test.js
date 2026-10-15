@@ -65,13 +65,13 @@ test('lock collision: the second claimant gets "被群友抢先一步" and the t
   assert.equal(y.vm.state, 'taken');
   assert.equal(y.vm.headline, '有群友正在接第 2 棒（约 2 分钟内）');
   assert.equal(y.overlay.toast.text, '被群友抢先一步');
-  assert.deepEqual(['entry:others', 'entry:new'].map((id) => Y.ids().includes(id)), [true, true]);
+  assert.deepEqual(['entry:group', 'entry:new'].map((id) => Y.ids().includes(id)), [true, true]);
   assert.ok(!Y.ids().includes('entry:claim'));
   // X gives the 棒 back: Y can take it after a refresh
   X.tapId('back');
   X.tapId('dialog:confirm');
   await X.settle();
-  Y.tapId('entry:others');
+  Y.tapId('entry:group');
   await Y.settle();
   assert.equal(Y.screen(), 'group');
   assert.equal(Y.view().vm.waiting.length, 1);
@@ -219,7 +219,7 @@ test('moderation block of a drawing: sent screen flips to blocked, my 接龙 sho
   g.tapId('picker:start');
   await g.settle();
   g.strokes(13); // the mock rule: exactly 13 strokes -> risky
-  g.tapId('draw:done');
+  g.tapId('draw:submit');
   await g.settle();
   assert.equal(g.view().vm.modState, 'pending');
   g.wait(61e3);
@@ -232,11 +232,10 @@ test('moderation block of a drawing: sent screen flips to blocked, my 接龙 sho
   assert.ok(!g.ids().includes('sent:share'));
   g.tapId('back');
   await g.settle();
-  assert.equal(g.view().overlay.sheet.kind, 'warn');
-  assert.ok(g.view().overlay.sheet.vm.text.includes('请遵守接龙公约'));
-  g.tapId('sheet:ack');
+  assert.equal(g.view().vm.sheet, 'strike');
+  g.tapId('strike:ok');
   await g.settle();
-  assert.equal(g.view().overlay.sheet, undefined);
+  assert.equal(g.view().vm.sheet, null);
   g.tapId('home:album');
   await g.settle();
   const a = g.view();
@@ -259,7 +258,7 @@ test('a pending drawing that never gets a verdict is voided; the album detail sh
   g.tapId('picker:start');
   await g.settle();
   g.strokes(15);
-  g.tapId('draw:done');
+  g.tapId('draw:submit');
   await g.settle();
   g.wait(72 * 60e3);
   g.srv.sweep();
@@ -280,17 +279,17 @@ test('report from the claim screen hides the previous 棒, cancels my claim and 
   assert.equal(X.screen(), 'describe');
   assert.equal(X.view().vm.canReport, true);
   X.tapId('describe:report');
-  const sheet = X.view().overlay.sheet;
+  const sheet = { kind: X.view().vm.sheet, vm: X.view().vm.report };
   assert.equal(sheet.kind, 'report');
   assert.deepEqual(sheet.vm.reasons, ['porn', 'politics', 'abuse', 'ad', 'other']);
   assert.equal(sheet.vm.reasonLabels.porn, '色情低俗');
-  X.tapId('report:submit'); // no reason yet: nothing happens
-  assert.equal(X.view().overlay.sheet.vm.state, 'idle');
+  assert.ok(!X.ids().includes('report:submit')); // no reason yet: the button is drawn disabled, no hit
+  assert.equal(X.view().vm.report.state, 'idle');
   X.tapId('report:reason:ad');
   X.tapId('report:submit');
   await X.settle();
   const v = X.view();
-  assert.equal(v.overlay.sheet, undefined);
+  assert.equal(v.vm.sheet, null);
   assert.equal(v.overlay.toast.text, '已举报，该内容已隐藏，我们会尽快核实');
   assert.equal(v.screen, 'entry');
   assert.equal(v.vm.nextStep, 1);
@@ -330,7 +329,7 @@ test('teaser for a non-participant: text only, 同题再传 preselects the promp
   assert.equal(tv.vm.passed, 6);
   assert.equal(tv.vm.canSameAgain, true);
   assert.ok(!JSON.stringify(tv).includes('strokes'));
-  Z.tapId('teaser:same');
+  Z.tapId('teaser:sameAgain');
   await Z.settle();
   const pk = Z.view();
   assert.equal(pk.screen, 'picker');
@@ -435,7 +434,7 @@ test('offline: home shows 需联网才能接龙 with a disabled start and 重试
   await c.settle();
   c.strokes(2);
   w.srv.offline = true;
-  c.tapId('draw:done');
+  c.tapId('draw:submit');
   await c.settle();
   v = c.view();
   assert.equal(v.screen, 'draw');
@@ -464,7 +463,7 @@ test('picker: 换一批 shows 3 non-daily prompts; 自己出题 is moderated bef
   const daily = c.view().vm.prompts.map((p) => p.id);
   assert.equal(daily.length, 3);
   assert.ok(c.view().vm.prompts.every((p) => p.isDaily));
-  c.tapId('picker:batch');
+  c.tapId('picker:shuffle');
   const batch = c.view().vm.prompts;
   assert.equal(batch.length, 3);
   assert.ok(batch.every((p) => !daily.includes(p.id)));
@@ -474,21 +473,21 @@ test('picker: 换一批 shows 3 non-daily prompts; 自己出题 is moderated bef
   c.type('一');
   assert.equal(c.view().vm.canStart, false);
   c.type('加我微信哦');
-  c.tapId('picker:start');
+  c.tapId('picker:customOk');
   await c.settle();
   assert.equal(c.view().vm.custom.error, '换个说法吧');
   c.type('测试违规');
-  c.tapId('picker:start');
+  c.tapId('picker:customOk');
   await c.settle();
   assert.equal(c.view().vm.custom.error, '这个题目不太合适，换一个吧');
   c.type('测试繁忙');
-  c.tapId('picker:start');
+  c.tapId('picker:customOk');
   await c.settle();
   assert.equal(c.view().vm.errorText, '审核服务繁忙，请稍后再试，或先选一个现成的题目');
   assert.equal(Object.keys(w.srv.db.chains).length, 0, 'AC 40: a blocked custom prompt creates no chain');
   c.type('我家的小猫');
   assert.equal(c.view().vm.custom.count, '5/12');
-  c.tapId('picker:start');
+  c.tapId('picker:customOk');
   await c.settle();
   assert.equal(c.screen(), 'draw');
   assert.equal(c.view().vm.sourceLabel, '题目：「我家的小猫」');

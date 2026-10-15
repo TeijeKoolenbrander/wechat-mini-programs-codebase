@@ -21,7 +21,7 @@ async function startChain(g, promptIdx) {
   g.tapId('rules:agree');
   await g.settle();
   assert.equal(g.view().screen, 'picker');
-  if (promptIdx) g.tapId('picker:prompt:' + g.view().vm.prompts[promptIdx].id);
+  if (promptIdx) g.tapId('picker:select:' + g.view().vm.prompts[promptIdx].id);
   g.tapId('picker:start');
   await g.settle();
   assert.equal(g.view().screen, 'draw');
@@ -39,10 +39,10 @@ test('first launch: how-to sheet once, home shows today prompts and the start bu
   const g = await toFirstDraw(t);
   const v = g.view();
   assert.equal(v.screen, 'home');
-  assert.equal(v.overlay.sheet.kind, 'howto');
-  assert.ok(g.frame().includes('1. 开一条接龙'));
+  assert.equal(v.vm.sheet, 'howto');
+  assert.ok(g.frame().includes('开一条接龙：'));
   g.tapId('sheet:close');
-  assert.equal(g.view().overlay.sheet, undefined);
+  assert.equal(g.view().vm.sheet, null);
   assert.equal(g.view().vm.state, 'ready');
   assert.equal(g.view().vm.daily.prompts.length, 3);
   assert.equal(g.view().vm.start.sublabel, '今天还能开 3 条');
@@ -50,7 +50,7 @@ test('first launch: how-to sheet once, home shows today prompts and the start bu
   // the how-to never returns
   const g2 = boot(t, { storage: g.storage });
   await g2.settle();
-  assert.equal(g2.view().overlay.sheet, undefined);
+  assert.equal(g2.view().vm.sheet, null);
 });
 
 test('start a chain: rules sheet, picker, one-thumb drawing, submit, 已传出 pending, then passed by polling', async (t) => {
@@ -59,10 +59,10 @@ test('start a chain: rules sheet, picker, one-thumb drawing, submit, 已传出 p
   g.tapId('home:start');
   await g.settle();
   // AC 76: the sheet has no pre-ticked box, 先看看 leaves the game browsable
-  assert.equal(g.view().overlay.sheet.kind, 'rules');
+  assert.equal(g.view().vm.sheet, 'rules');
   g.tapId('rules:later');
   assert.equal(g.view().screen, 'home');
-  assert.equal(g.view().overlay.sheet, undefined);
+  assert.equal(g.view().vm.sheet, null);
   g.tapId('home:start');
   g.tapId('rules:agree');
   await g.settle();
@@ -95,7 +95,7 @@ test('start a chain: rules sheet, picker, one-thumb drawing, submit, 已传出 p
   assert.ok(g.view().overlay.dialog);
   g.tapId('dialog:cancel');
   assert.equal(g.view().vm.strokes.s.length, 2);
-  g.tapId('draw:done');
+  g.tapId('draw:submit');
   assert.equal(g.view().vm.status, 'submitting');
   await g.settle();
   const s = g.view();
@@ -148,8 +148,12 @@ test('AC 14: timer 60 s; time up with a stroke auto-submits; with an empty canva
   g.wait(61e3);
   g.view();
   await g.settle();
+  assert.equal(g.view().screen, 'draw');
+  assert.equal(g.view().vm.status, 'timeUp'); // the 时间到 modal; the claim is already released
+  assert.ok(g.has('draw:timeUpOk') && g.has('draw:lock'));
+  g.tapId('draw:timeUpOk');
+  await g.settle();
   assert.equal(g.view().screen, 'home');
-  assert.ok(g.view().overlay.toast.text.includes('时间到，这一棒交给别人吧'));
   // nothing was consumed and the chain was abandoned
   const h = await g.app.api.getHome({});
   assert.equal(h.me.startsLeft, 2);
@@ -179,7 +183,7 @@ test('2-player chain to completion through the cards: invite share, group entry,
   assert.equal(g.view().screen, 'home');
   await startChain(g);
   g.strokes(3);
-  g.tapId('draw:done');
+  g.tapId('draw:submit');
   await g.settle();
   const chainId = Object.keys(g.srv.db.chains)[0];
   // the chain is unbound (no group context yet): share the invite card, voluntary
@@ -217,7 +221,7 @@ test('2-player chain to completion through the cards: invite share, group entry,
   assert.equal(d.vm.sourceLabel, '上一棒说：「一个大饼在天上」');
   assert.equal(d.vm.canReport, true);
   g.strokes(2);
-  g.tapId('draw:done');
+  g.tapId('draw:submit');
   await g.settle();
   assert.equal(g.view().screen, 'sent');
   g.wait(61e3);
@@ -234,7 +238,7 @@ test('2-player chain to completion through the cards: invite share, group entry,
   await g.settle();
   assert.equal(g.view().vm.step, 5);
   g.strokes(4);
-  g.tapId('draw:done');
+  g.tapId('draw:submit');
   await g.settle();
   g.wait(61e3);
   g.srv.sweep();
@@ -274,7 +278,7 @@ test('2-player chain to completion through the cards: invite share, group entry,
   assert.equal(rs.query, 'r=' + chainId);
   assert.equal(rs.title, '「' + Object.values(g.srv.db.chains)[0].promptText + '」传了 6 棒，变成了「外星人在吃披萨」');
   // replay restarts the sequence; any tap while playing skips
-  g.tapId('reveal:replay');
+  g.tapId('reveal:replayAll');
   assert.equal(g.view().vm.autoplay.playing, true);
   g.tapId('reveal:skip');
   assert.equal(g.view().vm.autoplay.playing, false);

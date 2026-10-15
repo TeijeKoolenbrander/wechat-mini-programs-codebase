@@ -84,9 +84,10 @@ test('a missing prompt bank is a server configuration error, not a crash', async
 
 const CORE = sync.DEFAULT_CORE;
 const haveCore = fs.existsSync(path.join(CORE, 'strokes.js')) && fs.existsSync(path.join(CORE, 'raster.js'));
+test('the real core is present (parity tests are never skipped)', () => assert.ok(haveCore));
 const real = (m) => require(path.join(CORE, m));
 
-test('REAL CORE: content shapes load through coreapi; every prompt passes the server text rules', { skip: !haveCore }, () => {
+test('REAL CORE: content shapes load through coreapi; every prompt passes the server text rules', () => {
   const api = h.mod('common/coreapi.js');
   api.resetForTests({ prompts: real('content/prompts.v1'), blocklist: real('content/blocklist.v1'), daily: real('daily'), text: real('text') });
   assert.ok(api.prompts().length >= 400);
@@ -104,7 +105,7 @@ test('REAL CORE: content shapes load through coreapi; every prompt passes the se
   api.resetForTests();
 });
 
-test('REAL CORE: server stroke validation agrees with core strokes.validate on random drawings', { skip: !haveCore }, () => {
+test('REAL CORE: server stroke validation agrees with core strokes.validate on random drawings', () => {
   const core = real('strokes');
   const { validateStrokes } = h.mod('common/strokes.js');
   let seed = 5;
@@ -130,7 +131,7 @@ test('REAL CORE: server stroke validation agrees with core strokes.validate on r
   assert.ok(valid > 50 && invalid > 50, `mix ${valid}/${invalid}`);
 });
 
-test('REAL CORE: server rasteriser and the core rasteriser agree (>= 95% identical pixels; the core renderer is the primary, AC 27); core PNG decodes', { skip: !haveCore }, () => {
+test('REAL CORE: server rasteriser and the core rasteriser agree (>= 95% identical pixels; the core renderer is the primary, AC 27); core PNG decodes', () => {
   const png = h.mod('common/png.js');
   const raster = h.mod('common/raster.js');
   const api = h.mod('common/coreapi.js');
@@ -162,7 +163,7 @@ test('REAL CORE: server rasteriser and the core rasteriser agree (>= 95% identic
   api.resetForTests();
 });
 
-test('REAL CORE: the server constants match core CONFIG', { skip: !haveCore }, () => {
+test('REAL CORE: the server constants match core CONFIG', () => {
   const { CONFIG } = real('config');
   const { LIMITS } = h.mod('common/config.js');
   const { LIMITS: S } = h.mod('common/strokes.js');

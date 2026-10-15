@@ -60,7 +60,7 @@ test('rewarded 再开一条: after 3 free starts, early close grants nothing, fu
   g.tapId('picker:start');
   await g.settle();
   g.strokes(2);
-  g.tapId('draw:done');
+  g.tapId('draw:submit');
   await g.settle();
   g.tapId('back');
   await g.settle();
@@ -96,7 +96,7 @@ test('no fill: the reward is granted once per day per placement, then blocked, t
   g.tapId('picker:start');
   await g.settle();
   g.strokes(2);
-  g.tapId('draw:done');
+  g.tapId('draw:submit');
   await g.settle();
   g.tapId('back');
   await g.settle();
@@ -128,7 +128,6 @@ test('今日彩笔: offered before the first stroke only, unlocks 6 colours unti
   // AC 22: locked swatches are not selectable
   assert.ok(!g.ids().includes('draw:color:7'));
   g.tapId('draw:paletteAd');
-  assert.equal(g.view().overlay.adStub.placement === undefined || true, true);
   g.wait(3100);
   g.tapId('adstub:complete');
   await g.settle();
@@ -139,7 +138,7 @@ test('今日彩笔: offered before the first stroke only, unlocks 6 colours unti
   g.stroke(0.1, 0.1, 0.5, 0.5);
   assert.equal(g.view().vm.strokes.s[0][0], 7);
   assert.equal(g.view().vm.colorIdx, 7);
-  g.tapId('draw:done');
+  g.tapId('draw:submit');
   await g.settle();
   // the next Beijing day: locked again, and the ad is offered again
   g.wait(24 * 3600e3);
@@ -333,10 +332,10 @@ test('analytics: only known events, no user text, strokes, openids or group ids 
   await g.settle();
   g.tapId('picker:custom');
   g.type('我家的小猫');
-  g.tapId('picker:start');
+  g.tapId('picker:customOk');
   await g.settle();
   g.strokes(3);
-  g.tapId('draw:done');
+  g.tapId('draw:submit');
   await g.settle();
   const q = g.app.analytics.queue;
   assert.ok(q.length > 5);

@@ -162,10 +162,25 @@ function boot(t, opts) {
     },
     /** Redraw, find a hit by id (or predicate), tap its centre. Returns the id tapped. */
     tapId(idOrFn) {
-      const hit = g.hit(idOrFn);
+      let hit = g.hit(idOrFn);
+      // a hit scrolled out of view is not emitted by the renderers: drag the scroll area like a finger would
+      for (let i = 0; !hit && i < 80 && g.scrollStep(); i++) hit = g.hit(idOrFn);
       if (!hit) throw new Error('no hit ' + idOrFn + ' among ' + app.hits.map((h) => h.id).join(','));
       g.tap(hit.x + hit.w / 2, hit.y + hit.h / 2);
       return hit.id;
+    },
+    /** Drag the main scroll area (or the open sheet's) one step down; false when already at the end. */
+    scrollStep() {
+      const max = app.hits.scrollMax || {};
+      const sid = max['sheet:scroll'] !== undefined ? 'sheet:scroll' : Object.keys(max).filter((k) => k !== 'sheet:scroll')[0];
+      if (!sid) return false;
+      const cur = app.ctl.state.ui.scroll[sid] || 0;
+      if (cur >= max[sid]) return false;
+      app.ctl.onDrag(sid, -120);
+      return true;
+    },
+    scrollTop() {
+      app.ctl.state.ui.scroll = {};
     },
     ids() {
       g.frame();
@@ -234,7 +249,7 @@ function makeClient(t, srv, openid, opts) {
   const { createKeyboard } = require('../js/keyboard');
   const { createAudio } = require('../js/audio');
   const { createController } = require('../js/controller');
-  const { stubLayout, draw, drawOverlay } = require('../js/stub-render');
+  const R = require('../js/renderers').loadRenderers();
   const { CONFIG } = require('../core/config');
   const log = newLog();
   const handlers = {};
@@ -250,7 +265,7 @@ function makeClient(t, srv, openid, opts) {
   const privacy = createPrivacy({ wx, store, analytics });
   const keyboard = createKeyboard(wx);
   const audio = createAudio(wx, false);
-  const layout = stubLayout({ ...SCREEN, safeArea: { bottom: 778 }, menuRect: CAPSULE });
+  const layout = R.makeLayout({ ...SCREEN, safeArea: { bottom: 778 }, menuRect: CAPSULE });
   const ctl = createController({ wx, api, store, analytics, ads, share, privacy, keyboard, audio, config: CONFIG, invalidate() {}, getLayout: () => layout });
   const c = {
     openid,
@@ -269,9 +284,12 @@ function makeClient(t, srv, openid, opts) {
       const view = ctl.view(Date.now());
       const ctx = fakeContext(log);
       log.text = [];
-      const hits = draw(view.screen, ctx, view.vm, layout).concat(drawOverlay(ctx, view.overlay, layout));
+      const screenHits = R.draw(view.screen, ctx, view.vm, layout);
+      const hits = screenHits.concat(R.drawOverlay(ctx, view.overlay, layout));
+      hits.scrollMax = screenHits.scrollMax || {};
       c.hits = hits;
       ctl.setHits(hits);
+      ctl.setScrollMax(hits.scrollMax);
       return view;
     },
     ids() {
@@ -280,7 +298,14 @@ function makeClient(t, srv, openid, opts) {
     },
     tapId(id) {
       c.frame();
-      const h = c.hits.slice().reverse().find((x) => x.id === id);
+      let h = c.hits.slice().reverse().find((x) => x.id === id);
+      for (let i = 0; !h && i < 80; i++) {
+        const sid = Object.keys(c.hits.scrollMax)[0];
+        if (!sid || (ctl.state.ui.scroll[sid] || 0) >= c.hits.scrollMax[sid]) break;
+        ctl.onDrag(sid, -120);
+        c.frame();
+        h = c.hits.slice().reverse().find((x) => x.id === id);
+      }
       if (!h) throw new Error('no hit ' + id + ' among ' + c.hits.map((x) => x.id).join(','));
       ctl.onHit(h.id);
       return h.id;

@@ -29,7 +29,7 @@ async function homeClient(t, w, id, opts) {
   c.tapId('entry:home');
   await c.settle();
   assert.equal(c.screen(), 'home');
-  if (c.view().overlay.sheet) c.tapId('sheet:close');
+  if (c.view().vm.sheet) c.tapId('sheet:close');
   return c;
 }
 
@@ -41,7 +41,7 @@ async function uiStart(t, c, strokes) {
   await c.settle();
   assert.equal(c.screen(), 'draw');
   c.strokes(strokes || 2);
-  c.tapId('draw:done');
+  c.tapId('draw:submit');
   await c.settle();
   assert.equal(c.screen(), 'sent');
   return Object.keys(c.api.mock.db.chains).filter((id) => c.api.mock.db.chains[id].starter === c.openid).pop();
@@ -87,7 +87,7 @@ test('starter early reveal: entry shows 现在揭晓 with a confirm dialog; the 
   assert.equal(rv.vm.canSameAgain, true);
   // 同题再传 from the reveal: picker preselected, counts as a normal start
   S1.tapId('reveal:skip');
-  S1.tapId('reveal:same');
+  S1.tapId('reveal:sameAgain');
   await S1.settle();
   const pk = S1.view();
   assert.equal(pk.screen, 'picker');
@@ -123,7 +123,7 @@ test('expired chain: starter sees 同题再传 and 看我的那一棒; others do
   assert.equal(S1.view().vm.mine.length, 1);
   assert.equal(S1.view().vm.mine[0].canDelete, true);
   S1.tapId('back');
-  S1.tapId('entry:same');
+  S1.tapId('entry:sameAgain');
   await S1.settle();
   assert.equal(S1.screen(), 'picker');
   // B (participant, not the starter): no same-again, only own 棒
@@ -200,7 +200,7 @@ test('本群接龙: stats, waiting / in progress / recently revealed; without gr
   await S1.settle();
   S1.strokes(2);
   t.mock.timers.tick(300);
-  S1.tapId('draw:done');
+  S1.tapId('draw:submit');
   await S1.settle();
   S1.tapId('sent:group');
   await S1.settle();
@@ -218,7 +218,7 @@ test('本群接龙: stats, waiting / in progress / recently revealed; without gr
   const Bc = makeClient(t, w.srv, 'B');
   await Bc.ctl.start(ENTER(chainId, 'tb'));
   await Bc.settle();
-  Bc.tapId('entry:others');
+  Bc.tapId('entry:group');
   await Bc.settle();
   assert.deepEqual(Bc.view().vm.waiting, []);
   assert.deepEqual(Bc.view().vm.inProgress.map((x) => x.line), ['第 1 棒审核中', '第 3 棒等别人来接']);
@@ -232,7 +232,7 @@ test('本群接龙: stats, waiting / in progress / recently revealed; without gr
   await L.settle();
   assert.equal(L.view().vm.state, 'noGroup');
   assert.equal(L.view().vm.explainer, '在群聊里点开接龙卡片，就能看到本群的接龙');
-  assert.ok(L.ids().includes('group:new'));
+  assert.ok(L.ids().includes('group:start'));
   assert.equal(L.log.calls.filter((c) => c.indexOf('getGroupEnterInfo') === 0).length, 0);
 });
 
@@ -269,7 +269,7 @@ test('subscribe 揭晓时提醒我: only with a template, only after a tap; refu
   await S3.settle();
   S3.strokes(2);
   t.mock.timers.tick(300);
-  S3.tapId('draw:done');
+  S3.tapId('draw:submit');
   await S3.settle();
   assert.equal(S3.view().vm.subscribe.state, 'hidden');
   // no template configured: never offered
@@ -330,8 +330,8 @@ test('settings: sound, large text, high contrast, rules, privacy contract, agree
   g.tapId('home:settings');
   assert.equal(g.view().screen, 'settings');
   assert.equal(g.view().display.largeText, false);
-  g.tapId('settings:large');
-  g.tapId('settings:contrast');
+  g.tapId('settings:largeText');
+  g.tapId('settings:highContrast');
   g.tapId('settings:sound');
   let v = g.view();
   assert.deepEqual([v.display.largeText, v.display.highContrast, v.muted, v.vm.largeText, v.vm.highContrast, v.vm.muted], [true, true, true, true, true, true]);
@@ -342,13 +342,13 @@ test('settings: sound, large text, high contrast, rules, privacy contract, agree
   assert.deepEqual([g2.view().display.largeText, g2.view().display.highContrast, g2.view().muted], [true, true, true]);
   // rules sheet from settings, privacy contract, agreement
   g.tapId('settings:rules');
-  assert.equal(g.view().overlay.sheet.kind, 'rules');
+  assert.equal(g.view().vm.sheet, 'rules');
   g.tapId('rules:privacy');
   assert.ok(g.log.calls.includes('openPrivacyContract'));
   g.tapId('rules:later');
   g.tapId('settings:privacy');
   assert.equal(g.log.calls.filter((c) => c === 'openPrivacyContract').length, 2);
-  g.tapId('settings:agreement');
+  g.tapId('settings:terms');
   assert.equal(g.log.modals.length, 1);
   // palette unlock from settings (stub ad)
   g.tapId('settings:palette');
@@ -358,8 +358,8 @@ test('settings: sound, large text, high contrast, rules, privacy contract, agree
   assert.equal(g.view().vm.paletteUnlockedToday, true);
   assert.ok(!g.ids().includes('settings:palette'));
   // delete everything: two confirmations; cancel resets
-  g.tapId('settings:delete');
-  assert.equal(g.view().vm.deleteAll.state, 'confirm1');
+  g.tapId('settings:deleteAll');
+  assert.ok(g.view().overlay.dialog); // the confirms are overlay dialogs, vm.deleteAll stays idle
   g.tapId('dialog:cancel');
   assert.equal(g.view().vm.deleteAll.state, 'idle');
   g.srv.as('mock-openid-me').call('agreeRules', { version: 1 });
@@ -367,9 +367,9 @@ test('settings: sound, large text, high contrast, rules, privacy contract, agree
   g.srv.as('mock-openid-me').call('submitStep', { chainId: cr.chainId, claimId: cr.claim.claimId, strokes: drawing(2) });
   g.wait(61e3);
   g.srv.sweep();
-  g.tapId('settings:delete');
+  g.tapId('settings:deleteAll');
   g.tapId('dialog:confirm');
-  assert.equal(g.view().vm.deleteAll.state, 'confirm2');
+  assert.ok(g.view().overlay.dialog);
   assert.ok(g.view().overlay.dialog.text.includes('再确认一次'));
   g.tapId('dialog:confirm');
   await g.settle();
@@ -408,10 +408,10 @@ test('rules: the sheet gates start and claim; a server RULES_REQUIRED opens it; 
   X.tapId('entry:claim');
   await X.settle();
   // the client does not know the agreement state of a fresh install: it asks, nothing is claimed
-  assert.equal(X.view().overlay.sheet.kind, 'rules');
-  assert.equal(X.view().overlay.sheet.vm.pendingAction, 'claim');
+  assert.equal(X.view().vm.sheet, 'rules');
+  assert.equal(X.view().vm.rules.pendingAction, 'claim');
   assert.equal(srv.db.chains[cr.chainId].claim, null);
-  assert.equal(X.view().overlay.sheet.vm.lines.length, 4);
+  assert.equal(X.view().vm.rules.lines.length, 4);
   X.tapId('rules:agree');
   await X.settle();
   assert.equal(X.screen(), 'describe'); // continued with the claim

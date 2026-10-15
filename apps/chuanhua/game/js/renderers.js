@@ -1,13 +1,18 @@
 /**
- * Picks the renderer: the real js/render/* from frontend-ui when present, otherwise js/stub-render.js.
- * Both follow js/CONTRACT.md:
- *   { kind, makeLayout(info), draw(screen, ctx, vm, layout) -> hits, drawOverlay(ctx, overlayVm, layout) -> hits,
- *     hitTest(hits,x,y), shareCard }
+ * The renderer adapter: the real js/render/* (frontend-ui). There is no stub fallback any more; a missing
+ * renderer is a build error. A screen that throws on a view model must never take the frame loop down
+ * (a dead rAF loop freezes the game), so the error is recorded in `errors` (the integration test asserts it
+ * stays empty) and the frame draws nothing.
+ *
+ *   { makeLayout(info), draw(screen, ctx, vm, layout) -> hits, drawOverlay(ctx, overlayVm, layout) -> hits,
+ *     hitTest(hits,x,y), shareCard, errors }
  * The real renderer is `js/render/index.js` exporting { screens: { <screen>: { draw(ctx, vm, layout) } },
  * makeLayout, overlay: { draw(ctx, overlayVm, layout) }, hitTest?, shareCard? }.
  */
 
-const stub = require('./stub-render');
+const real = require('./render/index');
+
+const errors = [];
 
 function hitTestLocal(hits, x, y) {
   for (let i = hits.length - 1; i >= 0; i--) {
@@ -17,24 +22,25 @@ function hitTestLocal(hits, x, y) {
   return null;
 }
 
-function loadRenderers() {
-  let real = null;
+function guarded(label, fn) {
   try {
-    real = require('./render/index');
+    return fn();
   } catch (e) {
-    real = null;
+    if (errors.length < 20) errors.push(label + ': ' + (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e));
+    return [];
   }
-  if (real && real.screens && real.makeLayout) {
-    return {
-      kind: 'real',
-      makeLayout: real.makeLayout,
-      draw: (screen, ctx, vm, layout) => real.screens[screen].draw(ctx, vm, layout),
-      drawOverlay: (ctx, ov, layout) => (real.overlay ? real.overlay.draw(ctx, ov, layout) : []),
-      hitTest: real.hitTest || hitTestLocal,
-      shareCard: real.shareCard || null,
-    };
-  }
-  return { kind: 'stub', makeLayout: stub.stubLayout, draw: stub.draw, drawOverlay: stub.drawOverlay, hitTest: hitTestLocal, shareCard: null };
 }
 
-module.exports = { loadRenderers, hitTestLocal };
+function loadRenderers() {
+  return {
+    kind: 'real',
+    makeLayout: real.makeLayout,
+    draw: (screen, ctx, vm, layout) => guarded(screen, () => real.screens[screen].draw(ctx, vm, layout)),
+    drawOverlay: (ctx, ov, layout) => guarded('overlay', () => (real.overlay ? real.overlay.draw(ctx, ov, layout) : [])),
+    hitTest: real.hitTest || hitTestLocal,
+    shareCard: real.shareCard || null,
+    errors,
+  };
+}
+
+module.exports = { loadRenderers, hitTestLocal, errors };

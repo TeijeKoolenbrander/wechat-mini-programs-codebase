@@ -538,6 +538,7 @@ function reportVm(r) {
     reasons: CONFIG.report.reasons,
     reasonLabels: CONFIG.report.reasonLabels, // extra
     selected: r.reason || null, // extra
+    reason: r.reason || null, // extra: the same value under the name the renderer reads
     state: r.state || 'idle',
     message: { done: '已举报，该内容已隐藏，我们会尽快核实', limit: '今天举报次数已达上限', dup: '你已举报过这条内容', error: '没举报成功，请重试', idle: '', submitting: '' }[r.state || 'idle'], // extra
   };

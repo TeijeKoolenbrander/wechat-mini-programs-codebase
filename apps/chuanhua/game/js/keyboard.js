@@ -13,7 +13,12 @@
 
 function createKeyboard(wx) {
   let handlers = null;
-  const kb = { active: false, mode: null };
+  const kb = { active: false, mode: null, height: 0 }; // height: px of the platform keyboard (wx.onKeyboardHeightChange), 0 when closed
+  if (wx && wx.onKeyboardHeightChange) {
+    wx.onKeyboardHeightChange((res) => {
+      kb.height = kb.active && res && res.height > 0 ? res.height : 0;
+    });
+  }
 
   function detach() {
     if (!wx) return;
@@ -98,6 +103,7 @@ function createKeyboard(wx) {
     detach();
     kb.active = false;
     kb.mode = null;
+    kb.height = 0;
   };
 
   return kb;

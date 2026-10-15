@@ -15,7 +15,7 @@
  *   ctl.animating(now)                 true while something needs repainting
  *
  * Screens: home picker draw describe sent entry reveal teaser group album detail settings.
- * Overlay: dialog, toast, adStub, sheet {kind: rules|howto|report|warn}.
+ * Overlay: dialog, toast, adStub. Sheets (rules|strike|howto|report) travel in the screen vm as vm.sheet.
  * Game rules live in core/chain.js and the server; the client only presents state and never decides money,
  * eligibility or moderation (the server answers every claim and submit).
  */
@@ -156,7 +156,7 @@ function createController(deps) {
       S.homeCache = { at: now(), data: r };
       store.save();
       if (r.me && r.me.restriction) track('restriction_shown', { level: r.me.restriction.permanent ? 'permanent' : 'temp' });
-      if (r.me && r.me.warnPending && !c.home.sheet) c.home.sheet = 'warn';
+      if (r.me && r.me.warnPending && !c.home.sheet) c.home.sheet = 'strike';
       if (c.group.status === 'ok') refreshWaiting();
     } else {
       if (!c.home.data && S.homeCache) c.home.data = S.homeCache.data;
@@ -211,14 +211,13 @@ function createController(deps) {
       case 'home:album':
         return openAlbum();
       case 'home:group':
+      case 'home:groupLine':
         return openGroup();
       case 'home:howto':
         c.home.sheet = 'howto';
         return invalidate();
       case 'home:settings':
         return openSettings();
-      case 'home:sound':
-        return toggleMute();
       default:
         void d;
     }
@@ -278,16 +277,16 @@ function createController(deps) {
         return invalidate();
       }
       if (id === 'rules:privacy') return privacy.openContract();
-      if (id === 'rules:agreement') return privacy.openAgreement();
+      if (id === 'rules:terms') return privacy.openAgreement();
       return;
     }
     if (c.home.sheet && c.screen === 'home') {
-      if (id === 'sheet:close' || id === 'sheet:ack') {
+      if (id === 'sheet:close' || id === 'strike:ok' || id === 'howto:ok') {
         if (c.home.sheet === 'howto') {
           S.howtoSeen = true;
           store.save();
         }
-        if (c.home.sheet === 'warn') {
+        if (c.home.sheet === 'strike') {
           api.ackWarning({});
           if (c.home.data) c.home.data.me.warnPending = false;
         }
@@ -322,6 +321,14 @@ function createController(deps) {
     p.selectedId = list[0].id;
     p.batchCount++;
     p.sourceKind = 'batch';
+    p.custom = { open: false, text: '', error: null };
+    keyboard.close();
+    invalidate();
+  }
+
+  function pickerCustomCancel() {
+    const p = c.picker;
+    if (!p) return;
     p.custom = { open: false, text: '', error: null };
     keyboard.close();
     invalidate();
@@ -424,15 +431,17 @@ function createController(deps) {
       c.picker = null;
       return popScreen();
     }
-    if (id.indexOf('picker:prompt:') === 0) {
-      p.selectedId = id.slice('picker:prompt:'.length);
+    if (id.indexOf('picker:select:') === 0) {
+      p.selectedId = id.slice('picker:select:'.length);
       p.custom.open = false;
       keyboard.close();
       return invalidate();
     }
-    if (id === 'picker:batch') return pickerBatch();
+    if (id === 'picker:shuffle') return pickerBatch();
     if (id === 'picker:custom') return pickerCustomOpen();
     if (id === 'picker:customInput') return pickerCustomOpen();
+    if (id === 'picker:customOk') return pickerStart();
+    if (id === 'picker:customCancel') return pickerCustomCancel();
     if (id === 'picker:start') return pickerStart();
     if (id === 'picker:retry') {
       p.state = 'ready';
@@ -445,7 +454,7 @@ function createController(deps) {
 
   function persistTurn() {
     const t = c.turn;
-    if (!t) return;
+    if (!t || t.status === 'timeUp') return;
     S.turn = {
       chainId: t.chainId,
       claimId: t.claimId,
@@ -661,8 +670,21 @@ function createController(deps) {
     const info = t.tool.info();
     const act = C.timeUpAction(t.kind, { strokes: info.strokes, chars: Tx.countCp(t.text) });
     if (act === 'submit') return submitTurn(true);
-    discardTurn('timeUp', V.COPY.timeUp, null);
+    // nothing worth sending: give the 棒 back and show the 时间到 modal (draw:timeUpOk / describe:timeUpOk leaves)
+    track('step_release', { chainId: t.chainId, step: t.step, reason: 'timeUp' });
     api.releaseClaim({ chainId: t.chainId, claimId: t.claimId });
+    S.turn = null;
+    store.save();
+    keyboard.close();
+    t.status = 'timeUp';
+    t.errorText = null;
+    invalidate();
+  }
+
+  function leaveTimeUp() {
+    const t = c.turn;
+    if (!t || t.status !== 'timeUp') return;
+    c.turn = null;
     if (t.entryBack === 'home' || t.step === 1) goHome();
     else {
       c.stack = [];
@@ -678,8 +700,9 @@ function createController(deps) {
       c.ui.dialog = { text: '放弃这一棒？群友可以接着画', confirmLabel: '放弃', cancelLabel: '继续画', danger: true, action: 'quit' };
       return invalidate();
     }
-    if (t.status === 'submitting') return;
-    if (id === 'draw:done' || id === 'draw:retry') {
+    if (t.status === 'timeUp') return id === 'draw:timeUpOk' ? leaveTimeUp() : undefined;
+    if (t.status === 'submitting' || id === 'draw:lock') return;
+    if (id === 'draw:submit' || id === 'draw:retry') {
       if (now() - c.lastPrimaryAt < PRIMARY_DEBOUNCE_MS) return;
       c.lastPrimaryAt = now();
       return submitTurn(false);
@@ -713,7 +736,8 @@ function createController(deps) {
       c.ui.dialog = { text: '放弃这一棒？群友可以接着画', confirmLabel: '放弃', cancelLabel: '继续', danger: true, action: 'quit' };
       return invalidate();
     }
-    if (t.status === 'submitting') return;
+    if (t.status === 'timeUp') return id === 'describe:timeUpOk' ? leaveTimeUp() : undefined;
+    if (t.status === 'submitting' || id === 'describe:lock') return;
     if (id === 'describe:input') return openDescribeKeyboard();
     if (id === 'describe:submit') {
       if (now() - c.lastPrimaryAt < PRIMARY_DEBOUNCE_MS) return;
@@ -844,7 +868,6 @@ function createController(deps) {
     if (!s) return;
     switch (id) {
       case 'back':
-      case 'sent:home':
         c.sent = null;
         return goHome();
       case 'sent:share':
@@ -953,10 +976,14 @@ function createController(deps) {
         return;
       case 'entry:reveal':
         return openReveal(e.chainId);
-      case 'entry:others':
+      case 'entry:group':
         return openGroup();
       case 'entry:new':
         return needRules('start', () => openPicker('home'));
+      case 'entry:refresh':
+        return loadEntry();
+      case 'entry:teaser':
+        return openReveal(e.chainId);
       case 'entry:revealNow':
         c.ui.dialog = { text: '现在揭晓？之后就不能再接了', confirmLabel: '现在揭晓', cancelLabel: '再等等', action: 'revealNow' };
         return invalidate();
@@ -966,7 +993,7 @@ function createController(deps) {
         return subscribe(e.chainId, e);
       case 'entry:mine':
         return openDetail(e.chainId);
-      case 'entry:same':
+      case 'entry:sameAgain':
         return sameAgainFromEntry();
     }
   }
@@ -1078,20 +1105,20 @@ function createController(deps) {
       rv.autoplay.playing = false;
       return invalidate();
     }
-    if (id === 'reveal:replay') {
+    if (id === 'reveal:replayAll') {
       rv.autoplay = { enabled: true, playing: true, startedAt: now() };
       rv.solo = null;
       rv.replays++;
       return invalidate();
     }
-    if (id.indexOf('reveal:panel:') === 0) {
-      rv.solo = { n: +id.slice('reveal:panel:'.length), startedAt: now() };
+    if (id.indexOf('reveal:drawing:') === 0) {
+      rv.solo = { n: +id.slice('reveal:drawing:'.length), startedAt: now() };
       return invalidate();
     }
     if (id.indexOf('reveal:laugh:') === 0) return laugh(+id.slice('reveal:laugh:'.length));
     if (id.indexOf('reveal:report:') === 0) return openReport({ chainId: rv.chainId, step: +id.slice('reveal:report:'.length) });
     if (id === 'reveal:share') return shareReveal();
-    if (id === 'reveal:same') return sameAgainFromReveal();
+    if (id === 'reveal:sameAgain') return sameAgainFromReveal();
   }
 
   async function laugh(n) {
@@ -1131,19 +1158,16 @@ function createController(deps) {
         return c.stack.length ? popScreen() : goHome();
       case 'teaser:retry':
         return openReveal(t.chainId, { replace: true });
-      case 'teaser:others':
+      case 'teaser:group':
         return openGroup();
       case 'teaser:report':
         return openReport({ chainId: t.chainId, step: 0 });
-      case 'teaser:same':
+      case 'teaser:sameAgain':
         if (t.data && t.data.promptId && t.data.canSameAgain) {
           track('same_again', { fromRole: 'teaser' });
           return needRules('start', () => openPicker('same_again', { id: t.data.promptId, text: t.data.promptText }));
         }
         return;
-      case 'teaser:home':
-        c.teaser = null;
-        return goHome();
     }
   }
 
@@ -1215,9 +1239,10 @@ function createController(deps) {
       return popScreen();
     }
     if (id === 'group:retry') return loadGroup();
-    if (id === 'group:new') return needRules('start', () => openPicker('home'));
+    if (id === 'group:start') return needRules('start', () => openPicker('home'));
     if (id.indexOf('group:chain:') === 0) return openEntry(id.slice('group:chain:'.length));
     if (id.indexOf('group:reveal:') === 0) return openReveal(id.slice('group:reveal:'.length));
+    if (id.indexOf('group:teaser:') === 0) return openReveal(id.slice('group:teaser:'.length));
   }
 
   // ---------------------------------------------------------------- album + detail
@@ -1257,6 +1282,7 @@ function createController(deps) {
       return popScreen();
     }
     if (id === 'album:retry') return loadAlbum(false);
+    if (id === 'album:start') return needRules('start', () => openPicker('home'));
     if (id === 'album:more') return loadAlbum(true);
     if (id.indexOf('album:item:') === 0) {
       const cid = id.slice('album:item:'.length);
@@ -1289,11 +1315,6 @@ function createController(deps) {
       c.detail = null;
       return popScreen();
     }
-    if (id === 'detail:retry') return openDetail(d.chainId);
-    if (id === 'detail:same' && d.item && d.item.promptId) {
-      track('same_again', { fromRole: 'participant' });
-      return needRules('start', () => openPicker('same_again', { id: d.item.promptId, text: d.item.promptText }));
-    }
     if (id.indexOf('detail:delete:') === 0) {
       const n = +id.slice('detail:delete:'.length);
       c.ui.dialog = { text: '删除这一棒？删除后别人将看不到它', confirmLabel: '删除', cancelLabel: '取消', danger: true, action: 'deleteStep', n };
@@ -1325,25 +1346,25 @@ function createController(deps) {
         return popScreen();
       case 'settings:sound':
         return toggleMute();
-      case 'settings:large':
+      case 'settings:largeText':
         S.largeText = !S.largeText;
         store.save();
         return invalidate();
-      case 'settings:contrast':
+      case 'settings:highContrast':
         S.highContrast = !S.highContrast;
         store.save();
         return invalidate();
       case 'settings:rules':
         c.rules = { open: true, pendingAction: null };
         return invalidate();
-      case 'settings:agreement':
+      case 'settings:terms':
         return privacy.openAgreement();
       case 'settings:privacy':
         return privacy.openContract();
       case 'settings:palette':
         if (paletteToday()) return toast('今日彩笔已解锁');
         return paletteAd('settings');
-      case 'settings:delete':
+      case 'settings:deleteAll':
         c.ui.dialog = { text: '删除我的全部接龙内容？删除后，你画的和写的内容将不再展示，正在进行的接龙会让出你的那一棒', confirmLabel: '继续', cancelLabel: '取消', danger: true, action: 'deleteAll1' };
         c.settings.deleteState = 'confirm1';
         return invalidate();
@@ -1564,8 +1585,12 @@ function createController(deps) {
   c.wantsPointer = function (x, y) {
     const t = c.turn;
     if (!t || c.screen !== 'draw' || t.status !== 'drawing' || c.ui.dialog || hasSheet() || ads.overlay) return false;
-    const cv = c.hits.filter((h) => h.id === 'draw:canvas')[0];
-    return !!cv && x >= cv.x && x <= cv.x + cv.w && y >= cv.y && y <= cv.y + cv.h;
+    // the topmost hit under the finger must be the canvas: the 今日彩笔 button is drawn on the empty canvas
+    for (let i = c.hits.length - 1; i >= 0; i--) {
+      const h = c.hits[i];
+      if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h.id === 'draw:canvas';
+    }
+    return false;
   };
 
   c.onPointer = function (type, id, x, y) {
@@ -1730,17 +1755,36 @@ function createController(deps) {
         vm = c.detail.item ? Object.assign(V.detailVm(c.detail.item), { state: c.detail.state }) : { chainId: c.detail.chainId, mine: [], state: c.detail.state };
         break;
       case 'settings':
-        vm = V.settingsVm({ muted: S.muted, largeText: S.largeText, highContrast: S.highContrast, canUnlockPalette: !paletteToday(), paletteUnlockedToday: paletteToday(), deleteState: c.settings.deleteState, paletteAdState: c.settings.paletteAdState });
+        vm = V.settingsVm({ muted: S.muted, largeText: S.largeText, highContrast: S.highContrast, canUnlockPalette: !paletteToday(), paletteUnlockedToday: paletteToday(), deleteState: c.settings.deleteState === 'confirm1' || c.settings.deleteState === 'confirm2' ? 'idle' : c.settings.deleteState, /* the two confirms are overlay.dialog */ paletteAdState: c.settings.paletteAdState });
         break;
     }
     const overlay = {};
     if (c.ui.dialog) overlay.dialog = { text: c.ui.dialog.text, confirmLabel: c.ui.dialog.confirmLabel, cancelLabel: c.ui.dialog.cancelLabel, danger: !!c.ui.dialog.danger };
     if (c.ui.toast) overlay.toast = { text: c.ui.toast.text };
     if (ads.overlay) overlay.adStub = { kind: ads.overlay.kind, secondsLeft: Math.max(0, Math.ceil((ads.overlay.durationMs - (t - ads.overlay.startedAt)) / 1000)) };
-    if (c.report.open) overlay.sheet = { kind: 'report', vm: V.reportVm(Object.assign({}, c.report, { reason: c.report.reason })) };
-    else if (c.rules.open) overlay.sheet = { kind: 'rules', vm: V.rulesVm({ open: c.rules.open, pendingAction: c.rules.pendingAction ? c.rules.pendingAction.trigger : null }, RULES_LINES) };
-    else if (c.screen === 'home' && c.home.sheet) overlay.sheet = { kind: c.home.sheet, vm: c.home.sheet === 'howto' ? V.howtoVm() : { text: '你有内容没通过审核。请遵守接龙公约，多次违规将被限制参与。', lines: RULES_LINES } };
-    return { screen: c.screen, vm, overlay, display: { largeText: S.largeText, highContrast: S.highContrast }, muted: S.muted };
+    // the renderers draw sheets and display modes from the screen vm (js/render/CONTRACT.md "Shared extras")
+    const display = { largeText: !!S.largeText, highContrast: !!S.highContrast };
+    if (c.screen !== c.scrollScreen) {
+      c.scrollScreen = c.screen;
+      c.ui.scroll = {};
+    }
+    vm.display = display;
+    vm.t = t;
+    vm.scrollY = c.ui.scroll[c.screen === 'reveal' ? 'reveal:scroll' : 'scroll'] || 0;
+    vm.sheetScroll = c.ui.scroll['sheet:scroll'] || 0;
+    vm.keyboardH = keyboard.active && keyboard.height ? keyboard.height : 0;
+    vm.sheet = null;
+    if (c.report.open) {
+      vm.sheet = 'report';
+      vm.report = V.reportVm(c.report);
+    } else if (c.rules.open) {
+      vm.sheet = 'rules';
+      vm.rules = V.rulesVm({ open: true, pendingAction: c.rules.pendingAction ? c.rules.pendingAction.trigger : null }, RULES_LINES);
+    } else if (c.screen === 'home' && c.home.sheet) {
+      vm.sheet = c.home.sheet;
+    }
+    overlay.display = display;
+    return { screen: c.screen, vm, overlay, display, muted: S.muted };
   };
 
   c.state = c;

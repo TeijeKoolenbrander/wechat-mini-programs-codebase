@@ -85,7 +85,7 @@ test('capsule menu share: the context follows the screen (invite for an open cha
   await S1.settle();
   S1.strokes(2);
   t.mock.timers.tick(300);
-  S1.tapId('draw:done');
+  S1.tapId('draw:submit');
   await S1.settle();
   const chainId = Object.keys(w.srv.db.chains)[0];
   let r = S1.handlers.shareMenu();
