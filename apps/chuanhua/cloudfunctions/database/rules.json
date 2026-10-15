@@ -1,0 +1,20 @@
+{
+  "_comment": "Cloud database security rules, one entry per collection. EVERY collection is deny-all for clients: the mini game never touches the database directly; all access goes through cloud functions, which run with admin rights and bypass these rules. Paste each value into the console (Database > collection > Permissions > Custom rules). See README 'Database security rules' for why each collection needs deny-all.",
+  "chains": { "read": false, "write": false },
+  "steps": { "read": false, "write": false },
+  "mod_traces": { "read": false, "write": false },
+  "mod_log": { "read": false, "write": false },
+  "mod_quota": { "read": false, "write": false },
+  "reports": { "read": false, "write": false },
+  "players": { "read": false, "write": false },
+  "group_members": { "read": false, "write": false },
+  "group_stats": { "read": false, "write": false },
+  "reactions": { "read": false, "write": false },
+  "sub_grants": { "read": false, "write": false },
+  "daily_stats": { "read": false, "write": false },
+  "audit_log": { "read": false, "write": false },
+  "events": { "read": false, "write": false },
+  "rate_limits": { "read": false, "write": false },
+  "app_config": { "read": false, "write": false },
+  "meta": { "read": false, "write": false }
+}

@@ -1,0 +1,3 @@
+# synced copies of the game core (source: apps/chuanhua/game/core). Run: npm run sync
+*/core/
+node_modules/
