@@ -1,0 +1,5 @@
+# Seed bank files list FUTURE daily seeds (a spoiler, spec 5.2, AC 54): never commit them.
+*.json
+*.jsonl
+*.ndjson
+!.gitignore

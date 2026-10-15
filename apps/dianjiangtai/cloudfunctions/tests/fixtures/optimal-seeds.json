@@ -1,0 +1,202 @@
+[
+ {
+  "seed": 1231,
+  "lineup": [
+   {
+    "slot": "zhugong",
+    "generalId": "g_zhugeliang"
+   },
+   {
+    "slot": "junshi",
+    "generalId": "g_caocao"
+   },
+   {
+    "slot": "xianfeng",
+    "generalId": "g_zhanghe"
+   },
+   {
+    "slot": "mengjiang",
+    "generalId": "g_guanyu"
+   },
+   {
+    "slot": "shoujiang",
+    "generalId": "g_zhouyu"
+   }
+  ]
+ },
+ {
+  "seed": 1302,
+  "lineup": [
+   {
+    "slot": "zhugong",
+    "generalId": "g_liubei"
+   },
+   {
+    "slot": "junshi",
+    "generalId": "g_zhugeliang"
+   },
+   {
+    "slot": "xianfeng",
+    "generalId": "g_guanyu"
+   },
+   {
+    "slot": "mengjiang",
+    "generalId": "g_zhangfei"
+   },
+   {
+    "slot": "shoujiang",
+    "generalId": "g_luxun"
+   }
+  ]
+ },
+ {
+  "seed": 1562,
+  "lineup": [
+   {
+    "slot": "zhugong",
+    "generalId": "g_liubei"
+   },
+   {
+    "slot": "junshi",
+    "generalId": "g_zhugeliang"
+   },
+   {
+    "slot": "xianfeng",
+    "generalId": "g_guanyu"
+   },
+   {
+    "slot": "mengjiang",
+    "generalId": "g_zhangfei"
+   },
+   {
+    "slot": "shoujiang",
+    "generalId": "g_sunquan"
+   }
+  ]
+ },
+ {
+  "seed": 1599,
+  "lineup": [
+   {
+    "slot": "zhugong",
+    "generalId": "g_liubei"
+   },
+   {
+    "slot": "junshi",
+    "generalId": "g_zhugeliang"
+   },
+   {
+    "slot": "xianfeng",
+    "generalId": "g_guanyu"
+   },
+   {
+    "slot": "mengjiang",
+    "generalId": "g_zhangfei"
+   },
+   {
+    "slot": "shoujiang",
+    "generalId": "g_zhangliao"
+   }
+  ]
+ },
+ {
+  "seed": 1670,
+  "lineup": [
+   {
+    "slot": "zhugong",
+    "generalId": "g_liubei"
+   },
+   {
+    "slot": "junshi",
+    "generalId": "g_zhugeliang"
+   },
+   {
+    "slot": "xianfeng",
+    "generalId": "g_guanyu"
+   },
+   {
+    "slot": "mengjiang",
+    "generalId": "g_zhangfei"
+   },
+   {
+    "slot": "shoujiang",
+    "generalId": "g_zhanglu"
+   }
+  ]
+ },
+ {
+  "seed": 1806,
+  "lineup": [
+   {
+    "slot": "zhugong",
+    "generalId": "g_zhugeliang"
+   },
+   {
+    "slot": "junshi",
+    "generalId": "g_caocao"
+   },
+   {
+    "slot": "xianfeng",
+    "generalId": "g_zhangliao"
+   },
+   {
+    "slot": "mengjiang",
+    "generalId": "g_xuchu"
+   },
+   {
+    "slot": "shoujiang",
+    "generalId": "g_zhouyu"
+   }
+  ]
+ },
+ {
+  "seed": 1861,
+  "lineup": [
+   {
+    "slot": "zhugong",
+    "generalId": "g_xunyu"
+   },
+   {
+    "slot": "junshi",
+    "generalId": "g_zhouyu"
+   },
+   {
+    "slot": "xianfeng",
+    "generalId": "g_sunce"
+   },
+   {
+    "slot": "mengjiang",
+    "generalId": "g_guanyu"
+   },
+   {
+    "slot": "shoujiang",
+    "generalId": "g_huangfusong"
+   }
+  ]
+ },
+ {
+  "seed": 2001,
+  "lineup": [
+   {
+    "slot": "zhugong",
+    "generalId": "g_liubei"
+   },
+   {
+    "slot": "junshi",
+    "generalId": "g_zhouyu"
+   },
+   {
+    "slot": "xianfeng",
+    "generalId": "g_zhangliao"
+   },
+   {
+    "slot": "mengjiang",
+    "generalId": "g_xuchu"
+   },
+   {
+    "slot": "shoujiang",
+    "generalId": "g_sunce"
+   }
+  ]
+ }
+]
