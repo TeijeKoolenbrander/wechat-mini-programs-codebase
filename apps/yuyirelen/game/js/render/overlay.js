@@ -42,7 +42,11 @@ function drawDialog(ctx, L, hits, d) {
   const inner = w - L.u(40);
   const lines = W.wrap(ctx, d.text, inner, T.FS.bodyL, 500, false);
   const titleH = d.title ? L.u(36) : 0;
-  const h = L.u(28) + titleH + lines.length * lineH + L.u(24) + bh + L.u(20);
+  // two buttons side by side when both labels fit, otherwise stacked full width (long labels, large text)
+  const half = (inner - L.u(12)) / 2 - L.u(20);
+  const stacked = !!d.cancelLabel && (W.measure(ctx, d.confirmLabel || '好', T.FS.bodyL, 700, false) > half || W.measure(ctx, d.cancelLabel, T.FS.bodyL, 700, false) > half);
+  const btnRows = stacked ? 2 : 1;
+  const h = L.u(28) + titleH + lines.length * lineH + L.u(24) + bh * btnRows + (btnRows - 1) * L.u(12) + L.u(20);
   const m = modalCard(ctx, L, hits, 'dialog:block', w, h);
   let y = m.y + L.u(28);
   if (d.title) {
@@ -50,15 +54,21 @@ function drawDialog(ctx, L, hits, d) {
     y += titleH;
   }
   lines.forEach((ln, i) => W.text(ctx, ln, m.x + m.w / 2, y + i * lineH + L.u(8), { size: T.FS.bodyL, align: 'center', weight: 500 }));
-  const by = m.y + m.h - L.u(20) - bh;
-  const bw = d.cancelLabel ? (m.w - L.u(40) - L.u(12)) / 2 : m.w - L.u(40);
-  let bx = m.x + L.u(20);
-  if (d.cancelLabel) {
-    // the safe choice (再想想) sits first and carries the weight; the destructive one is outlined
-    W.button(ctx, L, hits, { id: 'dialog:cancel', x: bx, y: by, w: bw, h: bh, label: d.cancelLabel, kind: d.danger ? 'primary' : 'secondary' });
-    bx += bw + L.u(12);
+  // the safe choice (再想想) sits first and carries the weight; the destructive one is outlined
+  const cancelKind = d.danger ? 'primary' : 'secondary';
+  const confirmKind = d.danger ? 'secondary' : 'primary';
+  if (!d.cancelLabel) {
+    W.button(ctx, L, hits, { id: 'dialog:confirm', x: m.x + L.u(20), y: m.y + m.h - L.u(20) - bh, w: m.w - L.u(40), h: bh, label: d.confirmLabel || '好', kind: confirmKind, size: T.FS.bodyL });
+  } else if (stacked) {
+    const by = m.y + m.h - L.u(20) - bh * 2 - L.u(12);
+    W.button(ctx, L, hits, { id: 'dialog:cancel', x: m.x + L.u(20), y: by, w: m.w - L.u(40), h: bh, label: d.cancelLabel, kind: cancelKind, size: T.FS.bodyL });
+    W.button(ctx, L, hits, { id: 'dialog:confirm', x: m.x + L.u(20), y: by + bh + L.u(12), w: m.w - L.u(40), h: bh, label: d.confirmLabel || '好', kind: confirmKind, size: T.FS.bodyL });
+  } else {
+    const by = m.y + m.h - L.u(20) - bh;
+    const bw = (m.w - L.u(40) - L.u(12)) / 2;
+    W.button(ctx, L, hits, { id: 'dialog:cancel', x: m.x + L.u(20), y: by, w: bw, h: bh, label: d.cancelLabel, kind: cancelKind, size: T.FS.bodyL });
+    W.button(ctx, L, hits, { id: 'dialog:confirm', x: m.x + L.u(20) + bw + L.u(12), y: by, w: bw, h: bh, label: d.confirmLabel || '好', kind: confirmKind, size: T.FS.bodyL });
   }
-  W.button(ctx, L, hits, { id: 'dialog:confirm', x: bx, y: by, w: bw, h: bh, label: d.confirmLabel || '好', kind: d.danger ? 'secondary' : 'primary', size: T.FS.bodyL });
 }
 
 function drawToast(ctx, L, t) {

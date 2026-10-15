@@ -41,7 +41,7 @@ function rowHeight(L) {
 
 /** Slim 刚猜 card used above the keyboard. */
 function miniCardHeight(L) {
-  return L.u(T.METRICS.large ? 84 : 64);
+  return L.u(T.METRICS.large ? 96 : 72);
 }
 
 function cardHeight(L) {
@@ -58,7 +58,7 @@ function drawLatest(ctx, L, vm, x, y, w, h, mini) {
   const word = waiting ? vm.pendingWord || '' : r ? r.word : vm.pendingWord || '';
   const band = solving ? 'hit' : r && !waiting ? r.band : 'cold';
   const large = T.METRICS.large;
-  const pad = L.u(12);
+  const pad = L.u(mini ? 8 : 12);
   const iw = w - 2 * pad;
 
   // card with a band-coloured edge (gold glow while solving)
@@ -87,7 +87,7 @@ function drawLatest(ctx, L, vm, x, y, w, h, mini) {
     const rw = W.measure(ctx, rt, rankSize, 700, false);
     W.text(ctx, word, x + pad, rowY, { size: wordSize, weight: 800, maxW: iw - rw - L.u(12), minSize: T.FS.bodyL });
     W.text(ctx, rt, x + w - pad, rowY, { size: rankSize, weight: 700, align: 'right' });
-    const by = y + h - pad - L.u(large ? 13 : 9);
+    const by = y + h - pad - L.u(large ? 15 : 13);
     const pw = pillLabel ? W.measure(ctx, pillLabel, T.FS.body, 800, false) + 16 : 0;
     const barW = iw - (pw ? Math.max(pw, (T.FS.body + 10) * 1.25) + L.u(10) : 0);
     W.thermoBar(ctx, x + pad, by - L.u(7), barW, L.u(14), r ? r.temp : 0, band, barOpts);
@@ -515,7 +515,7 @@ function drawLegend(ctx, L, x, y, w) {
   const cw = (w - gap * (n - 1)) / n;
   T.BANDS.forEach((b, i) => {
     const cx = x + i * (cw + gap);
-    W.bandPill(ctx, cx + cw / 2, y, b, T.BAND_LABEL[b], { size: T.FS.body, h: T.FS.body + 12 });
+    W.bandPill(ctx, cx + cw / 2, y, b, T.BAND_LABEL[b], { size: T.FS.body, h: T.FS.body + 12, align: 'center' });
   });
   W.text(ctx, '越红越近，越蓝越远', x + w / 2, y + L.u(28), { size: T.FS.body, color: C.sub, align: 'center' });
 }

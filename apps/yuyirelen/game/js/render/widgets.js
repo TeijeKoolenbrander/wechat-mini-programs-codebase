@@ -469,7 +469,7 @@ function bandPill(ctx, x, y, band, label, o) {
   const tw = measure(ctx, label, size, 800, false);
   const w = Math.max(h * 1.25, tw + 16);
   const fill = T.bandColor(band);
-  const ax = o.align === 'right' ? x - w : x;
+  const ax = o.align === 'right' ? x - w : o.align === 'center' ? x - w / 2 : x;
   fillRR(ctx, ax, y - h / 2, w, h, h / 2, fill);
   if (T.METRICS.hc) strokeRR(ctx, ax, y - h / 2, w, h, h / 2, C.ink, 2);
   text(ctx, label, ax + w / 2, y + 0.5, { size, weight: 800, color: T.textOn(fill), align: 'center' });
