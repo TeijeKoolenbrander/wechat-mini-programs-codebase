@@ -153,8 +153,8 @@ test('hit ids: every id in CONTRACT.md is routed by the controller (or is a drag
   assert.deepStrictEqual(dead, []);
 });
 
-test('hit ids: the names the two sides used to disagree on are settled (retryRound, result:revealSkip, issue:list, home:scroll, settings:openAlbum, album:*)', () => {
-  for (const id of ['retryRound', 'result:revealSkip', 'result:skip', 'issue:list', 'issue:retry', 'home:scroll', 'sheet:list', 'settings:openAlbum', 'album:openSetting', 'album:cancel']) {
+test('hit ids: the names the two sides used to disagree on are settled (retryRound, result:revealSkip, issue:list, home:scroll, settings:openAlbum, album:*, settings:music/sfx)', () => {
+  for (const id of ['retryRound', 'result:revealSkip', 'result:skip', 'issue:list', 'issue:retry', 'home:scroll', 'sheet:list', 'settings:openAlbum', 'album:openSetting', 'album:cancel', 'settings:music', 'settings:sfx']) {
     assert.ok(contractIds.has(id), id + ' in CONTRACT.md');
     assert.ok(handlerRegion.includes(`'${id}'`), id + ' routed');
   }

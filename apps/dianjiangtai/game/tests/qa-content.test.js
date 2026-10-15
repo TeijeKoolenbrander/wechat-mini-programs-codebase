@@ -134,11 +134,14 @@ test('content texts (cause lines, comments, wavering templates) pass the forbidd
 test('main package (game dir minus packOptions.ignore) <= 4 MB and no portrait images (AC 48, 58)', () => {
   const cfg = JSON.parse(fs.readFileSync(path.join(GAME, 'project.config.json'), 'utf8'));
   const ignore = new Set(cfg.packOptions.ignore.map((i) => i.value));
+  // subpackages (audio, CTO-D3) are separate from the main package: measured on their own
+  const gameJson = JSON.parse(fs.readFileSync(path.join(GAME, 'game.json'), 'utf8'));
+  const subRoots = (gameJson.subpackages || []).map((s) => s.root.replace(/\/$/, ''));
   let total = 0;
   (function sum(d, rel) {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const r = rel ? rel + '/' + e.name : e.name;
-      if (ignore.has(r) || ignore.has(e.name) && e.isDirectory()) continue;
+      if (ignore.has(r) || (ignore.has(e.name) && e.isDirectory()) || subRoots.includes(r)) continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) sum(p, r);
       else {
@@ -149,6 +152,21 @@ test('main package (game dir minus packOptions.ignore) <= 4 MB and no portrait i
   })(GAME, '');
   assert.ok(total <= 4 * 1024 * 1024, `main package ${total} bytes`);
   assert.ok(total < 1024 * 1024, `informational: main package is ${(total / 1024).toFixed(0)} KB`);
+});
+
+test('audio subpackage: declared in game.json, every file present, each subpackage <= 2 MB, whole game <= 20 MB (CTO-D3)', () => {
+  const gameJson = JSON.parse(fs.readFileSync(path.join(GAME, 'game.json'), 'utf8'));
+  const subs = gameJson.subpackages || [];
+  const audio = subs.find((s) => s.name === 'audio');
+  assert.ok(audio && audio.root === 'audio/');
+  let size = 0;
+  for (const f of ['bgm', 'flip', 'drum', 'bell', 'tap']) {
+    const p = path.join(GAME, 'audio', f + '.mp3');
+    assert.ok(fs.existsSync(p), f);
+    size += fs.statSync(p).size;
+  }
+  for (const f of fs.readdirSync(path.join(GAME, 'audio'))) assert.ok(/\.mp3$/.test(f), 'only mp3 in the audio subpackage: ' + f);
+  assert.ok(size <= 2 * 1024 * 1024, 'audio subpackage ' + size);
 });
 
 // ---------- compliance code searches ----------

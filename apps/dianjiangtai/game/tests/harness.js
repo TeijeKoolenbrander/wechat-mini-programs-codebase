@@ -32,7 +32,7 @@ function boot(t, opts) {
     t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: opts.now || Date.UTC(2026, 10, 20, 4, 0, 0) });
   }
 
-  const log = { text: [], calls: [], storageWrites: 0, cloudWrites: [], shares: [], ads: [], menu: [], console: [], canvases: [] };
+  const log = { text: [], calls: [], storageWrites: 0, cloudWrites: [], shares: [], ads: [], menu: [], console: [], canvases: [], audio: [] };
   const storage = opts.storage || {};
   const handlers = {};
   let raf = null;
@@ -50,7 +50,22 @@ function boot(t, opts) {
       return cv;
     },
     createImage: () => ({}),
-    createInnerAudioContext: () => ({ play: () => call('audio.play'), stop() {} }),
+    createInnerAudioContext: () => {
+      const c = {
+        src: '', loop: false, volume: 1, playing: false, plays: 0,
+        play() { this.playing = true; this.plays++; call('audio.play', this.src); },
+        stop() { this.playing = false; },
+        pause() { this.playing = false; },
+        onError() {},
+      };
+      log.audio.push(c);
+      return c;
+    },
+    loadSubpackage: (o) => {
+      call('loadSubpackage', o.name);
+      if (opts.audioLoadFails) return o.fail({ errMsg: 'fail' });
+      o.success({});
+    },
     vibrateShort: () => call('vibrateShort'),
     getStorageSync: (k) => storage[k],
     setStorageSync: (k, v) => {

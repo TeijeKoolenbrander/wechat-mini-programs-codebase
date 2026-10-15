@@ -53,6 +53,7 @@ function createController(deps) {
   const boardRectOf = deps.boardRect || ((L) => L.board);
   const bannerRectOf = deps.bannerRect || ((L, b) => (b && b.show && b.reservedHeight > 0 ? { x: 16, y: (L.bottomEdge || L.H || 0) - b.reservedHeight, w: (L.W || 375) - 32, h: b.reservedHeight } : null));
   const S = store.state;
+  let audioRevealStart = 0;
 
   const c = {
     screen: 'home',
@@ -751,8 +752,9 @@ function createController(deps) {
     if (!res || res.status !== 'revealing') return;
     res.status = 'done';
     c.ui.doneAt = now();
+    if (deps.audio) deps.audio.stop('drum');
     if (res.record.w === 12 && wx.vibrateShort) wx.vibrateShort({ type: 'light' });
-    if (deps.audio) deps.audio.play(res.record.w === 12 ? 'bell' : 'drum');
+    if (res.record.w === 12 && deps.audio) deps.audio.play('bell');
     if (!res.tracked) {
       res.tracked = true;
       const r = c.r;
@@ -1121,6 +1123,7 @@ function createController(deps) {
   };
 
   c.onShow = function (options) {
+    if (deps.audio) deps.audio.onShow();
     analytics.onShow({ scene: options && options.scene, fromCard: 'none', hasShareTicket: !!(options && options.shareTicket) });
     privacy.refreshOnShow().then(() => invalidate());
     if (S.dailyCache && beijingDateKey(now() + c.dailyOffsetMs) !== S.dailyCache.dateKey && c.screen === 'home') refreshDaily();
@@ -1131,6 +1134,7 @@ function createController(deps) {
   };
 
   c.onHide = function () {
+    if (deps.audio) deps.audio.onHide();
     persistActive();
     analytics.onHide();
   };
@@ -1160,7 +1164,15 @@ function createController(deps) {
     invalidate();
   };
 
+  /** A soft UI tap on every button press, unless the press itself made a sound (flip, bell...). */
   c.onHit = function (id) {
+    const a = deps.audio;
+    const before = a ? a.played : 0;
+    onHitInner(id);
+    if (a && a.played === before && id !== 'home:scroll' && id !== 'sheet:list' && id !== 'result:revealSkip') a.play('tap');
+  };
+
+  function onHitInner(id) {
     const ui = c.ui;
     // overlays first
     if (ads.overlay) {
@@ -1198,7 +1210,7 @@ function createController(deps) {
       case 'historyIssue':
         return issueHit(id);
     }
-  };
+  }
 
   function historyHit(id) {
     if (id === 'history:back') return goHome();
@@ -1212,6 +1224,19 @@ function createController(deps) {
       return invalidate();
     }
     if (id === 'issue:retry') return openHistory(); // the issue could not be found: reload the archive
+  }
+
+  /** Sound settings (spec AC 49, CTO-D3). muteAll: true/false for both channels, or flip one channel by name. */
+  function setSound(muteAll, channel) {
+    const a = deps.audio;
+    if (a) {
+      if (channel === 'music') a.setMusicOn(!a.musicOn);
+      else if (channel === 'sfx') a.setSfxOn(!a.sfxOn);
+      else a.setMuted(muteAll);
+      S.muted = a.muted;
+    } else S.muted = channel ? S.muted : muteAll;
+    store.save();
+    return invalidate();
   }
 
   function homeHit(id) {
@@ -1255,10 +1280,12 @@ function createController(deps) {
         return; // drag areas (onDrag); a tap does nothing
       case 'home:sound':
       case 'settings:sound':
-        S.muted = !S.muted;
-        if (deps.audio) deps.audio.setMuted(S.muted);
-        store.save();
-        return invalidate();
+        // the home link is one switch for both channels: anything audible -> mute, otherwise sound back on
+        return setSound(deps.audio ? !deps.audio.muted : !S.muted, null);
+      case 'settings:music':
+        return setSound(null, 'music');
+      case 'settings:sfx':
+        return setSound(null, 'sfx');
       case 'settings:openSetting':
         return privacy.openSetting().then(() => invalidate());
       case 'settings:privacy':
@@ -1470,7 +1497,26 @@ function createController(deps) {
   }
 
   /** Called every frame: advances time-driven transitions. */
+  /** Music follows the screen: on for home and draft, faded out during the battle reveal; the drum pulse starts with the reveal. */
+  function syncAudio() {
+    const a = deps.audio;
+    if (!a) return;
+    const res = c.res;
+    const revealing = c.screen === 'result' && !!res && res.status === 'revealing' && !!c.ui.revealStart;
+    if (revealing) {
+      if (audioRevealStart !== c.ui.revealStart) {
+        audioRevealStart = c.ui.revealStart;
+        a.play('drum');
+      }
+    } else if (audioRevealStart) {
+      audioRevealStart = 0;
+      a.stop('drum'); // skipped or finished: the pulse ends with the reveal
+    }
+    a.setScene(c.screen === 'home' || c.screen === 'draft' ? 'music' : 'quiet');
+  }
+
   c.tick = function (t) {
+    syncAudio();
     const res = c.res;
     if (c.screen === 'result' && res && res.status === 'revealing' && c.ui.revealStart && revealCount(t) >= 12 && t - c.ui.revealStart >= 12 * REVEAL_MS + 300) finishReveal();
     if (c.screen === 'result' && res && res.reveal && res.reveal.pending && res.status === 'done') {
@@ -1503,7 +1549,7 @@ function createController(deps) {
     let vm;
     switch (c.screen) {
       case 'home':
-        vm = V.homeVm(c.home.daily, { hasGroupContext: c.group.status === 'ok', muted: S.muted, showHowToOnce: c.home.sheet === 'howto' && !S.howtoSeen, friendBoardEnabled: privacy.friendBoardEnabled(), sheet: c.home.sheet, t, display: display(), privacy: privacy.status().privacy, friendScope: privacy.status().friendScope, album: album.scope, scrollY: c.ui.homeScroll || 0, sheetScroll: c.ui.sheetScroll });
+        vm = V.homeVm(c.home.daily, { hasGroupContext: c.group.status === 'ok', muted: deps.audio ? deps.audio.muted : S.muted, musicOn: deps.audio ? deps.audio.musicOn : !S.muted, sfxOn: deps.audio ? deps.audio.sfxOn : !S.muted, showHowToOnce: c.home.sheet === 'howto' && !S.howtoSeen, friendBoardEnabled: privacy.friendBoardEnabled(), sheet: c.home.sheet, t, display: display(), privacy: privacy.status().privacy, friendScope: privacy.status().friendScope, album: album.scope, scrollY: c.ui.homeScroll || 0, sheetScroll: c.ui.sheetScroll });
         if (vm.daily.streak.current >= 2) trackOnce('streak:home', 'streak_shown', { current: vm.daily.streak.current, where: 'home' });
         break;
       case 'draft': {

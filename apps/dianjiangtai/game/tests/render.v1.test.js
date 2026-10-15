@@ -394,6 +394,8 @@ test('settings: large-text and high-contrast toggles with ids, reflecting the mo
     const ctx = mockCtx();
     const hits = render.screens.home.draw(ctx, { ...fx.settings_on, sheetScroll: 0 }, L);
     assert.ok(hits.some((h) => h.id === 'settings:largeText'), mode);
+    assert.ok(hits.some((h) => h.id === 'settings:music') && hits.some((h) => h.id === 'settings:sfx'), mode);
+    assert.ok(!hits.some((h) => h.id === 'settings:sound'), mode);
     assert.ok(hits.some((h) => h.id === 'settings:highContrast'), mode);
     assert.ok(hits.some((h) => h.id === 'settings:feedback'));
     const t = textsOf(ctx.__calls).join('|');

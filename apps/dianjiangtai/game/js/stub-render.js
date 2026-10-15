@@ -93,7 +93,8 @@ const drawers = {
       p.hits.length = 0;
       p.text(vm.sheet === 'howto' ? '玩法：翻令、选将、放入位置，五轮后出征' : '隐私与设置');
       if (vm.sheet === 'settings') {
-        p.button('settings:sound', vm.muted ? '声音：关' : '声音：开');
+        p.button('settings:music', vm.musicOn ? '音乐：开' : '音乐：关');
+        p.button('settings:sfx', vm.sfxOn ? '音效：开' : '音效：关');
         p.button('settings:largeText', vm.settings.largeText ? '大字模式：开' : '大字模式：关');
         p.button('settings:highContrast', vm.settings.highContrast ? '高对比度：开' : '高对比度：关');
         if (!vm.settings.friendBoardEnabled) p.button('settings:openSetting', '好友排行：未开启 [去设置]');

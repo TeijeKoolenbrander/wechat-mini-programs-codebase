@@ -431,6 +431,104 @@ test('mute persists and is applied; sound toggle in settings', async (t) => {
   assert.strictEqual(g2.app.ctl.view().vm.muted, true);
 });
 
+// ---------- audio (CTO-D3) ----------
+const cue = (g, name) => g.log.audio.find((c) => c.src === 'audio/' + name + '.mp3');
+
+test('audio: subpackage loads after launch, music plays low on home, game plays fully muted when loading fails', async (t) => {
+  const g = await startUp(t);
+  assert.ok(!g.log.calls.includes('loadSubpackage:"audio"'), 'not during launch');
+  g.wait(600);
+  g.frame();
+  assert.ok(g.log.calls.includes('loadSubpackage:"audio"'));
+  const m = cue(g, 'bgm');
+  assert.ok(m && m.loop && m.playing, 'music on home');
+  g.wait(3000);
+  assert.ok(m.volume > 0 && m.volume <= 0.35, 'low volume ' + m.volume);
+  // load failure: everything still plays
+  const f = await startUp(t, { audioLoadFails: true });
+  f.wait(600);
+  f.tapId('sheet:close');
+  f.tapId('home:free');
+  await playDraft(f);
+  f.tapId('result:skip');
+  assert.strictEqual(f.app.ctl.view().vm.status, 'done');
+  assert.strictEqual(f.log.audio.length, 0);
+});
+
+test('audio: settings toggles 音乐 / 音效 persist, mute is immediate, and taps make a soft sound', async (t) => {
+  const g = await startUp(t);
+  g.wait(600);
+  g.tapId('sheet:close');
+  g.tapId('home:settings');
+  const m = cue(g, 'bgm');
+  assert.ok(m.playing);
+  assert.ok(cue(g, 'tap'), 'a button press taps');
+  g.tapId('settings:music');
+  assert.strictEqual(m.playing, false, 'music off is immediate');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(g.storage.djt_audio_v1)), { music: false, sfx: true });
+  assert.strictEqual(g.app.ctl.view().vm.musicOn, false);
+  assert.strictEqual(g.app.ctl.view().vm.sfxOn, true);
+  const taps = cue(g, 'tap').plays;
+  g.tapId('settings:sfx');
+  assert.strictEqual(g.app.ctl.view().vm.muted, true);
+  g.tapId('settings:largeText');
+  assert.strictEqual(cue(g, 'tap').plays, taps, 'silent when 音效 is off');
+  const g2 = boot(t, { storage: g.storage });
+  await g2.settle();
+  g2.wait(600);
+  const v = g2.app.ctl.view().vm;
+  assert.deepStrictEqual([v.musicOn, v.sfxOn, v.muted], [false, false, true]);
+  assert.strictEqual(g2.log.audio.filter((c) => c.playing).length, 0, 'a muted player hears nothing at launch');
+});
+
+test('audio: flip sound on 翻令, drum pulse and music fade-out during the reveal, hide/show pauses and resumes', async (t) => {
+  const g = await startUp(t);
+  g.wait(600);
+  g.tapId('sheet:close');
+  g.tapId('home:free');
+  g.wait(3000);
+  const m = cue(g, 'bgm');
+  assert.ok(m.playing && m.volume > 0, 'music on the draft screen');
+  g.tapId('primary');
+  await g.settle();
+  assert.ok(cue(g, 'flip') && cue(g, 'flip').plays >= 1, 'flip');
+  g.wait(1300);
+  await g.settle();
+  g.tapId((h) => h.id.indexOf('pool:') === 0 && h.id !== 'pool:list');
+  g.tapId((h) => h.id.indexOf('slot:') === 0);
+  g.wait(400);
+  g.tapId('primary');
+  g.hide();
+  assert.strictEqual(m.playing, false, 'hidden: paused');
+  g.show({ scene: 1001, query: {} });
+  assert.strictEqual(m.playing, true, 'shown: resumes');
+  g.wait(400);
+  await g.settle();
+  // finish the draft quickly through the helper from round 2
+  for (let round = 2; round <= 5; round++) {
+    g.tapId('primary');
+    await g.settle();
+    g.wait(1300);
+    await g.settle();
+    g.tapId((h) => h.id.indexOf('pool:') === 0 && h.id !== 'pool:list');
+    g.tapId((h) => h.id.indexOf('slot:') === 0);
+    g.wait(400);
+    g.tapId('primary');
+    g.wait(400);
+    await g.settle();
+  }
+  g.frame();
+  assert.strictEqual(g.app.ctl.view().vm.status, 'revealing');
+  assert.ok(cue(g, 'drum') && cue(g, 'drum').playing, 'drum pulse starts with the reveal');
+  g.wait(1000);
+  g.frame();
+  g.wait(2000);
+  assert.strictEqual(m.playing, false, 'music faded out and paused for the battle');
+  g.tapId('result:skip');
+  assert.strictEqual(cue(g, 'drum').playing, false, 'skip ends the pulse');
+  assert.strictEqual(m.playing, false, 'no music on the result screen');
+});
+
 test('touch routing: a second finger is ignored; taps in the capsule row hit nothing on home', async (t) => {
   const g = await startUp(t);
   g.tapId('sheet:close');

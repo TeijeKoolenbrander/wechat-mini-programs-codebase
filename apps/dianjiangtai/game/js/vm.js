@@ -43,7 +43,7 @@ function displayVm(d) {
 
 /**
  * daily: { state, issueNo, dateKey, round?, record?, bandLabel?, variant?, streak? }
- * opts: { hasGroupContext, muted, showHowToOnce, friendBoardEnabled, sheet, t, display, privacy, friendScope, album, scrollY, sheetScroll }
+ * opts: { hasGroupContext, muted, musicOn, sfxOn, showHowToOnce, friendBoardEnabled, sheet, t, display, privacy, friendScope, album, scrollY, sheetScroll }
  */
 function homeVm(daily, opts) {
   const d = { state: daily.state, issueNo: daily.issueNo, dateKey: daily.dateKey };
@@ -59,10 +59,14 @@ function homeVm(daily, opts) {
     nav: { historyEnabled: true },
     hasGroupContext: !!opts.hasGroupContext,
     muted: !!opts.muted,
+    musicOn: opts.musicOn == null ? !opts.muted : !!opts.musicOn,
+    sfxOn: opts.sfxOn == null ? !opts.muted : !!opts.sfxOn,
     showHowToOnce: !!opts.showHowToOnce,
     settings: {
       friendBoardEnabled: !!opts.friendBoardEnabled,
       muted: !!opts.muted,
+      musicOn: opts.musicOn == null ? !opts.muted : !!opts.musicOn,
+      sfxOn: opts.sfxOn == null ? !opts.muted : !!opts.sfxOn,
       largeText: !!disp.largeText,
       highContrast: !!disp.highContrast,
       privacy: opts.privacy || 'unknown',

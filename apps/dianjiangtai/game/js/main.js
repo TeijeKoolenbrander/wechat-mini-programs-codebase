@@ -78,7 +78,7 @@ function boot() {
     return { largeText: !!d.largeText, highContrast: !!d.highContrast, scale: d.largeText ? 1.25 : 1, palette: d.highContrast ? 'highContrast' : 'standard' };
   };
   const odc = createOdc(wx);
-  const audio = createAudio(wx, store.state.muted);
+  const audio = createAudio(wx, { legacyMuted: store.state.muted });
 
   if (R.shareCard) {
     // always the standard look, whatever the display mode: one consistent card for a group (spec 8.10)
@@ -212,6 +212,8 @@ function boot() {
 
   ctl.start(wx.getEnterOptionsSync ? wx.getEnterOptionsSync() : wx.getLaunchOptionsSync && wx.getLaunchOptionsSync());
   requestAnimationFrame(frame);
+  // audio lives in a subpackage: fetched after the first frame so it never delays the start
+  setTimeout(() => audio.load(), 500);
   return app;
 }
 

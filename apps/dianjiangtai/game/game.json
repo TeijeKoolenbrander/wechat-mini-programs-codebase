@@ -1,5 +1,11 @@
 {
   "deviceOrientation": "portrait",
   "showStatusBar": false,
-  "openDataContext": "opendata"
+  "openDataContext": "opendata",
+  "subpackages": [
+    {
+      "name": "audio",
+      "root": "audio/"
+    }
+  ]
 }

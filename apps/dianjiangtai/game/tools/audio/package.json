@@ -1,0 +1,8 @@
+{
+  "name": "dianjiangtai-audio-gen",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Procedurally generates every sound of 点将台 (original, (c) studio). Dev tool, not shipped.",
+  "scripts": { "build": "node gen.js" },
+  "dependencies": { "lamejs": "1.2.1" }
+}

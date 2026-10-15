@@ -1,15 +1,15 @@
 /**
  * 隐私与设置 sheet (spec 8.1, 8.10, 11.6 status line). Drawn over Home.
- * vm: Home view model ({muted, settings:{friendBoardEnabled, album?}, display,
+ * vm: Home view model ({muted, musicOn, sfxOn, settings:{friendBoardEnabled, album?}, display,
  * sheetScroll}), or the spec 13 Settings model ({muted, largeText,
  * highContrast, privacy, friendScope, album}) when drawn on its own.
  *
- * Rows: 声音 toggle; 显示: 大字模式 toggle, 高对比度 toggle; 好友排行 status
+ * Rows: 音乐 toggle, 音效 toggle; 显示: 大字模式 toggle, 高对比度 toggle; 好友排行 status
  * (+ 去设置 when off); 相册权限 status (only when the album scope was
  * refused); 用户隐私保护指引; and, pinned under the scroll area, 联系我们 / 反馈.
  * The toggles show the mode that is actually being rendered.
  *
- * Hit ids: settings:sound, settings:largeText, settings:highContrast,
+ * Hit ids: settings:music, settings:sfx (settings:sound is retired from this sheet; the controller still accepts it), settings:largeText, settings:highContrast,
  * settings:openSetting (only when friend board is off), settings:openAlbum
  * (only when album is 'denied'; map it to wx.openSetting), settings:privacy,
  * settings:feedback (logic positions the native feedback button over this
@@ -41,7 +41,7 @@ function drawInto(ctx, vm, L, hits) {
   const showAlbum = album === 'denied';
   const friendOn = vm.settings && vm.settings.friendBoardEnabled != null ? !!vm.settings.friendBoardEnabled : vm.friendScope === 'granted' && vm.privacy === 'agreed';
   const sectionH = L.u(large ? 40 : 34);
-  const rows = 1 + 2 + 1 + (showAlbum ? 1 : 0) + 1;
+  const rows = 2 + 2 + 1 + (showAlbum ? 1 : 0) + 1;
   const contentH = rows * rowH + sectionH + L.u(8);
   const footH = rowH;
   const wanted = L.u(60) + contentH + footH + L.u(12) + L.safeBottom;
@@ -56,13 +56,19 @@ function drawInto(ctx, vm, L, hits) {
   W.scrollBody(ctx, hits, area, contentH, vm.sheetScroll, 'sheet:list', () => {
     let y = area.y;
 
-    // sound
-    W.iconSpeaker(ctx, s.x + L.u(12), y + rowH / 2, L.u(22), C.ink, vm.muted);
-    W.text(ctx, '声音', s.x + L.u(36), y + rowH / 2, { size: T.FS.bodyL, weight: 600 });
-    toggle(ctx, L, tx, y + (rowH - L.u(large ? 38 : 34)) / 2, !vm.muted);
-    hits.add('settings:sound', s.x, y, s.w, rowH);
-    y += rowH;
-    line(y);
+    // sound: 音乐 and 音效 are separate switches (CTO-D3); either off is silent at once
+    const musicOn = vm.musicOn != null ? !!vm.musicOn : vm.settings && vm.settings.musicOn != null ? !!vm.settings.musicOn : !vm.muted;
+    const sfxOn = vm.sfxOn != null ? !!vm.sfxOn : vm.settings && vm.settings.sfxOn != null ? !!vm.settings.sfxOn : !vm.muted;
+    [
+      ['settings:music', '音乐', musicOn],
+      ['settings:sfx', '音效', sfxOn],
+    ].forEach(([id, label, on]) => {
+      W.text(ctx, label, s.x + L.u(12), y + rowH / 2, { size: T.FS.bodyL, weight: 600, maxW: tx - s.x - L.u(24) });
+      toggle(ctx, L, tx, y + (rowH - L.u(large ? 38 : 34)) / 2, on);
+      hits.add(id, s.x, y, s.w, rowH);
+      y += rowH;
+      line(y);
+    });
 
     // 显示
     W.text(ctx, '显示', s.x, y + sectionH / 2 + L.u(4), { size: T.FS.body, weight: 800, color: C.sub });
