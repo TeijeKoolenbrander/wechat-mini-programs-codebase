@@ -49,6 +49,9 @@ function createController(deps) {
   const invalidate = deps.invalidate || (() => {});
   const getLayout = deps.getLayout || (() => ({ board: { x: 16, y: 120, w: 343, h: 400 }, s: 1, dpr: 1 }));
   const cvNum = content.contentVersion;
+  // the renderer owns the board / banner geometry (render/layout.js boardRect, bannerRect); fallbacks for the stub renderer
+  const boardRectOf = deps.boardRect || ((L) => L.board);
+  const bannerRectOf = deps.bannerRect || ((L, b) => (b && b.show && b.reservedHeight > 0 ? { x: 16, y: (L.bottomEdge || L.H || 0) - b.reservedHeight, w: (L.W || 375) - 32, h: b.reservedHeight } : null));
   const S = store.state;
 
   const c = {
@@ -169,6 +172,7 @@ function createController(deps) {
     c.ui.flipStart = 0;
     c.ui.adState = 'idle';
     c.ui.dialog = null;
+    c.ui.albumDenied = false;
     c.ui.coach = !S.coachSeen && S.lifetimeRuns === 0 && r.mode !== 'challenge' ? 1 : 0;
     c.res = null;
     go('draft');
@@ -483,6 +487,7 @@ function createController(deps) {
   function dialogConfirm() {
     const d = c.ui.dialog;
     c.ui.dialog = null;
+    c.ui.albumDenied = false;
     if (!d) return;
     if (d.action === 'abandon') {
       const r = c.r;
@@ -493,9 +498,6 @@ function createController(deps) {
       goHome();
     } else if (d.action === 'retryLate') {
       goHome();
-    } else if (d.action === 'albumSettings') {
-      // 去设置: wx.openSetting on this tap only; never re-asked automatically
-      album.openSetting().then(() => invalidate());
     }
     invalidate();
   }
@@ -503,6 +505,8 @@ function createController(deps) {
   function goHome() {
     c.ui.sheet = null;
     c.ui.dialog = null;
+    c.ui.albumDenied = false;
+    c.ui.homeScroll = 0;
     c.screen = 'home';
     setDailyFromState();
     if (c.pendingEntry) {
@@ -628,7 +632,7 @@ function createController(deps) {
     const r = await api.submitRun({ clientRunId: p.clientRunId, mode: p.mode, dateKey: p.dateKey, challengeId: p.challengeId || undefined, actions: p.actions });
     if (r && r.ok) return onServerResult(p, res, r);
     const code = r && r.code;
-    if (code === 'ALREADY_PLAYED' && r.existing && r.existing.ok) return onServerResult(p, res, r.existing);
+    if (code === 'ALREADY_PLAYED' && r.result && r.result.ok) return onServerResult(p, res, r.result); // backend: the stored result rides along
     if (code === 'NETWORK' || code === 'TIMEOUT' || !code) {
       S.pending = p;
       store.save();
@@ -861,7 +865,7 @@ function createController(deps) {
     go('challenge');
     const r = await api.getChallenge({ challengeId: id });
     if (r && r.ok) {
-      c.challenge = { id, status: r.status, theirRecord: r.theirRecord, mode: r.mode, countsAsDaily: r.countsAsDaily, isFriendly: r.isFriendly, answerCount: r.answerCount, bestRecord: r.bestAnswer !== undefined ? { w: r.bestAnswer, l: 12 - r.bestAnswer } : undefined, rounds: r.rounds, dateKey: r.dateKey, lineupLocked: !!r.lineupLocked, variant: r.variant === 'shiren' ? 'shiren' : 'standard' };
+      c.challenge = { id, status: r.status, theirRecord: r.theirRecord, mode: r.mode, countsAsDaily: r.countsAsDaily, isFriendly: r.isFriendly, answerCount: r.answerCount, bestRecord: r.bestAnswer && Number.isInteger(r.bestAnswer.w) ? { w: r.bestAnswer.w, l: 12 - r.bestAnswer.w } : undefined, rounds: r.rounds, dateKey: r.dateKey, lineupLocked: !!r.lineupLocked, variant: r.variant === 'shiren' ? 'shiren' : 'standard' };
       if (r.status === 'own' && r.subscribe && r.subscribe.granted && subscribe) subscribe.markGranted(id);
     } else if (r && (r.status === 'expired' || r.code === 'CHALLENGE_EXPIRED' || r.code === 'NOT_FOUND')) {
       c.challenge = { id, status: 'expired', theirRecord: { w: 0, l: 0 } };
@@ -937,7 +941,7 @@ function createController(deps) {
     b.variant = r.variant === 'shiren' ? 'shiren' : 'standard';
     if (!r.rows.length) return view('empty');
     const L = getLayout();
-    const msg = V.boardMessage(kind, r, { content, groupRef: c.group.groupRef, shareTicket: c.group.shareTicket, groupid: c.group.groupid, board: L.board, dpr: L.dpr, showUnverified: config.showUnverified });
+    const msg = V.boardMessage(kind, r, { content, groupRef: c.group.groupRef, shareTicket: c.group.shareTicket, groupid: c.group.groupid, board: boardRectOf(L, bannerSlot({ state: 'ready' })), dpr: L.dpr, showUnverified: config.showUnverified, display: V.displayVm(display()) });
     b.rowCount = r.rows.length;
     odc.render(msg);
     b.sharedCanvas = odc.sharedCanvas();
@@ -988,7 +992,7 @@ function createController(deps) {
       toast('已保存到相册');
     } else if (out.needSettings) {
       res.saveState = 'denied';
-      c.ui.dialog = { title: '保存图片需要相册权限', text: '保存图片需要相册权限，请在设置中开启「保存到相册」。', confirmLabel: '去设置', cancelLabel: '取消', action: 'albumSettings' };
+      c.ui.albumDenied = true; // overlay.albumDenied: 去设置 (album:openSetting) / 取消 (album:cancel)
     } else {
       res.saveState = 'error';
       toast('保存失败，请稍后再试');
@@ -1019,13 +1023,22 @@ function createController(deps) {
 
   // ---------------------------------------------------------------- banner (spec 12, PO-14)
 
-  function bannerFor(b) {
+  /** Pure: the banner slot for a board state (no side effects), the same numbers bannerFor() and openBoard() use. */
+  function bannerSlot(b) {
     const f = c.features.banner;
     const L = getLayout();
     const width = Math.max(0, (L.W || 375) - 32);
     const enabled = !!(f.enabled && (ads.stub || f.adUnitId));
     const show = !!(enabled && b && (b.state === 'ready' || b.state === 'empty'));
     const height = ads.bannerHeight || Math.round(width * 0.29);
+    return { show, reservedHeight: show ? height : 0, stub: show && ads.stub };
+  }
+
+  function bannerFor(b) {
+    const f = c.features.banner;
+    const L = getLayout();
+    const slot = bannerSlot(b);
+    const show = slot.show;
     // native banner lifecycle: created on the board, hidden under a dialog, destroyed on leaving
     if (!show) {
       if (c.bannerLive) {
@@ -1036,10 +1049,11 @@ function createController(deps) {
       if (c.ui.dialog) {
         if (ads.bannerActive) ads.bannerHide();
       } else if (!ads.bannerActive) {
-        c.bannerLive = ads.bannerShow({ unitId: f.adUnitId, left: 16, width, bottomEdge: L.bottomEdge || L.H || 0 }) || c.bannerLive;
+        const rect = bannerRectOf(L, slot);
+        if (rect) c.bannerLive = ads.bannerShow({ unitId: f.adUnitId, left: rect.x, width: rect.w, bottomEdge: rect.y + rect.h, gap: 0 }) || c.bannerLive;
       }
     }
-    return { show, reservedHeight: show ? height : 0, stub: show && ads.stub };
+    return slot;
   }
 
   // ---------------------------------------------------------------- entry routing (9.4)
@@ -1130,14 +1144,16 @@ function createController(deps) {
   c.onDrag = function (id, dy) {
     const max = (c.scrollMax && c.scrollMax[id]) || 0;
     const clampTo = (v) => Math.max(0, Math.min(max, v));
-    if (id === 'pool:list') c.ui.poolScroll = clampTo(c.ui.poolScroll - dy);
+    if (id === 'home:scroll') c.ui.homeScroll = clampTo((c.ui.homeScroll || 0) - dy);
+    else if (id === 'pool:list') c.ui.poolScroll = clampTo(c.ui.poolScroll - dy);
     else if (id === 'result:scroll') c.ui.scrollY = clampTo(c.ui.scrollY - dy);
     else if (id === 'sheet:list') c.ui.sheetScroll = clampTo(c.ui.sheetScroll - dy);
     else if (id === 'history:list') c.history.scroll = clampTo((c.history.scroll || 0) - dy);
-    else if (id === 'issue:scroll') c.ui.issueScroll = clampTo((c.ui.issueScroll || 0) - dy);
+    else if (id === 'issue:list') c.ui.issueScroll = clampTo((c.ui.issueScroll || 0) - dy);
     else if (id === 'board:list' && c.board) {
       const L = getLayout();
-      const cap = (c.board.rowCount || 0) * 66 * (L.s || 1);
+      const rowH = display().largeText ? 100 : 66; // open data row height (CONTRACT: board)
+      const cap = (c.board.rowCount || 0) * rowH * (L.s || 1);
       c.ui.boardScroll = Math.max(0, Math.min(cap, c.ui.boardScroll - dy));
       odc.scroll(c.ui.boardScroll);
     }
@@ -1150,6 +1166,14 @@ function createController(deps) {
     if (ads.overlay) {
       if (id === 'adstub:complete') ads.stubComplete();
       else if (id === 'adstub:skip') ads.stubSkip();
+      return invalidate();
+    }
+    if (ui.albumDenied) {
+      if (id === 'album:openSetting') {
+        // wx.openSetting on this tap only; never re-asked automatically
+        ui.albumDenied = false;
+        album.openSetting().then(() => invalidate());
+      } else if (id === 'album:cancel') ui.albumDenied = false;
       return invalidate();
     }
     if (ui.dialog) {
@@ -1187,6 +1211,7 @@ function createController(deps) {
       c.screen = 'history';
       return invalidate();
     }
+    if (id === 'issue:retry') return openHistory(); // the issue could not be found: reload the archive
   }
 
   function homeHit(id) {
@@ -1210,6 +1235,7 @@ function createController(deps) {
         return openBoard('friend');
       case 'home:howto':
         c.home.sheet = 'howto';
+        c.ui.sheetScroll = 0;
         return invalidate();
       case 'home:history':
         return openHistory();
@@ -1219,7 +1245,14 @@ function createController(deps) {
         return setDisplay({ highContrast: !display().highContrast });
       case 'home:settings':
         c.home.sheet = 'settings';
+        c.ui.sheetScroll = 0;
         return invalidate();
+      case 'settings:openAlbum':
+        // album permission was refused earlier: 去设置, wx.openSetting on this tap only
+        return album.openSetting().then(() => invalidate());
+      case 'home:scroll':
+      case 'sheet:list':
+        return; // drag areas (onDrag); a tap does nothing
       case 'home:sound':
       case 'settings:sound':
         S.muted = !S.muted;
@@ -1239,6 +1272,7 @@ function createController(deps) {
           store.save();
         }
         c.home.sheet = null;
+        c.ui.sheetScroll = 0;
         return invalidate();
     }
   }
@@ -1273,7 +1307,7 @@ function createController(deps) {
     }
     if (c.ui.coach === 1 && id === 'primary') endCoach();
     if (id === 'primary') return onPrimary();
-    if (id === 'round:retry') return r.roundFetch === 'failed' ? fetchRound() : undefined;
+    if (id === 'retryRound') return r.roundFetch === 'failed' ? fetchRound() : undefined;
     if (id === 'undo') return undo();
     if (id === 'respin:faction') return respin('faction', 'free');
     if (id === 'respin:era') return respin('era', 'free');
@@ -1281,13 +1315,16 @@ function createController(deps) {
     if (id === 'respinAd:era') return respinAd('era');
     if (id === 'sheet:close') {
       c.ui.selectedId = null;
+      c.ui.sheetScroll = 0;
       return invalidate();
     }
+    if (id === 'sheet:list') return; // drag area of the detail sheet
     if (id.indexOf('pool:') === 0 && id !== 'pool:list') {
       if (r.run.phase !== 'flipped') return;
       const gid = id.slice(5);
       if (r.run.drafted[gid]) return; // 已点将: dimmed, unselectable (PO-2)
       c.ui.selectedId = c.ui.selectedId === gid ? null : gid;
+      c.ui.sheetScroll = 0;
       if (c.ui.coach === 2) c.ui.coach = 3;
       return invalidate();
     }
@@ -1299,7 +1336,14 @@ function createController(deps) {
     if (!res) return;
     const ui = c.ui;
     // 五德揭晓 (识人): a tap anywhere skips to the full reveal
-    if (res.reveal && res.reveal.pending && res.status === 'done') return completeReveal(true);
+    if (res.reveal && res.reveal.pending && res.status === 'done') {
+      if (id === 'result:back') {
+        c.r = null;
+        return goHome();
+      }
+      if (id === 'result:revealSkip') return completeReveal(true); // the verdict area: a tap skips to the full reveal
+      return; // no other action is drawn while the 五德揭晓 plays
+    }
     if (id === 'result:skip') {
       if (res.status === 'revealing') {
         track('reveal_skip', { runId: res.runId, atBattle: Math.min(12, Math.floor(revealCount(now()))) });
@@ -1459,12 +1503,12 @@ function createController(deps) {
     let vm;
     switch (c.screen) {
       case 'home':
-        vm = V.homeVm(c.home.daily, { hasGroupContext: c.group.status === 'ok', muted: S.muted, showHowToOnce: c.home.sheet === 'howto' && !S.howtoSeen, friendBoardEnabled: privacy.friendBoardEnabled(), sheet: c.home.sheet, t, display: display(), privacy: privacy.status().privacy, friendScope: privacy.status().friendScope, album: album.scope });
+        vm = V.homeVm(c.home.daily, { hasGroupContext: c.group.status === 'ok', muted: S.muted, showHowToOnce: c.home.sheet === 'howto' && !S.howtoSeen, friendBoardEnabled: privacy.friendBoardEnabled(), sheet: c.home.sheet, t, display: display(), privacy: privacy.status().privacy, friendScope: privacy.status().friendScope, album: album.scope, scrollY: c.ui.homeScroll || 0, sheetScroll: c.ui.sheetScroll });
         if (vm.daily.streak.current >= 2) trackOnce('streak:home', 'streak_shown', { current: vm.daily.streak.current, where: 'home' });
         break;
       case 'draft': {
         const flip = c.ui.flipStart ? Math.min(1, (t - c.ui.flipStart) / FLIP_MS) : undefined;
-        vm = V.draftVm(c.r.run, { selectedId: c.ui.selectedId, poolScroll: c.ui.poolScroll, flip, coach: c.ui.coach, adState: c.ui.adState, t, hidden: c.r.hidden, roundFetch: c.r.roundFetch, shirenCoach: c.r.hidden && !S.shirenCoachSeen && c.r.run.picks.length === 0 });
+        vm = V.draftVm(c.r.run, { selectedId: c.ui.selectedId, poolScroll: c.ui.poolScroll, sheetScroll: c.ui.sheetScroll, flip, coach: c.ui.coach, adState: c.ui.adState, t, hidden: c.r.hidden, roundFetch: c.r.roundFetch, shirenCoach: c.r.hidden && !S.shirenCoachSeen && c.r.run.picks.length === 0 });
         break;
       }
       case 'result': {
@@ -1498,6 +1542,7 @@ function createController(deps) {
     if (c.screen !== 'board') bannerFor(null); // destroys a live banner when the board is left
     vm.display = V.displayVm(display());
     const overlay = {};
+    if (c.ui.albumDenied) overlay.albumDenied = true;
     if (c.ui.dialog) overlay.dialog = { title: c.ui.dialog.title, text: c.ui.dialog.text, confirmLabel: c.ui.dialog.confirmLabel, cancelLabel: c.ui.dialog.cancelLabel, danger: !!c.ui.dialog.danger };
     if (c.ui.toast) overlay.toast = { text: c.ui.toast.text };
     if (ads.overlay) overlay.adStub = { kind: ads.overlay.kind, secondsLeft: Math.max(0, Math.ceil((ads.overlay.durationMs - (t - ads.overlay.startedAt)) / 1000)) };

@@ -79,7 +79,7 @@ The open data domain clamps scroll itself, and it cannot tell the main domain th
 - `dialog: {title?, text, confirmLabel, cancelLabel?, danger?}` -> `dialog:confirm`, `dialog:cancel`
 - `toast: {text}` (no hit areas; logic removes it)
 - `adStub: {kind:'rewarded'|'interstitial', secondsLeft}` -> `adstub:complete`, `adstub:skip`
-- `privacy: {}` (own dialog if `onNeedPrivacyAuthorization` is used) -> `privacy:agree`, `privacy:refuse`, `privacy:contract`
+- `privacy: {}` (own dialog, the spec 11.6 fallback if the device spike rules out the official popup; **not wired in v1**: the controller uses `wx.requirePrivacyAuthorize`) -> `privacy:agree`, `privacy:refuse`, `privacy:contract`
 - `albumDenied: true` -> "保存图片需要相册权限" with `album:openSetting` (call `wx.openSetting`) and `album:cancel` (spec 8.12; shown by logic after privacy/scope refusal, no automatic re-ask)
 
 ## shareCard  (`shareCard.js`)

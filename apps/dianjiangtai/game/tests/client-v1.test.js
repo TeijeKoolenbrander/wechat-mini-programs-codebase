@@ -132,7 +132,7 @@ test('progressive daily offline: 令牌传递中断 with 重试, the current rou
   assert.strictEqual(named(g, 'round_fetch').filter((e) => e.props.result === 'offline').length, 1);
   // still the same attempt after the network returns
   g.app.api.mock.offline = false;
-  hit(g, 'round:retry');
+  hit(g, 'retryRound');
   await g.settle();
   g.wait(1300);
   vm = view(g).vm;
@@ -198,7 +198,7 @@ test('Sunday 识人 daily: stats, tier, fit and S_r hidden until the verdict, th
   assert.ok(vm.reveal.pending && vm.reveal.step >= 2);
   assert.ok(vm.lineup[0].stats && vm.lineup[0].tier && vm.lineup[0].fit && vm.lineup[0].score !== null, 'revealed slots show everything');
   assert.strictEqual(vm.lineup[4].stats, null, 'later slots still hidden');
-  hit(g, 'result:skip'); // a tap skips
+  hit(g, 'result:revealSkip'); // a tap skips
   vm = view(g).vm;
   assert.deepStrictEqual(vm.reveal, { pending: false, step: 5 });
   assert.ok(vm.lineup.every((e) => e.stats && e.tier && e.fit && e.score !== null));
@@ -209,6 +209,8 @@ test('Sunday 识人 daily: stats, tier, fit and S_r hidden until the verdict, th
   // the card carries the tag and the shiren share title
   const card = require('../js/vm').cardVm(g.app.ctl.state.res, g.app.ctl.state.r.run.content);
   assert.strictEqual(card.variantLabel, '识人');
+  g.frame();
+  g.app.ctl.onDrag('result:scroll', -99999); // the shiren verdict is taller (stats per row): the action buttons are below the fold
   g.tapId('result:share');
   await g.settle();
   assert.ok(/识人军令，我 \d+胜\d+负，你认得几员将？/.test(g.log.shares[0].title), g.log.shares[0].title);
@@ -371,12 +373,13 @@ test('save to album denied: permission sheet with 去设置, openSetting only on
   hit(g, 'result:save');
   await g.settle();
   let ov = view(g).overlay;
-  assert.ok(ov.dialog && ov.dialog.confirmLabel === '去设置' && /相册权限/.test(ov.dialog.title + ov.dialog.text));
+  assert.strictEqual(ov.albumDenied, true, 'overlay.albumDenied: 保存图片需要相册权限 with 去设置 / 取消');
+  assert.ok(g.ids().includes('album:openSetting') && g.ids().includes('album:cancel'));
   assert.strictEqual(view(g).vm.saveImage.state, 'denied');
   assert.strictEqual(calls(g, /^openSetting/).length, 0, 'no automatic settings page');
   assert.strictEqual(named(g, 'save_image')[0].props.result, 'scopeDenied');
-  hit(g, 'dialog:cancel');
-  assert.ok(!view(g).overlay.dialog);
+  hit(g, 'album:cancel');
+  assert.ok(!view(g).overlay.albumDenied);
   assert.strictEqual(calls(g, /^openSetting/).length, 0);
   // the scope is now refused: the next tap shows the sheet directly, with no save attempt
   const saves = calls(g, /saveImageToPhotosAlbum/).length;
@@ -386,11 +389,12 @@ test('save to album denied: permission sheet with 去设置, openSetting only on
   await freeRun(g2);
   hit(g2, 'result:save');
   await g2.settle();
-  assert.ok(view(g2).overlay.dialog, 'sheet shown directly');
+  assert.strictEqual(view(g2).overlay.albumDenied, true, 'sheet shown directly');
   assert.strictEqual(calls(g2, /saveImageToPhotosAlbum/).length, 0);
-  hit(g2, 'dialog:confirm');
+  g2.tapId('album:openSetting');
   await g2.settle();
   assert.strictEqual(calls(g2, /^openSetting/).length, 1, 'settings opened on the tap only');
+  assert.ok(!view(g2).overlay.albumDenied);
   assert.ok(saves >= 1);
   // free play still available
   hit(g2, 'result:again');
@@ -409,7 +413,7 @@ test('save to album: privacy refusal (104) takes the same sheet; a daily card ca
   assert.ok(card.footer.indexOf('点将台') >= 0);
   hit(g, 'result:save');
   await g.settle();
-  assert.ok(view(g).overlay.dialog);
+  assert.strictEqual(view(g).overlay.albumDenied, true);
   assert.strictEqual(named(g, 'save_image')[0].props.result, 'privacyDenied');
   assert.strictEqual(named(g, 'save_image')[0].props.mode, 'daily');
 });

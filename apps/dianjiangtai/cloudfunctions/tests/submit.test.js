@@ -329,6 +329,9 @@ test('getReplay uses final tokens after a free re-spin (复盘 lineup is drawabl
   const gens = require(require('path').join(h.root, 'getDaily', 'core', 'content.js')).getContent(CV).byId;
   for (const l of rep.best.lineup) {
     const g = gens[l.generalId];
-    assert.ok(run.finalTokens.some((t) => g.faction === t.faction && g.eras.includes(t.era)), l.generalId + ' not drawable from the final tokens');
+    // content 2: a general may appear in several factions; the lineup entry names the cell it was drafted from
+    const apps = g.appearances || [{ faction: g.faction, eras: g.eras }];
+    const fac = l.faction || g.faction;
+    assert.ok(run.finalTokens.some((t) => fac === t.faction && apps.some((a) => a.faction === t.faction && a.eras.includes(t.era))), l.generalId + ' not drawable from the final tokens');
   }
 });

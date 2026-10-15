@@ -269,11 +269,11 @@ function createAds(opts) {
     const h = ads.bannerHeight || Math.round(bannerInfo.width * 0.29);
     bannerAd.style = bannerAd.style || {};
     bannerAd.style.left = bannerInfo.left;
-    bannerAd.style.top = bannerInfo.bottomEdge - h - 8;
+    bannerAd.style.top = bannerInfo.bottomEdge - h - (bannerInfo.gap === undefined ? 8 : bannerInfo.gap);
     bannerAd.style.width = bannerInfo.width;
   }
 
-  /** info = { unitId, left, width, bottomEdge }. No-op in stub mode or when the platform has no banner API. */
+  /** info = { unitId, left, width, bottomEdge, gap? }. No-op in stub mode or when the platform has no banner API. */
   ads.bannerShow = function (info) {
     if (stub || !wx || !wx.createBannerAd || !info || !info.unitId) return false;
     bannerInfo = info;

@@ -43,7 +43,7 @@ function displayVm(d) {
 
 /**
  * daily: { state, issueNo, dateKey, round?, record?, bandLabel?, variant?, streak? }
- * opts: { hasGroupContext, muted, showHowToOnce, friendBoardEnabled, sheet, t, display, privacy, friendScope, album }
+ * opts: { hasGroupContext, muted, showHowToOnce, friendBoardEnabled, sheet, t, display, privacy, friendScope, album, scrollY, sheetScroll }
  */
 function homeVm(daily, opts) {
   const d = { state: daily.state, issueNo: daily.issueNo, dateKey: daily.dateKey };
@@ -70,6 +70,8 @@ function homeVm(daily, opts) {
       album: opts.album || 'unknown',
     },
     sheet: opts.sheet || null,
+    scrollY: opts.scrollY || 0,
+    sheetScroll: opts.sheetScroll || 0,
     t: opts.t || 0,
   };
 }
@@ -117,7 +119,7 @@ function poolRow(content, g, factionKey, hidden, drafted) {
     portraitUrl: null,
     seal: A.sealOf(content, g.id, { factionKey, hidden }),
     blurb: g.blurb,
-    appearanceNote: A.appearanceNote(g, factionKey),
+    appearanceNote: A.appearanceNote(g, factionKey, content),
     tier: hidden ? null : g.tier,
     stats: hidden ? null : Object.assign({}, g.stats),
     drafted: !!drafted,
@@ -160,7 +162,7 @@ function draftVm(run, ui) {
       seal: A.sealOf(content, g.id, { factionKey: g.faction, hidden, size: 96 }),
       blurb: g.blurb,
       statNote: hidden ? null : g.statNote,
-      appearanceNote: A.appearanceNote(g, fk),
+      appearanceNote: A.appearanceNote(g, fk, content),
       tier: hidden ? null : g.tier,
       stats: hidden ? null : Object.assign({}, g.stats),
       slotOptions,
@@ -204,6 +206,7 @@ function draftVm(run, ui) {
     primaryLabel,
     primaryDisabled: roundFetch === 'loading',
     poolScroll: ui.poolScroll || 0,
+    sheetScroll: ui.sheetScroll || 0,
     flip: ui.flip === undefined ? (run.phase === 'awaitFlip' ? 0 : 1) : ui.flip,
     notice,
     coach: ui.coach || 0,
@@ -228,6 +231,7 @@ function resultLineup(res, content, revealedCount) {
       const fk = (res.lineupFac && res.lineupFac[e.slot]) || g.faction;
       row.label = content.roleByKey[e.slot].label;
       row.factionKey = fk;
+      row.monogram = g.monogram;
       row.seal = A.sealOf(content, g.id, { factionKey: fk, hidden: !shown });
       row.tier = shown ? g.tier : null;
       row.stats = shown ? Object.assign({}, g.stats) : null;
@@ -299,7 +303,11 @@ function rarityText(res, config) {
     const share = config.freeRarity[res.record.w];
     return share === undefined ? null : '约 ' + Math.max(0.1, Math.round(share * 1000) / 10) + '% 的阵容能达到';
   }
-  if (res.rarity && res.rarity.share !== null && res.rarity.share !== undefined) return BAND_SHARE_TEXT(res.rarity.share, res.record.w);
+  // server contract (submitRun.rarity): { pct: percent at or better with one decimal, total }, null under 30 runs.
+  // `share` (a 0..1 fraction) is accepted too.
+  const rr = res.rarity;
+  if (rr && rr.pct !== null && rr.pct !== undefined) return BAND_SHARE_TEXT(rr.pct / 100, res.record.w);
+  if (rr && rr.share !== null && rr.share !== undefined) return BAND_SHARE_TEXT(rr.share, res.record.w);
   return null;
 }
 
@@ -352,7 +360,7 @@ function boardVm(b) {
 
 /** Main domain -> open data domain message (13). Rows may carry the server streak k as the 5th element. */
 function boardMessage(kind, payload, extra) {
-  const { content, groupRef, shareTicket, groupid, board, dpr, showUnverified } = extra;
+  const { content, groupRef, shareTicket, groupid, board, dpr, showUnverified, display } = extra;
   const msg = {
     type: 'render',
     kind,
@@ -369,7 +377,8 @@ function boardMessage(kind, payload, extra) {
     width: board.w,
     height: board.h,
     dpr: dpr || 1,
-    roster: content.generals.map((g) => [g.monogram, g.faction]),
+    roster: content.generals.map((g) => [g.monogram, g.faction, g.tier]),
+    display: { largeText: !!(display && display.largeText), highContrast: !!(display && display.highContrast) },
   };
   if (kind === 'group') {
     if (groupid) msg.groupid = groupid;
@@ -401,7 +410,7 @@ function historyVm(h, ctx) {
     state: h.state,
     bestStreakText: h.bestStreak >= STREAK_MIN ? '最长连续出征 ' + h.bestStreak + ' 天' : null,
     items,
-    scroll: h.scroll || 0,
+    scrollY: h.scroll || 0,
     t: ctx.t || 0,
   };
 }
@@ -410,21 +419,29 @@ function thousands(n) {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-function lineupFromIdx(content, idx, fac, hidden) {
+/** withStats: 识人 days show the five stats in the archive (the day is over for this player, spec 8.9); other days show names and seals only. */
+function lineupFromIdx(content, idx, fac, hidden, withStats) {
   return SLOTS.map((slot, k) => {
     const g = content.generals[idx[k]];
-    if (!g) return { slot, label: content.roleByKey[slot].label, name: null, seal: null, stats: null };
+    if (!g) return { slot, label: content.roleByKey[slot].label, name: '', seal: null, tier: null, stats: null };
     const fk = (fac && fac[k]) || g.faction;
-    return { slot, label: content.roleByKey[slot].label, name: g.name, seal: A.sealOf(content, g.id, { factionKey: fk, hidden: !!hidden }), stats: Object.assign({}, g.stats) };
+    return {
+      slot,
+      label: content.roleByKey[slot].label,
+      name: g.name,
+      seal: A.sealOf(content, g.id, { factionKey: fk, hidden: !!hidden }),
+      tier: g.tier,
+      stats: withStats ? Object.assign({}, g.stats) : null,
+    };
   });
 }
 
 /** Issue detail (spec 8.9): the player's lineup, the distribution (>= 30 runs), the best lineup after D+1 00:30. */
 function historyIssueVm(item, ctx) {
   const { content, config, windowClosed } = ctx;
-  if (!item) return { state: ctx.state || 'error', dateKey: null, issueNo: 0, variantLabel: null, mine: null, stats: null, best: null, bestLockedText: null };
+  if (!item) return { state: ctx.state || 'error', dateKey: null, issueNo: 0, variantLabel: null, mine: null, stats: null, best: null, bestLockedText: null, scrollY: 0, t: ctx.t || 0 };
   const mine = item.mine
-    ? { record: { w: item.mine.w, l: item.mine.l }, bandLabel: bandFor(config, item.mine.w).label, lineup: lineupFromIdx(content, item.mine.lineupIdx || [], item.mine.lineupFac, false) }
+    ? { record: { w: item.mine.w, l: item.mine.l }, bandLabel: bandFor(config, item.mine.w).label, lineup: lineupFromIdx(content, item.mine.lineupIdx || [], item.mine.lineupFac, false, item.variant === 'shiren') }
     : null;
   let stats = null;
   if (item.hist && item.total >= HISTORY_MIN_RUNS) {
@@ -437,7 +454,7 @@ function historyIssueVm(item, ctx) {
       }),
     };
   }
-  const best = item.best ? { record: item.best.record, lineup: lineupFromIdx(content, item.best.lineupIdx, null, false).map((e) => ({ slot: e.slot, label: e.label, name: e.name, seal: e.seal })) } : null;
+  const best = item.best ? { record: item.best.record, lineup: lineupFromIdx(content, item.best.lineupIdx, item.best.lineupFac || null, false, false).map((e) => ({ slot: e.slot, label: e.label, name: e.name, seal: e.seal })) } : null;
   return {
     state: 'ready',
     dateKey: item.dateKey,
@@ -447,7 +464,7 @@ function historyIssueVm(item, ctx) {
     stats,
     best,
     bestLockedText: best || windowClosed ? null : BEST_LOCKED_TEXT,
-    scroll: ctx.scroll || 0,
+    scrollY: ctx.scroll || 0,
     t: ctx.t || 0,
   };
 }

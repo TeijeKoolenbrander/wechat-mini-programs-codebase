@@ -44,6 +44,8 @@ function loadRenderers() {
       },
       drawOverlay: (ctx, ov, layout) => (real.overlay ? real.overlay.draw(ctx, ov, layout) : []),
       hitTest: real.hitTest || hitTestLocal,
+      boardRect: real.boardRect || null,
+      bannerRect: real.bannerRect || null,
       shareCard: real.shareCard || null,
     };
   }

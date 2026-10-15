@@ -16,7 +16,10 @@ function bestOf(seedDoc) {
     if (!seedDoc.best) return null;
     const lineup = core.normaliseLineup(seedDoc.best.lineup);
     if (!lineup) return null;
-    return { lineupIdx: core.lineupToIdx(lineup, seedDoc.contentVersion), record: seedDoc.best.record || { w: 12, l: 0 } };
+    // lineupFac: the cell each general was drafted from (content 2 cohesion / seal colour), when the stored best carries it
+    const out = { lineupIdx: core.lineupToIdx(lineup, seedDoc.contentVersion), record: seedDoc.best.record || { w: 12, l: 0 } };
+    if (lineup.every((l) => l.faction)) out.lineupFac = lineup.map((l) => l.faction);
+    return out;
   } catch (e) {
     return null;
   }

@@ -56,6 +56,9 @@ exports.main = store.handler(async (event, { openid }) => {
     ok: true, resumed: !created || p.released > 1 || p.actions.length > 0, countsAsDaily,
     released: p.released, rounds: progress.releasedRounds(sheet, p.released),
   };
-  if (out.resumed) out.actions = p.actions;
+  if (out.resumed) {
+    out.actions = p.actions;
+    out.clientRunId = p.clientRunId; // the attempt's original run id (a second device adopts it)
+  }
   return out;
 });

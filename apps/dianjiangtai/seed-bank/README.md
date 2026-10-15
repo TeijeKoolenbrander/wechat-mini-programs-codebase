@@ -2,6 +2,8 @@
 
 Output folder for the offline daily seed bank (spec 5.2). The files here are **spoilers** (they list future daily seeds) and are git-ignored: never commit them, delete them after the import. A `bank*.json` file anywhere under `apps/dianjiangtai/` also trips the cloudfunctions `qa-trust` test (AC 54) while it exists, so keep it here only while preparing the import.
 
+Simplest and safest: generate straight into a folder outside the repo (for example `--bank-file $TMPDIR/bank-cv2-60d.json`) and pass that path to `prepare-bank.js`. Then no bank file ever sits under `apps/dianjiangtai/`, the `qa-trust` AC 54 test stays green, and nothing can be committed by accident. The commands below write into this folder instead, which also works because the ignore file here covers it (delete the file after the import).
+
 Generate (contentVersion 2, configVersion 2, strict gate: optimal = 12-0, greedy window, random window):
 
 ```

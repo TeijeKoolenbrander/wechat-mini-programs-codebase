@@ -25,13 +25,15 @@ function interstitialDefaults(config) {
 }
 
 /**
- * raw: getDaily.features (may be undefined). build: build-config (optional
+ * raw: getDaily.features (may be undefined). The backend sends { ads: { banner, interstitial }, subscribe? }
+ * (cloudfunctions/common/appconfig.js); the flat spec 13 shape { subscribe, banner, interstitial } is accepted too. build: build-config (optional
  * local template id, used when the remote one is absent).
  */
 function normalizeFeatures(raw, config, build) {
   raw = raw && typeof raw === 'object' ? raw : {};
   const d = interstitialDefaults(config);
-  const ri = raw.interstitial && typeof raw.interstitial === 'object' ? raw.interstitial : {};
+  const ads = raw.ads && typeof raw.ads === 'object' ? raw.ads : raw;
+  const ri = ads.interstitial && typeof ads.interstitial === 'object' ? ads.interstitial : {};
   const interstitial = {
     enabled: ri.enabled === undefined ? d.enabled : ri.enabled === true,
     everyNRuns: num(ri.everyNRuns, d.everyNRuns, CLAMP.everyNRuns[0], CLAMP.everyNRuns[1]),
@@ -39,7 +41,7 @@ function normalizeFeatures(raw, config, build) {
     minGapSec: num(ri.minGapSec, d.minGapSec, CLAMP.minGapSec[0], CLAMP.minGapSec[1]),
     maxPerDay: num(ri.maxPerDay, d.maxPerDay, CLAMP.maxPerDay[0], CLAMP.maxPerDay[1]),
   };
-  const rb = raw.banner && typeof raw.banner === 'object' ? raw.banner : {};
+  const rb = ads.banner && typeof ads.banner === 'object' ? ads.banner : {};
   const unit = typeof rb.adUnitId === 'string' && rb.adUnitId ? rb.adUnitId : null;
   const banner = { enabled: rb.enabled === true, adUnitId: unit };
   let tmplId = raw.subscribe && typeof raw.subscribe.tmplId === 'string' ? raw.subscribe.tmplId : '';

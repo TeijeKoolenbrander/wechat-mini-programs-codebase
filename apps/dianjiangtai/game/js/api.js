@@ -1,7 +1,7 @@
 /**
  * Cloud function wrapper (spec 14.2). Every call returns a Promise that
  * RESOLVES to the function's result ({ok:true,...}) or to
- * {ok:false, code, msg}; it never rejects, so callers branch on `ok`.
+ * {ok:false, code, message}; it never rejects, so callers branch on `ok`.
  *
  *   getDaily, startRun, submitRun, joinGroup, getBoard, getReplay,
  *   createChallenge, getChallenge, track
@@ -41,16 +41,16 @@ function createApi(opts) {
         clearTimer(timer);
         resolve(r);
       };
-      const timer = setTimer(() => done({ ok: false, code: 'TIMEOUT', msg: 'timeout' }), TIMEOUT_MS[name] || 8000);
+      const timer = setTimer(() => done({ ok: false, code: 'TIMEOUT', message: 'timeout' }), TIMEOUT_MS[name] || 8000);
       try {
         wx.cloud.callFunction({
           name,
           data,
           success: (res) => done(res && res.result && typeof res.result === 'object' ? res.result : { ok: false, code: 'BAD_RESPONSE' }),
-          fail: (e) => done({ ok: false, code: 'NETWORK', msg: (e && e.errMsg) || 'network' }),
+          fail: (e) => done({ ok: false, code: 'NETWORK', message: (e && e.errMsg) || 'network' }),
         });
       } catch (e) {
-        done({ ok: false, code: 'NETWORK', msg: String(e && e.message) });
+        done({ ok: false, code: 'NETWORK', message: String(e && e.message) });
       }
     });
   }

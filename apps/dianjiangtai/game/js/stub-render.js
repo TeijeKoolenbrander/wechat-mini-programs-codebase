@@ -109,7 +109,7 @@ const drawers = {
     if (vm.shirenCoach) p.text(vm.shirenCoach, 14);
     if (vm.roundFetchText) {
       p.text(vm.roundFetchText);
-      p.button('round:retry', '重试');
+      p.button('retryRound', '重试');
     }
     if (vm.tokens) p.text('令牌：' + vm.tokens.faction.label + ' · ' + vm.tokens.era.label);
     if (vm.notice) p.text(vm.notice);
@@ -151,7 +151,7 @@ const drawers = {
     }
     if (vm.reveal && vm.reveal.pending) {
       p.text('五德揭晓 ' + vm.reveal.step + '/5');
-      p.hits.push({ id: 'result:skip', x: 0, y: 0, w: p.L.W, h: p.L.H });
+      p.hits.push({ id: 'result:revealSkip', x: 0, y: 0, w: p.L.W, h: p.L.H });
     }
     p.text(vm.record.w + ' 胜 ' + vm.record.l + ' 负  ' + vm.band.label + (vm.variantLabel ? ' · ' + vm.variantLabel : ''), 24);
     if (vm.streak && vm.streak.text) p.text(vm.streak.text);

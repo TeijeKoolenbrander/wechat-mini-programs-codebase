@@ -1,35 +1,31 @@
 /**
- * The one place where the client touches v1/v2 core details that are still
- * moving (multi-appearance content, 晋 faction, pool cap, shiren weekday).
- * Everything here tolerates both contentVersion 1 (single appearance, four
- * factions) and contentVersion 2 (appearances[], 晋). If the core API names
- * change, fix them here only.
+ * The one place where the client touches core details that the UI needs reshaped (seals, appearance notes,
+ * 已点将 rows, drafted-cell factions). It uses the final core API (core/README.md): date.weekdayOf / variantOf,
+ * draft.draftedInCell, draft.currentPool, content.appearanceNote. It still tolerates contentVersion 1 content
+ * (single appearance, four factions) for old stored runs. If the core API names change, fix them here only.
  *
- * Assumptions (spec 3.5, 4, 8.11, PO-2, PO-5):
- *  - general.appearances?: [{ faction, eras[], note? }] (absent in v1 -> derived from faction/eras)
+ *  - general.appearances: [{ faction, eras[], note? }] (content 1: derived from faction/eras)
  *  - content.cells['faction|era'] = roster indexes of the (uncapped) cell
  *  - draft.currentPool(run) = roster indexes of the selectable (undrafted, capped) pool
- *  - run.picks[] = { round, generalId, slot }, run.finalTokens[round-1] = { faction, era } (the drafted cell)
+ *  - run.picks[] = { round, generalId, slot, faction? }, run.finalTokens[round-1] = { faction, era }
  *  - config.shiren.weekday (default 0 = Sunday)
  */
 
 const draft = require('../core/draft');
-const { SLOTS } = require('../core/content');
+const { SLOTS, appearanceNote: coreAppearanceNote } = require('../core/content');
+const dateMod = require('../core/date');
 
 const FALLBACK_FACTION_COLOR = { jin: '#DCE3EA' };
 const SHIREN_WEEKDAY_DEFAULT = 0;
 
 function weekdayOf(dateKey) {
-  const y = +dateKey.slice(0, 4);
-  const m = +dateKey.slice(4, 6);
-  const d = +dateKey.slice(6, 8);
-  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return dateMod.weekdayOf(dateKey);
 }
 
 /** 'shiren' on the configured weekday (Beijing date key), otherwise 'standard'. */
 function variantFor(config, dateKey) {
   const wd = config && config.shiren && config.shiren.weekday !== undefined ? config.shiren.weekday : SHIREN_WEEKDAY_DEFAULT;
-  return weekdayOf(dateKey) === wd ? 'shiren' : 'standard';
+  return dateMod.variantOf(dateKey, wd);
 }
 
 function appearancesOf(g) {
@@ -38,7 +34,8 @@ function appearancesOf(g) {
 }
 
 /** Appearance note (e.g. 从公孙瓒) for the cell the general is shown in, or null. */
-function appearanceNote(g, factionKey) {
+function appearanceNote(g, factionKey, content) {
+  if (content && content.byId && content.byId[g.id]) return coreAppearanceNote(content, g.id, factionKey) || null;
   const a = appearancesOf(g).find((x) => x.faction === factionKey);
   return a && a.note ? a.note : null;
 }
@@ -75,7 +72,7 @@ function poolTotal(run) {
 /** Roster indexes of drafted generals who belong to the current cell (shown dimmed, 已点将). */
 function draftedInCell(run) {
   if (!run.token) return [];
-  return cellMembers(run.content, run.token.faction, run.token.era).filter((gi) => run.drafted[run.content.roster[gi]]);
+  return draft.draftedInCell(run, run.token.faction, run.token.era);
 }
 
 /** { slot -> factionKey } of the cell each lineup general was drafted from. */

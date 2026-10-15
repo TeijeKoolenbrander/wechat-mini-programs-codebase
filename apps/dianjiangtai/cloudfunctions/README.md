@@ -142,7 +142,11 @@ node apps/dianjiangtai/cloudfunctions/scripts/prepare-bank.js <tmp>/bank.json <t
 
 ### Importing the contentVersion 2 launch bank (`apps/dianjiangtai/seed-bank/bank-cv2-60d.json`)
 
-The core agent generates the launch bank (>= 60 accepted days for contentVersion 2 / configVersion 2, spec 5.2, PO-17). All contentVersion 1 entries are unusable once the live core is 2 (`genDaily` filters by `contentVersion`, `configVersion`, `gateVersion` and would fall back to the slow live loop). Steps for whoever holds the console:
+The launch bank (>= 60 accepted days for contentVersion 2 / configVersion 2, spec 5.2, PO-17) is **not in git, on purpose**: it lists future daily seeds (a spoiler), and any `bank*.json` under `apps/dianjiangtai/` trips the `qa-trust` test (AC 54), so it lives only while you prepare the import. Regenerate it whenever it is needed (about 5 minutes on 8 cores; the command and flags are in `apps/dianjiangtai/seed-bank/README.md`):
+
+```
+node apps/dianjiangtai/game/tools/simstats.js --seeds 1000 --optseeds 100 --gateseeds 100 --timeseeds 10 --bank 60 --bank-file apps/dianjiangtai/seed-bank/bank-cv2-60d.json
+``` All contentVersion 1 entries are unusable once the live core is 2 (`genDaily` filters by `contentVersion`, `configVersion`, `gateVersion` and would fall back to the slow live loop). Steps for whoever holds the console:
 
 ```
 # 1. re-verify every entry against the live core and convert to JSON Lines (offline, no cloud access needed)

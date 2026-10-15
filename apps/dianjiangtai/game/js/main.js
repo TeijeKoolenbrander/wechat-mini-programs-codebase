@@ -97,6 +97,8 @@ function boot() {
   const ctl = createController({
     wx, api, store, analytics, ads, share, privacy, odc, audio, config, content, invalidate, subscribe, album, build,
     getLayout: () => layout,
+    boardRect: R.boardRect,
+    bannerRect: R.bannerRect,
     relayout: () => {
       layout = R.makeLayout(sys());
     },

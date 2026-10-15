@@ -114,6 +114,23 @@ function replayPartial(seed, contentVersion, actions, mode, rounds, configVersio
   }
 }
 
+/**
+ * Does `actions` begin with exactly the `frozen` actions? The core's own rule (validate.extendsPrefix), so the
+ * client, getRound and submitRun agree on what "extends the stored prefix" means.
+ */
+function extendsPrefix(frozen, actions) {
+  return validate.extendsPrefix(frozen, actions);
+}
+
+/**
+ * The sheet's round n as the core hands it out for a valid prefix (validate.roundToken). getRound serves the
+ * round from the STORED sheet (pinned at seed creation, so a later sheet-code change cannot alter a published
+ * day) after replayPartial; tests/core-consistency.test.js pins that both give the same round for every step.
+ */
+function roundToken(seed, contentVersion, n, priorActions, mode, configVersion) {
+  return validate.roundToken(seed, contentVersion, n, priorActions, mode, configVersion);
+}
+
 /** 'shiren' on the configured weekday (core config.shiren.weekday, default Sunday) of the Beijing date key, else 'standard'. */
 function variantFor(dateKey) {
   const c = getConfig(currentVersions().configVersion) || {};
@@ -204,5 +221,5 @@ module.exports = {
   dateKeyAt, currentVersions, configVersionFor, getConfig, boardListCap, bankLowWarn, roster,
   buildSheet, primaryTokens, replay, simulate, bestLineup, acceptDailySeed,
   normaliseLineup, lineupToIdx, finalTokens,
-  lineupFactions, replayPartial, variantFor, anomalyMinMs, interstitialDefaults, bandOf,
+  lineupFactions, replayPartial, extendsPrefix, roundToken, variantFor, anomalyMinMs, interstitialDefaults, bandOf,
 };

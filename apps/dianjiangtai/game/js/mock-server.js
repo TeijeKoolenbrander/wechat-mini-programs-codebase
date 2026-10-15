@@ -30,7 +30,7 @@ const ME = 'mock-openid-me';
 const HISTORY_MAX = 30;
 
 function err(code, msg) {
-  return { ok: false, code, msg: msg || code };
+  return { ok: false, code, message: msg || code };
 }
 
 function createMockServer(opts) {
@@ -81,10 +81,10 @@ function createMockServer(opts) {
 
   function rarityFor(dateKey, wins) {
     const st = db.stats[dateKey] || { hist: new Array(13).fill(0), total: 0 };
-    if (st.total < 30) return { share: null, total: st.total };
+    if (st.total < 30) return null; // same as the backend: no rarity under 30 runs
     let n = 0;
     for (let w = wins; w <= 12; w++) n += st.hist[w];
-    return { share: n / st.total, total: st.total };
+    return { pct: Math.round((n / st.total) * 1000) / 10, total: st.total };
   }
 
   /** Spoiler rule (backend dailyLocked): a daily-seed run stays sealed until the caller has a ranked daily for that date, or D+1 00:30. */
@@ -106,11 +106,10 @@ function createMockServer(opts) {
   /** The remote feature document (PO-11): missing -> everything optional is off. */
   function features() {
     const c = srv.appConfig || {};
-    return {
-      subscribe: c.subscribe && c.subscribe.tmplId ? { tmplId: c.subscribe.tmplId } : null,
-      banner: (c.ads && c.ads.banner) || { enabled: false, adUnitId: '' },
-      interstitial: (c.ads && c.ads.interstitial) || {},
-    };
+    // the backend shape (common/appconfig.js): { ads: { banner, interstitial }, subscribe? }
+    const f = { ads: { banner: (c.ads && c.ads.banner) || { enabled: false, adUnitId: '' }, interstitial: Object.assign({}, require('./features').interstitialDefaults(config), c.ads && c.ads.interstitial) } };
+    if (c.subscribe && c.subscribe.tmplId) f.subscribe = { tmplId: c.subscribe.tmplId };
+    return f;
   }
 
   /** Latest published date before dateKey. */
@@ -200,21 +199,21 @@ function createMockServer(opts) {
           return err('INVALID_ACTIONS');
         }
       }
-      const n = run.picks.length;
-      if (run.phase !== 'placed') return err('INVALID_ACTIONS');
-      // idempotent: the same frozen prefix again returns the same round
-      if (n === p.released - 1 && JSON.stringify(actions) === JSON.stringify(p.actions)) return { ok: true, round: p.released, data: s.rounds[p.released - 1] };
-      if (n !== p.released || n >= 5) {
-        flag('prefix', dateKey);
-        return err('INVALID_ACTIONS');
+      const n = run.picks.length; // the actions must end exactly after the pick of round n (1..4)
+      if (n < 1 || n > 4 || run.phase !== 'placed' || run.round !== n) return err('INVALID_ACTIONS');
+      const next = n + 1;
+      // same rules as the backend getRound
+      if (actionsExtend(p.actions, actions)) {
+        if (p.released < n) return err('INVALID_ACTIONS'); // cannot skip a round
+        if (p.released < next || p.actions.length !== actions.length) {
+          p.actions = actions.map((a) => Object.assign({}, a));
+          p.released = Math.max(p.released, next);
+        }
+        return { ok: true, round: next, data: s.rounds[n], released: p.released };
       }
-      if (!actionsExtend(p.actions, actions)) {
-        flag('prefix', dateKey);
-        return err('INVALID_ACTIONS');
-      }
-      p.actions = actions.map((a) => Object.assign({}, a));
-      p.released = n + 1;
-      return { ok: true, round: p.released, data: s.rounds[p.released - 1] };
+      if (actionsExtend(actions, p.actions) && next <= p.released) return { ok: true, round: next, data: s.rounds[n], released: p.released }; // stale retry
+      flag('prefix', dateKey);
+      return err('INVALID_ACTIONS');
     },
 
     submitRun(d) {
@@ -241,7 +240,7 @@ function createMockServer(opts) {
       const rep = replay(seed, cv, d.actions, mode === 'free' ? 'free' : mode);
       if (!rep.ok) {
         if (mode === 'daily') flag('invalid_ranked', dateKey);
-        return { ok: false, code: rep.error, reason: rep.reason, msg: rep.reason };
+        return { ok: false, code: rep.error, reason: rep.reason, message: rep.reason };
       }
       const sim = simulate(rep.lineup, seed, cv, config.configVersion);
       if (d.clientRecord && (d.clientRecord.w !== sim.record.w || d.clientRecord.l !== sim.record.l)) flag('mismatch', dateKey, { client: d.clientRecord, server: sim.record });
@@ -253,7 +252,7 @@ function createMockServer(opts) {
         const rk = dateKey + '_' + ME;
         if (db.results[rk]) {
           const prev = db.results[rk];
-          return Object.assign(err('ALREADY_PLAYED'), { record: { w: prev.w, l: 12 - prev.w }, existing: prev.response });
+          return Object.assign(err('ALREADY_PLAYED'), { result: prev.response });
         }
         const startedDate = dateKey;
         const lateLimit = beijingMidnightMs(t) + config.daily.graceMs;
@@ -330,7 +329,7 @@ function createMockServer(opts) {
           if (windowClosed(k)) {
             if (!db.bests[k]) {
               const b = bestLineup(s.seed, cv, s.rounds.map((r) => ({ faction: r.faction, era: r.era })), { configVersion: config.configVersion });
-              db.bests[k] = b ? { lineupIdx: b.lineup.map((e) => getContent(cv).indexOf[e.generalId]), record: b.record } : { none: true };
+              db.bests[k] = b ? { lineupIdx: b.lineup.map((e) => getContent(cv).indexOf[e.generalId]), lineupFac: b.lineup.map((e) => e.faction), record: b.record } : { none: true };
             }
             if (!db.bests[k].none) it.best = db.bests[k];
           }
@@ -449,7 +448,7 @@ function createMockServer(opts) {
       // a run that counts as today's daily gets its tokens round by round (startRun / getRound)
       if (!(dailyToday && counts)) out.rounds = c.rounds;
       if (c.owner === ME) out.subscribe = { granted: !!db.grants[d.challengeId] };
-      if (c.owner === ME && c.answers.length) out.bestAnswer = Math.max.apply(null, c.answers.map((a) => a.w));
+      if (c.owner === ME && c.answers.length) { const bw = Math.max.apply(null, c.answers.map((a) => a.w)); out.bestAnswer = { w: bw, l: 12 - bw }; }
       const locked = answered && dailyLocked(c.dateKey, c.seed);
       if (answered) {
         out.theirLineup = locked ? null : c.lineup;
