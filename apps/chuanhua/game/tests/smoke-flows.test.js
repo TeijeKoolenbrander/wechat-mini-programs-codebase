@@ -31,7 +31,7 @@ function agree(srv, id) {
 /** a chain started by 'S' in group G1 with 棒 1 passed */
 function seedChain(w, strokes) {
   agree(w.srv, 'S');
-  const ref = w.srv.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } }, 'S').groupRef;
+  const ref = w.srv.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G1', chat_type: 3 } } }, 'S').groupRef;
   const cr = w.srv.call('createChain', { promptId: 'A01', groupRef: ref }, 'S');
   assert.equal(cr.ok, true);
   w.srv.call('submitStep', { chainId: cr.chainId, claimId: cr.claim.claimId, strokes: drawing(strokes || 3) }, 'S');
@@ -103,7 +103,7 @@ test('claim lost: the app is frozen for 160 s, somebody else takes the 棒; the 
   X.type('一只猫在睡觉');
   // frozen in the background: no frames, no ticks, for 160 s of wall clock
   t.mock.timers.tick(160e3);
-  const ref = w.srv.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } }, 'Y').groupRef;
+  const ref = w.srv.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G1', chat_type: 3 } } }, 'Y').groupRef;
   agree(w.srv, 'Y');
   const cl = w.srv.call('claimStep', { chainId, groupRef: ref }, 'Y');
   assert.equal(cl.ok, true);
@@ -303,7 +303,7 @@ test('teaser for a non-participant: text only, 同题再传 preselects the promp
   const { chainId } = seedChain(w);
   // finish the chain quickly with S and B so it reveals
   agree(w.srv, 'B');
-  const refB = w.srv.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } }, 'B').groupRef;
+  const refB = w.srv.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G1', chat_type: 3 } } }, 'B').groupRef;
   const play = (who, ref, n) => {
     const cl = w.srv.call('claimStep', { chainId, groupRef: ref }, who);
     assert.equal(cl.ok, true, who + ' ' + cl.code);
@@ -311,7 +311,7 @@ test('teaser for a non-participant: text only, 同题再传 preselects the promp
     assert.equal(r.ok, true);
     w.adv(61e3);
   };
-  const refS = w.srv.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } }, 'S').groupRef;
+  const refS = w.srv.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G1', chat_type: 3 } } }, 'S').groupRef;
   play('B', refB, 2);
   play('S', refS, 3);
   play('B', refB, 4);
@@ -391,7 +391,7 @@ test('AC 97: a card opened during a turn does not interrupt it; it routes after 
   await X.settle();
   X.type('一只小猫');
   // another card arrives
-  const other = 'zzzzzzzzzz';
+  const other = 'AAAAAAAAAA';
   X.ctl.onShow({ scene: 1044, query: { k: other }, shareTicket: 'new', chatType: 3 });
   await X.settle();
   const v = X.view();

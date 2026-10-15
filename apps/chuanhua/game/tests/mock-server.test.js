@@ -14,7 +14,7 @@ function world() {
   w.user = (id) => {
     const u = srv.as(id);
     u.agree = () => u.call('agreeRules', { version: 1 });
-    u.join = (gid) => u.call('joinGroup', { groupData: { mockData: { opengid: gid, chat_type: 3 } } }).groupRef;
+    u.join = (gid) => u.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: gid, chat_type: 3 } } }).groupRef;
     return u;
   };
   return w;
@@ -136,7 +136,7 @@ test('two players complete a 6-棒 chain, reveal for participants only, teaser f
   // outsider: teaser only, no drawings
   const o = outsider.call('getReveal', { chainId: x.chainId });
   assert.deepEqual([o.ok, o.code], [false, 'NOT_PARTICIPANT']);
-  assert.deepEqual(o.teaser, { promptId: 'A01', promptText: '小猫吃面条', finalText: '外星人在吃披萨', passed: 6, canSameAgain: true });
+  assert.deepEqual(o.teaser, { promptId: 'A01', promptText: '小猫吃面条', finalText: '外星人在吃披萨', passed: 6, canSameAgain: true, paused: false });
   assert.ok(!/strokes/.test(JSON.stringify(o)));
   assert.equal(outsider.call('getChain', { chainId: x.chainId, groupRef: x.ref }).state, 'revealedTeaser');
   // laugh toggles
@@ -158,7 +158,7 @@ test('claim collision: second claimant gets TAKEN; expiry reopens; late submit r
   assert.equal(b.ok, true);
   const c = x.C.call('claimStep', { chainId: x.chainId, groupRef: x.ref });
   assert.deepEqual([c.ok, c.code], [false, 'TAKEN']);
-  assert.ok(x.C.call('getChain', { chainId: x.chainId, groupRef: x.ref }).claimEtaMs > 0);
+  assert.ok(x.C.call('getChain', { chainId: x.chainId, groupRef: x.ref }).takenEtaSec > 0);
   // B resumes the same claim (app restart)
   assert.equal(x.B.call('claimStep', { chainId: x.chainId, groupRef: x.ref }).claimId, b.claimId);
   // after 151 s C can claim; B's submit is then CLAIM_LOST
@@ -273,7 +273,7 @@ test('group binding: single chat and other group cannot claim; unbound chain bin
   C.agree();
   const g1 = C.join('G1');
   assert.equal(C.call('claimStep', { chainId: cr.chainId, groupRef: g1 }).code, 'WRONG_GROUP');
-  assert.equal(B.call('joinGroup', { groupData: { mockData: { opengid: 'X', chat_type: 1 } } }).code, 'NOT_GROUP');
+  assert.equal(B.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'X', chat_type: 1 } } }).code, 'NOT_GROUP');
 });
 
 test('reports hide at once for everyone, reopen the latest 棒, and cancel/release claims (AC 58-61)', () => {
@@ -281,8 +281,8 @@ test('reports hide at once for everyone, reopen the latest 棒, and cancel/relea
   pass1(x);
   const b = x.B.call('claimStep', { chainId: x.chainId, groupRef: x.ref });
   // B reports the previous 棒 (drawing 1) from the claim screen
-  assert.equal(x.A.call('report', { chainId: x.chainId, step: 1, reason: 'porn' }).code, 'OWN_STEP');
-  assert.equal(x.B.call('report', { chainId: x.chainId, step: 1, reason: 'bad' }).code, 'BAD_REASON');
+  assert.equal(x.A.call('report', { chainId: x.chainId, step: 1, reason: 'porn' }).code, 'NOT_PARTICIPANT'); // not revealed, not holding the next claim: as on the backend (OWN_STEP is pinned in client-contract.test.js)
+  assert.equal(x.B.call('report', { chainId: x.chainId, step: 1, reason: 'bad' }).code, 'BAD_INPUT');
   const r = x.B.call('report', { chainId: x.chainId, step: 1, reason: 'porn' });
   assert.deepEqual([r.ok, r.hidden, r.reopened], [true, true, true]);
   assert.equal(x.B.call('report', { chainId: x.chainId, step: 1, reason: 'porn' }).ok, false);
@@ -294,7 +294,7 @@ test('reports hide at once for everyone, reopen the latest 棒, and cancel/relea
   assert.equal(mine.mine[0].modState, 'hidden');
 });
 
-test('report in a revealed chain leaves a placeholder; teaser report hides the whole chain', () => {
+test('report in a revealed chain leaves a placeholder; teaser report hides the shown final sentence (preset prompt)', () => {
   const x = started();
   x.w.advance(61e3);
   x.A.call('getHome');
@@ -323,7 +323,7 @@ test('report in a revealed chain leaves a placeholder; teaser report hides the w
   // teaser report
   const t = x.C.call('report', { chainId: x.chainId, step: 0, reason: 'other' });
   assert.equal(t.hidden, true);
-  assert.equal(x.A.call('getChain', { chainId: x.chainId }).state, 'removed');
+  assert.equal(x.A.call('getReveal', { chainId: x.chainId }).steps.filter((s) => s.kind === 'describe').pop().placeholder, 'reported'); // a preset prompt: the shown final sentence is hidden for everyone, the chain stays
 });
 
 test('expiry: 48 h reveals >= 4 passed, expires fewer; participants then see only their own 棒 (AC 17/86)', () => {
@@ -338,7 +338,7 @@ test('expiry: 48 h reveals >= 4 passed, expires fewer; participants then see onl
   const mine = x.B.call('getMyChains', { chainId: x.chainId }).items[0];
   assert.equal(mine.status, 'expired');
   assert.equal(mine.mine.length, 1);
-  assert.equal(mine.promptText, undefined); // B never saw the prompt
+  assert.ok(!mine.promptText); // B never saw the prompt
   assert.equal(x.A.call('getMyChains', {}).items[0].promptText, '小猫吃面条'); // the starter did
 });
 

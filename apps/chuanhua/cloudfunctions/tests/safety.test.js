@@ -26,7 +26,7 @@ test('only participants get reveal content; other group members get the teaser t
   const teaser = await h.call('getReveal', { chainId: id }, { openid: C });
   assert.equal(teaser.ok, false);
   assert.equal(teaser.code, 'NOT_PARTICIPANT');
-  assert.deepEqual(Object.keys(teaser.teaser).sort(), ['canSameAgain', 'finalText', 'passed', 'paused', 'promptText']);
+  assert.deepEqual(Object.keys(teaser.teaser).sort(), ['canSameAgain', 'finalText', 'passed', 'paused', 'promptId', 'promptText']);
   assert.equal(teaser.teaser.promptText, '题目1号');
   assert.equal(teaser.teaser.finalText, '猜测6号');
   assert.ok(!/strokes/.test(JSON.stringify(teaser)));
@@ -190,7 +190,11 @@ test('strike ladder over a rolling 30 days: 1 warning, 2 -> 24 h, 3 -> 7 d, >= 4
   assert.equal(player().restrictedUntil || 0, 0);
   const home = await h.call('getHome', {}, { openid: B });
   assert.equal(home.me.warnPending, true);
-  assert.equal((await h.call('getHome', {}, { openid: B })).me.warnPending, false, 'the one-time sheet is read once');
+  assert.equal((await h.call('getHome', {}, { openid: B })).me.warnPending, true, 'kept until the client acknowledges it');
+  assert.equal((await h.call('ackWarning', {}, { openid: B })).ok, true);
+  assert.equal((await h.call('getHome', {}, { openid: B })).me.warnPending, false, 'acknowledged: the one-time sheet is gone');
+  assert.equal((await h.call('ackWarning', {}, { openid: B })).ok, true, 'idempotent');
+  assert.equal(h.db.get('players', B).strikes.length, 1, 'ackWarning never touches the strikes');
 
   assert.equal((await risky(B, gref, 2)).code, 'TEXT_BLOCKED');
   assert.equal(player().strikes.length, 2);
@@ -225,7 +229,7 @@ test('a restricted player can still open reveals they took part in, 我的接龙
   assert.equal((await F.claim(h, B, open, refs[B])).code, 'RESTRICTED');
   const view = await h.call('getChain', { chainId: open, groupRef: refs[B] }, { openid: B });
   assert.equal(view.state, 'restricted');
-  assert.ok(view.restrictedUntil > h.now());
+  assert.ok(view.until > h.now());
   await h.call('admin', { op: 'restrict', openid: B, permanent: true });
   assert.equal((await h.call('getHome', {}, { openid: B })).me.restriction.permanent, true);
 });

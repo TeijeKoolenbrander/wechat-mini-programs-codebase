@@ -11,8 +11,8 @@ const input = require('./common/input');
 const { fail, now, dateKeyAt, kindOfStep, CHAIN_LENGTH } = require('./common/util');
 
 const REASON = {
-  PENDING: 'pending', TAKEN: 'taken', PREV_MINE: 'prevMine', CAP_REACHED: 'capReached', STEP_LIMIT: 'limit',
-  CLAIM_LIMIT: 'limit', RESTRICTED: 'restricted', RULES_REQUIRED: 'rules', UGC_PAUSED: 'paused', CHAIN_CLOSED: 'closed',
+  PENDING: 'pending', TAKEN: 'taken', PREV_MINE: 'prevMine', CAP_REACHED: 'capReached', STEP_LIMIT: 'capReached',
+  CLAIM_LIMIT: 'capReached', RESTRICTED: 'restricted', RULES_REQUIRED: 'rules', UGC_PAUSED: 'paused', CHAIN_CLOSED: 'closed',
   NEED_GROUP: 'group', WRONG_GROUP: 'group',
 };
 

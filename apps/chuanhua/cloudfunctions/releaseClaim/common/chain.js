@@ -145,7 +145,7 @@ function canRevealNow(chain, openid, nowMs) {
 const ENTRY_STATE = {
   TAKEN: 'taken', PENDING: 'pending', PREV_MINE: 'prevMine', CAP_REACHED: 'capReached',
   WRONG_GROUP: 'wrongGroup', NEED_GROUP: 'wrongGroup', RESTRICTED: 'restricted',
-  RULES_REQUIRED: 'rulesRequired', UGC_PAUSED: 'ugcPaused', STEP_LIMIT: 'limit', CLAIM_LIMIT: 'limit',
+  RULES_REQUIRED: 'rulesRequired', UGC_PAUSED: 'ugcPaused', STEP_LIMIT: 'capReached', CLAIM_LIMIT: 'capReached', // the client shows the limit copy from the entry `code`
   CHAIN_REMOVED: 'removed', CHAIN_HIDDEN: 'removed', CHAIN_NOT_FOUND: 'notFound',
 };
 

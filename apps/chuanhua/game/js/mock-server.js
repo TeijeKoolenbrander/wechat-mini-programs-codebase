@@ -59,11 +59,32 @@ function createMockServer(opts) {
   const knobs = { moderationBusy: false, ugcBusy: false, subscribeTmpl: null, updatableCard: true, mediaDelaySec: CONFIG.moderation.mockMediaDelaySec, rasterize: opts.rasterize !== false };
   const srv = { db, knobs, offline: false, calls: [] };
 
+  // ids have the backend's formats: chainId [A-Z2-7]{10}, claimId [A-Z2-7]{12} (cloudfunctions/common/input.js)
+  const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   const nextId = (p) => {
     counter++;
-    const h = hash32(p + ':' + counter + ':' + now()).toString(32).padStart(7, '0');
-    return (p + h + counter.toString(32).padStart(4, '0')).slice(0, 10);
+    const len = p === 'k' ? 12 : 10;
+    let x = hash32(p + ':' + counter + ':' + now());
+    let out = '';
+    for (let i = 0; i < len - 3; i++) {
+      out += B32[x & 31];
+      x = (x >>> 5) || hash32(out + counter);
+    }
+    let c = counter; // the counter in base 32 makes ids unique
+    let tail = '';
+    for (let i = 0; i < 3; i++) {
+      tail = B32[c & 31] + tail;
+      c >>>= 5;
+    }
+    return out + tail;
   };
+  const CHAIN_ID_RE = /^[A-Z2-7]{10}$/;
+  const CLAIM_ID_RE = /^[A-Z2-7]{12}$/;
+  const GROUP_REF_RE = /^[0-9a-f]{16}$/;
+  const badInput = (what) => err('BAD_INPUT', 'bad ' + what);
+  const badChainId = (v) => typeof v !== 'string' || !CHAIN_ID_RE.test(v);
+  const badClaimId = (v) => typeof v !== 'string' || !CLAIM_ID_RE.test(v);
+  const badGroupRef = (v) => v !== undefined && v !== null && v !== '' && (typeof v !== 'string' || !GROUP_REF_RE.test(v));
 
   function player(openid) {
     if (!db.players[openid]) db.players[openid] = Object.assign(Pl.freshPlayer(), { seen: {} });
@@ -243,9 +264,10 @@ function createMockServer(opts) {
         ok: true,
         dateKey: dateKey(),
         serverNow: now(),
-        daily: { prompts: daily(dateKey()), counts: dd.byPrompt },
+        daily: { prompts: daily(dateKey()), counts: Object.keys(dd.byPrompt).reduce((o, k) => (dd.byPrompt[k] >= CONFIG.daily.nationalCountMin ? Object.assign(o, { [k]: dd.byPrompt[k] }) : o), {}) }, // aggregate only from the minimum up (AC 89)
         me: {
           rulesVersion: p.rulesVersion,
+          rulesCurrent: CONFIG.rulesVersion,
           restriction: r ? { until: r.until, permanent: r.permanent } : null,
           warnPending: warn,
           startsLeft: Pl.startsLeft(day),
@@ -262,7 +284,8 @@ function createMockServer(opts) {
 
     agreeRules(d, openid) {
       const p = player(openid);
-      p.rulesVersion = Math.max(p.rulesVersion, +d.version || 0);
+      if (!Number.isInteger(d.version) || d.version < 1 || d.version > CONFIG.rulesVersion) return badInput('version');
+      p.rulesVersion = Math.max(p.rulesVersion, d.version);
       p.warnPending = false;
       return { ok: true };
     },
@@ -274,10 +297,10 @@ function createMockServer(opts) {
 
     joinGroup(d, openid) {
       const g = d && d.groupData;
-      const data = g && g.mockData ? g.mockData : g;
+      const data = g && g.data ? g.data : g && g.mockData ? g.mockData : g; // real shape: {cloudID, data:{opengid, chat_type}} (the platform decrypts CloudID server-side); mockData is the old test alias
       if (!data || !data.opengid) return err(data && data.code ? data.code : 40097);
       if (data.chat_type !== undefined && data.chat_type !== 3 && data.chat_type !== 4) return err('NOT_GROUP');
-      const ref = 'gr' + hash32('pepper:' + data.opengid).toString(16).padStart(8, '0');
+      const ref = hash32('pepper:' + data.opengid).toString(16).padStart(8, '0') + hash32('salt:' + data.opengid).toString(16).padStart(8, '0'); // 16 hex like the backend's sha256 prefix
       db.groups[ref] = data.opengid;
       db.members[data.opengid + '_' + openid] = { lastSeen: now(), firstSeen: (db.members[data.opengid + '_' + openid] || {}).firstSeen || now() };
       db.groupStats[data.opengid] = db.groupStats[data.opengid] || { started: 0, revealed: 0, drawings: 0, lastActivityAt: now() };
@@ -307,8 +330,8 @@ function createMockServer(opts) {
         promptText = chk.text;
         custom = true;
       } else {
-        const pr = Pr.byId(d.promptId);
-        if (!pr) return err('BAD_PROMPT');
+        const pr = typeof d.promptId === 'string' ? Pr.byId(d.promptId) : null;
+        if (!pr) return badInput('promptId');
         promptText = pr.text;
         promptId = pr.id;
       }
@@ -322,32 +345,45 @@ function createMockServer(opts) {
     },
 
     getChain(d, openid) {
+      if (badChainId(d.chainId)) return badInput('chainId');
+      if (badGroupRef(d.groupRef)) return badInput('groupRef');
       const chain = db.chains[d.chainId];
-      if (!chain) return { ok: true, state: 'notFound' };
-      const v = viewerCtx(openid, chain, d.groupRef);
-      const es = C.entryState(chain, v);
-      const can = C.canRevealNow(chain, openid, now());
-      return {
-        ok: true,
-        state: es.state,
-        code: es.code,
-        until: es.until,
-        passed: chain.passed,
-        length: chain.length,
-        nextStep: chain.passed < chain.length ? chain.nextStep : null,
-        nextKind: chain.passed < chain.length ? C.kindOfStep(chain.nextStep) : null,
-        isParticipant: C.isParticipant(chain, openid),
-        isStarter: chain.starter === openid,
-        canRevealNow: can.ok,
-        canSameAgain: !!chain.promptId && !chain.custom && (chain.state === 'revealed' || (chain.state === 'expired' && chain.starter === openid)),
+      // same shape as cloudfunctions/getChain: counts, kinds and states only, never any content (AC 10)
+      const entry = (state, c, extra) => Object.assign({ ok: true, state, passed: c ? c.passed : 0, length: 6, nextStep: c && c.nextStep && c.passed < c.length ? c.nextStep : null, nextKind: c && c.nextStep && c.passed < c.length ? C.kindOfStep(c.nextStep) : null }, extra);
+      if (!chain || chain.state === 'abandoned') return entry('notFound', null);
+      const isParticipant = C.isParticipant(chain, openid);
+      const isStarter = chain.starter === openid;
+      const hidden = chain.state === 'removed';
+      const base = {
+        isParticipant,
+        isStarter,
         expiresAt: chain.expiresAt,
-        claimEtaMs: chain.claim && C.claimActive(chain, now()) ? chain.claim.expiresAt - now() : null,
         serverNow: now(),
-        activityId: 'mock-activity-' + chain._id,
+        timeLeftMs: Math.max(0, chain.expiresAt - now()),
+        canRevealNow: false,
+        // AC 10: only someone who already knows the prompt (the starter of an expired chain; a revealed chain's prompt is shown to participants and in the teaser) is told it can be reused
+        canSameAgain: !chain.custom && !!chain.promptId && !hidden && (chain.state === 'revealed' || (chain.state === 'expired' && isStarter)),
       };
+      if (hidden) return entry('removed', null, Object.assign({}, base, { canSameAgain: false }));
+      if (chain.state === 'revealed') return entry(isParticipant ? 'revealedParticipant' : 'revealedTeaser', chain, base);
+      if (chain.state === 'expired') return entry('expired', chain, base);
+      const es = C.entryState(chain, viewerCtx(openid, chain, d.groupRef));
+      const extra = Object.assign({}, base);
+      if (es.code) extra.code = es.code;
+      if (es.until) extra.until = es.until;
+      if (es.state === 'taken') extra.takenEtaSec = Math.max(1, Math.ceil((chain.claim.expiresAt - now()) / 1000));
+      extra.canRevealNow = isStarter && C.canRevealNow(chain, openid, now()).ok;
+      extra.subscribed = !!db.subGrants[d.chainId + '_' + openid];
+      extra.rulesRequired = !(player(openid).rulesVersion >= CONFIG.rulesVersion);
+      if (d.wantActivity === true && isParticipant) extra.activityId = 'mock-activity-' + chain._id;
+      return entry(es.state, chain, extra);
     },
 
     claimStep(d, openid) {
+      if (badChainId(d.chainId)) return badInput('chainId');
+      if (badGroupRef(d.groupRef)) return badInput('groupRef');
+      // kill switch: no lock and no previous 棒 while viewing is off (AC 54), same answer as the backend
+      if (!db.ugc.viewEnabled) return { ok: true, claimId: null, placeholder: 'paused', prev: { kind: 'paused' }, serverNow: now() };
       const bad = gateAction(openid, true);
       if (bad) return bad;
       const chain = db.chains[d.chainId];
@@ -368,17 +404,22 @@ function createMockServer(opts) {
         if (!visible(sd)) prev = { kind: 'paused' };
         else prev = sd.strokes ? { kind: 'draw', strokes: sd.strokes } : { kind: 'text', text: sd.text };
       }
-      return { ok: true, claimId: r.claim.claimId, step, kind: r.kind, expiresAt: r.claim.expiresAt, serverNow: now(), resumed: !!r.resumed, canReport: step > 1, prev };
+      return { ok: true, claimId: r.claim.claimId, step, kind: r.kind, expiresAt: r.claim.expiresAt, serverNow: now(), resumed: !!r.resumed, timerSec: r.kind === 'draw' ? CONFIG.timers.drawSec : CONFIG.timers.describeSec, canReport: step > 1, prev };
     },
 
     releaseClaim(d, openid) {
+      if (badChainId(d.chainId)) return badInput('chainId');
+      if (badClaimId(d.claimId)) return badInput('claimId');
+      // idempotent like the backend: a stale or foreign claimId is a no-op
       const chain = db.chains[d.chainId];
-      if (!chain) return err('CHAIN_NOT_FOUND');
+      if (!chain) return { ok: true, released: false };
       const r = C.release(chain, openid, d.claimId, now());
-      return r.ok ? { ok: true } : err(r.code);
+      return { ok: true, released: !!r.ok };
     },
 
     submitStep(d, openid) {
+      if (badChainId(d.chainId)) return badInput('chainId');
+      if (badClaimId(d.claimId)) return badInput('claimId');
       if (d.claimId && db.submits[d.claimId]) return db.submits[d.claimId];
       const out = submitStepInner(d, openid);
       if (out.ok && d.claimId) db.submits[d.claimId] = out;
@@ -386,11 +427,16 @@ function createMockServer(opts) {
     },
 
     getReveal(d, openid) {
+      if (badChainId(d.chainId)) return badInput('chainId');
       const chain = db.chains[d.chainId];
-      if (!chain) return err('CHAIN_NOT_FOUND');
+      if (!chain || chain.state === 'abandoned') return err('CHAIN_NOT_FOUND');
       if (chain.state === 'removed') return err('CHAIN_REMOVED');
       if (chain.state !== 'revealed') return err('NOT_REVEALED');
-      if (!C.isParticipant(chain, openid)) return err('NOT_PARTICIPANT', 'NOT_PARTICIPANT', { teaser: teaserOf(chain) });
+      if (!C.isParticipant(chain, openid)) {
+        // the teaser is for members of the chain's group only (PO-7); anyone else learns nothing
+        if (!chain.openGId || !memberFresh(chain.openGId, openid)) return err('NOT_MEMBER');
+        return err('NOT_PARTICIPANT', 'NOT_PARTICIPANT', { teaser: teaserOf(chain) });
+      }
       const steps = [];
       for (let n = 1; n <= chain.length; n++) {
         const sd = stepDoc(chain, n);
@@ -400,10 +446,13 @@ function createMockServer(opts) {
         if (!db.ugc.viewEnabled) placeholder = 'paused';
         else if (sd && sd.state === 'hidden') placeholder = 'reported';
         else if (sd && sd.state === 'deleted') placeholder = 'deleted';
-        const row = { n, kind: k, mine: !!sd && sd.author === openid, placeholder, laughs: sd ? sd.laughs : 0, myLaugh: !!db.reactions[(sd ? sd._id : '') + '_' + openid] };
+        const row = { n, kind: k, mine: !!sd && sd.author === openid, placeholder, laughs: 0, myLaugh: false, canReport: false };
         if (!placeholder && sd) {
           if (sd.strokes) row.strokes = sd.strokes;
           else row.text = sd.text;
+          row.laughs = sd.laughs;
+          row.myLaugh = !!db.reactions[sd._id + '_' + openid];
+          row.canReport = !row.mine;
         }
         steps.push(row);
       }
@@ -412,9 +461,11 @@ function createMockServer(opts) {
       const count = chain.promptId && dd ? dd.byPrompt[chain.promptId] || 0 : 0;
       return {
         ok: true,
+        state: db.ugc.viewEnabled ? 'ready' : 'paused',
         chainId: chain._id,
-        promptText: db.ugc.viewEnabled ? chain.promptText : '',
-        promptId: chain.promptId && !chain.custom ? chain.promptId : null,
+        promptText: db.ugc.viewEnabled ? chain.promptText : null,
+        promptId: chain.promptId && !chain.custom && db.ugc.viewEnabled ? chain.promptId : null,
+        canSameAgain: !chain.custom && !!chain.promptId,
         custom: chain.custom,
         passed: chain.passed,
         early: chain.revealReason !== 'complete',
@@ -435,6 +486,8 @@ function createMockServer(opts) {
     },
 
     laugh(d, openid) {
+      if (badChainId(d.chainId)) return badInput('chainId');
+      if (!Number.isInteger(d.step) || d.step < 1 || d.step > 6) return badInput('step');
       const chain = db.chains[d.chainId];
       if (!chain || chain.state !== 'revealed') return err('CHAIN_CLOSED');
       if (!C.isParticipant(chain, openid)) return err('NOT_PARTICIPANT');
@@ -452,28 +505,50 @@ function createMockServer(opts) {
     },
 
     report(d, openid) {
+      if (badChainId(d.chainId)) return badInput('chainId');
+      if (!Number.isInteger(d.step) || d.step < 0 || d.step > 6) return badInput('step');
+      if (CONFIG.report.reasons.indexOf(d.reason) < 0) return badInput('reason');
       const p = player(openid);
       const day = Pl.dayOf(p, dateKey());
-      if (CONFIG.report.reasons.indexOf(d.reason) < 0) return err('BAD_REASON');
       const chain = db.chains[d.chainId];
       if (!chain) return err('CHAIN_NOT_FOUND');
       const holder = chain.claim && chain.claim.openid === openid;
       const canSee = C.isParticipant(chain, openid) && chain.state === 'revealed';
       if (d.step === 0) {
-        // teaser texts: anyone who can see the teaser; hides the whole chain
-        const key = openid + '_' + chain._id + '_0';
-        if (db.reports[key]) return err('DUP_REPORT');
+        // teaser texts: participants and members of the group (same rule as the backend). A custom prompt is
+        // user-written text, so reporting it hides the whole chain; a preset prompt hides the shown final sentence.
+        const member = !!chain.openGId && memberFresh(chain.openGId, openid);
+        if (chain.state !== 'revealed' || !(C.isParticipant(chain, openid) || member)) return err('NOT_PARTICIPANT');
+        let target = null;
+        if (!chain.custom) {
+          for (let n = chain.length; n >= 2 && !target; n -= 2) {
+            const s = stepDoc(chain, n);
+            if (s && s.state === 'passed' && n % 2 === 0) target = s;
+          }
+          if (!target) return err('CHAIN_CLOSED');
+          if (target.author === openid) return err('OWN_STEP');
+        } else if (chain.starter === openid) return err('OWN_STEP');
+        const sid = target ? target._id : chain._id + '_0';
+        const key0 = openid + '_' + sid;
+        if (db.reports[key0]) return err('DUP_REPORT');
         if (day.reports >= CONFIG.allowances.reportsPerDay) return err('REPORT_LIMIT');
         day.reports++;
-        db.reports[key] = { reporter: openid, chainId: chain._id, step: 0, reason: d.reason, state: 'open', createdAt: now() };
-        chain.state = 'removed';
-        chain.hiddenBy = 'report';
-        chain.claim = null;
-        return { ok: true, hidden: true, reopened: false };
+        db.reports[key0] = { reporter: openid, stepId: sid, chainId: chain._id, reason: d.reason, state: 'open', createdAt: now() };
+        let reopened0 = false;
+        if (target) {
+          target.state = 'hidden';
+          target.hiddenReason = 'report';
+          reopened0 = !!C.reopenStep(chain, target.n, now()).reopened;
+        } else {
+          chain.state = 'removed';
+          chain.hiddenBy = 'report';
+          chain.claim = null;
+        }
+        return { ok: true, hidden: true, reopened: reopened0, releasedOwnClaim: false };
       }
       const sd = stepDoc(chain, d.step);
-      if (sd && sd.author === openid) return err('OWN_STEP');
       if (!sd || (!canSee && !(holder && chain.claim.step === d.step + 1))) return err('NOT_PARTICIPANT');
+      if (sd.author === openid) return err('OWN_STEP');
       const key = openid + '_' + sd._id;
       if (db.reports[key]) return err('DUP_REPORT');
       if (day.reports >= CONFIG.allowances.reportsPerDay) return err('REPORT_LIMIT');
@@ -482,10 +557,12 @@ function createMockServer(opts) {
       sd.state = 'hidden';
       sd.hiddenReason = 'report';
       const re = C.reopenStep(chain, d.step, now());
-      return { ok: true, hidden: true, reopened: re.reopened };
+      return { ok: true, hidden: true, reopened: !!re.reopened, releasedOwnClaim: !!(re.cancelledClaim && re.cancelledClaim.openid === openid) };
     },
 
     getMyChains(d, openid) {
+      // same rules as cloudfunctions/getMyChains: the caller's own 棒 only; the prompt only where they already know it
+      if (d.chainId !== undefined && badChainId(d.chainId)) return badInput('chainId');
       const mineSteps = Object.keys(db.steps)
         .map((k) => db.steps[k])
         .filter((s) => s.author === openid);
@@ -494,9 +571,10 @@ function createMockServer(opts) {
       Object.keys(db.chains).forEach((id) => {
         if (db.chains[id].starter === openid && db.chains[id].state !== 'abandoned') ids[id] = true;
       });
+      if (d.chainId !== undefined && !ids[d.chainId]) return err('CHAIN_NOT_FOUND', 'chain not found');
       const p = player(openid);
-      let items = Object.keys(ids)
-        .filter((id) => !d.chainId || id === d.chainId)
+      const items = Object.keys(ids)
+        .filter((id) => d.chainId === undefined || id === d.chainId)
         .map((id) => {
           const ch = db.chains[id];
           const mine = mineSteps.filter((s) => s.chainId === id);
@@ -505,46 +583,49 @@ function createMockServer(opts) {
             if (!latestByN[s.n] || latestByN[s.n].attempt < s.attempt) latestByN[s.n] = s;
           });
           const rows = Object.keys(latestByN).map((n) => latestByN[n]).sort((a, b) => a.n - b.n);
-          let status = 'open';
-          if (ch.state === 'revealed') status = 'revealed';
+          let status;
+          if (ch.state === 'removed') status = 'removed';
+          else if (ch.state === 'revealed') status = 'revealed';
           else if (ch.state === 'expired') status = 'expired';
-          else if (ch.state === 'removed') status = 'removed';
-          else if (ch.state === 'pending' && ch.pending.author === openid) status = 'pending';
-          else {
-            const last = rows[rows.length - 1];
-            if (last && last.state === 'blocked' && last.n >= ch.nextStep) status = 'blocked';
-          }
+          else if (rows.some((s) => s.state === 'pending')) status = 'pending';
+          else if (rows.length && !rows.some((s) => s.state === 'passed')) status = 'blocked';
+          else status = 'open';
           const blocked = rows.filter((s) => s.state === 'blocked' && s.n >= ch.nextStep)[0];
+          const participant = C.isParticipant(ch, openid);
+          const showPrompt = (status === 'revealed' && participant) || (status === 'expired' && ch.starter === openid);
           const item = {
             chainId: id,
             status,
             passed: ch.passed,
+            length: ch.length,
             mySteps: rows.filter((s) => s.state === 'passed' || s.state === 'pending').map((s) => s.n),
             blockedStep: blocked ? blocked.n : null,
-            promptText: ch.state === 'revealed' || ch.starter === openid ? ch.promptText : undefined,
-            promptId: (ch.state === 'revealed' || ch.starter === openid) && ch.promptId && !ch.custom ? ch.promptId : undefined,
             at: ch.lastActivityAt,
-            unseen: ch.state === 'revealed' && C.isParticipant(ch, openid) && !p.seen[id],
+            unseen: status === 'revealed' && participant && !p.seen[id],
+            promptText: showPrompt ? ch.promptText : null,
+            promptId: showPrompt && ch.promptId && !ch.custom ? ch.promptId : null,
           };
-          if (d.chainId) {
+          if (d.chainId !== undefined) {
             item.mine = rows.map((s) => ({
               n: s.n,
-              kind: s.strokes || s.n % 2 === 1 ? 'draw' : 'describe',
-              strokes: s.state === 'deleted' ? undefined : s.strokes,
-              text: s.state === 'deleted' ? undefined : s.text,
-              modState: s.state === 'void' ? 'void' : s.state,
-              canDelete: s.state === 'passed' || s.state === 'hidden',
+              kind: C.kindOfStep(s.n),
+              modState: s.state,
+              strokes: s.strokes && ['passed', 'pending', 'blocked'].includes(s.state) ? s.strokes : undefined,
+              text: s.text && s.state === 'passed' ? s.text : undefined,
+              canDelete: s.state === 'passed',
             }));
           }
           return item;
         })
         .sort((a, b) => b.at - a.at);
+      if (d.chainId !== undefined) return { ok: true, items };
       const start = d.cursor ? +d.cursor : 0;
       const page = items.slice(start, start + 20);
-      return { ok: true, items: page, cursor: start + 20 < items.length ? String(start + 20) : null };
+      return { ok: true, items: page, cursor: start + 20 < items.length ? start + 20 : null, streak: Pl.streakDays(p, dateKey()) };
     },
 
     getGroupChains(d, openid) {
+      if (typeof d.groupRef !== 'string' || badGroupRef(d.groupRef)) return badInput('groupRef');
       const gid = groupOfRef(d.groupRef);
       if (!gid || !memberFresh(gid, openid)) return err('NOT_MEMBER');
       const gs = db.groupStats[gid] || { started: 0, revealed: 0, drawings: 0 };
@@ -557,17 +638,17 @@ function createMockServer(opts) {
         .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
         .forEach((c) => {
           if (c.state === 'revealed') {
-            if (revealed.length < 20) revealed.push({ chainId: c._id, promptText: c.promptText, finalText: finalTextOf(c), participant: C.isParticipant(c, openid) });
+            if (revealed.length < 20) revealed.push({ chainId: c._id, participant: C.isParticipant(c, openid), passed: c.passed, promptText: db.ugc.viewEnabled ? c.promptText : null, finalText: db.ugc.viewEnabled ? finalTextOf(c) : null });
             return;
           }
           if (c.state !== 'open' && c.state !== 'pending' && c.state !== 'starting') return;
           if (c.state === 'starting') return;
           const es = C.entryState(c, viewerCtx(openid, c, d.groupRef));
-          const base = { chainId: c._id, nextStep: c.nextStep, nextKind: C.kindOfStep(c.nextStep), passed: c.passed };
+          const base = { chainId: c._id, nextStep: c.nextStep, nextKind: C.kindOfStep(c.nextStep), passed: c.passed, length: 6 };
           if (es.state === 'claimable') waiting.push(base);
           else if (es.state === 'pending' || es.state === 'taken' || es.state === 'prevMine' || es.state === 'capReached') inProgress.push(Object.assign(base, { why: es.state }));
         });
-      return { ok: true, stats: { started: gs.started, revealed: gs.revealed, drawings: gs.drawings }, waiting, inProgress, revealed };
+      return { ok: true, stats: { revealed: gs.revealed || 0, drawings: gs.drawings || 0, started: gs.started || 0 }, waiting, inProgress, revealed, ugc: { createEnabled: db.ugc.createEnabled, viewEnabled: db.ugc.viewEnabled } };
     },
 
     deleteMyStep(d, openid) {
@@ -586,19 +667,27 @@ function createMockServer(opts) {
           const s = db.steps[k];
           if (s.author === openid && (s.state === 'passed' || s.state === 'hidden')) del(s);
         });
-        return { ok: true, count };
+        return { ok: true, count, more: false };
       }
+      if (badChainId(d.chainId)) return badInput('chainId');
+      if (!Number.isInteger(d.step) || d.step < 1 || d.step > 6) return badInput('step');
       const chain = db.chains[d.chainId];
       if (!chain) return err('CHAIN_NOT_FOUND');
       const s = stepDoc(chain, d.step) || Object.keys(db.steps).map((k) => db.steps[k]).filter((x) => x.chainId === d.chainId && x.n === d.step && x.author === openid && x.state === 'hidden')[0];
-      if (!s || s.author !== openid) return err('OWN_STEP');
+      if (!s || s.author !== openid) return err('FORBIDDEN', 'not your step');
+      if (s.state !== 'passed' && s.state !== 'hidden') return err('CHAIN_CLOSED', 'step cannot be deleted');
       del(s);
       return { ok: true, count };
     },
 
     subscribeReveal(d, openid) {
+      if (badChainId(d.chainId)) return badInput('chainId');
+      if (!knobs.subscribeTmpl) return err('NO_TEMPLATE', 'subscribe template not configured');
       const chain = db.chains[d.chainId];
-      if (!chain || !C.isParticipant(chain, openid)) return err('NOT_PARTICIPANT');
+      if (!chain || chain.state === 'removed' || chain.state === 'abandoned') return err('CHAIN_NOT_FOUND');
+      const involved = C.isParticipant(chain, openid) || Object.keys(db.steps).some((k) => db.steps[k].chainId === d.chainId && db.steps[k].author === openid);
+      if (!involved) return err('NOT_PARTICIPANT', 'participants only');
+      if (chain.state === 'revealed' || chain.state === 'expired') return err('CHAIN_CLOSED', 'nothing left to wait for');
       db.subGrants[d.chainId + '_' + openid] = { grantedAt: now(), used: false };
       return { ok: true };
     },
@@ -606,19 +695,24 @@ function createMockServer(opts) {
     grantReward(d, openid) {
       const p = player(openid);
       const day = Pl.dayOf(p, dateKey());
-      if (d.kind === 'start') {
-        if (Pl.adStartsLeft(day) <= 0) return err('REWARD_LIMIT');
-        day.adStarts++;
-      } else if (d.kind === 'palette') {
-        if (day.palette >= CONFIG.allowances.paletteAdPerDay) return err('REWARD_LIMIT');
-        day.palette++;
-      } else return err('BAD_KIND');
+      if (d.kind !== 'start' && d.kind !== 'palette') return badInput('kind');
+      if (d.kind === 'start' && Pl.adStartsLeft(day) <= 0) return err('REWARD_LIMIT');
+      if (d.kind === 'palette' && day.palette >= CONFIG.allowances.paletteAdPerDay) return err('REWARD_LIMIT');
+      if (d.noFill === true) {
+        // the server cannot see the video: a no-fill grant is allowed once per day per kind (as on the backend)
+        day.noFill = day.noFill || {};
+        if (day.noFill[d.kind]) return err('REWARD_LIMIT');
+        day.noFill[d.kind] = true;
+      }
+      if (d.kind === 'start') day.adStarts++;
+      else day.palette++;
       return { ok: true, startsLeft: Pl.startsLeft(day), adStartsLeft: Pl.adStartsLeft(day), paletteToday: day.palette > 0 };
     },
 
     track(d, openid) {
-      (d.events || []).forEach((e) => db.events.push(Object.assign({ openid }, e)));
-      return { ok: true };
+      const events = Array.isArray(d.events) ? d.events : [];
+      events.forEach((e) => db.events.push(Object.assign({ openid }, e)));
+      return { ok: true, accepted: events.length };
     },
   };
 
@@ -631,7 +725,8 @@ function createMockServer(opts) {
   }
 
   function teaserOf(chain) {
-    return { promptId: chain.promptId && !chain.custom ? chain.promptId : null, promptText: chain.promptText, finalText: finalTextOf(chain), passed: chain.passed, canSameAgain: !!chain.promptId && !chain.custom };
+    const viewOk = db.ugc.viewEnabled;
+    return { promptId: viewOk && chain.promptId && !chain.custom ? chain.promptId : null, promptText: viewOk ? chain.promptText : null, finalText: viewOk ? finalTextOf(chain) : null, passed: chain.passed, canSameAgain: !!chain.promptId && !chain.custom, paused: !viewOk };
   }
 
   function submitStepInner(d, openid) {

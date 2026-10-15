@@ -17,7 +17,7 @@ const sources = () => [
 ];
 
 test('every function from the spec exists', () => {
-  const expected = ['getHome', 'agreeRules', 'joinGroup', 'createChain', 'getChain', 'claimStep', 'releaseClaim', 'submitStep', 'onMediaCheck', 'modSweeper',
+  const expected = ['getHome', 'agreeRules', 'ackWarning', 'joinGroup', 'createChain', 'getChain', 'claimStep', 'releaseClaim', 'submitStep', 'onMediaCheck', 'modSweeper',
     'getReveal', 'revealNow', 'laugh', 'report', 'getMyChains', 'getGroupChains', 'deleteMyStep', 'subscribeReveal', 'grantReward', 'admin', 'track', 'cleanup'];
   assert.deepEqual(FNS.slice().sort(), expected.slice().sort());
 });
@@ -88,7 +88,7 @@ test('secrets: env vars only (documented), no AppSecret/session_key anywhere, no
 });
 
 test('every function has an explicit timeout and memory size; spec timeouts are respected', () => {
-  const spec = { getHome: 5, agreeRules: 5, joinGroup: 5, createChain: 8, getChain: 5, claimStep: 5, releaseClaim: 5, submitStep: 10, onMediaCheck: 5, modSweeper: 60,
+  const spec = { getHome: 5, agreeRules: 5, ackWarning: 5, joinGroup: 5, createChain: 8, getChain: 5, claimStep: 5, releaseClaim: 5, submitStep: 10, onMediaCheck: 5, modSweeper: 60,
     getReveal: 5, revealNow: 5, laugh: 5, report: 5, getMyChains: 5, getGroupChains: 5, deleteMyStep: 10, subscribeReveal: 5, grantReward: 5, admin: 20, track: 5, cleanup: 120 };
   for (const fn of FNS) {
     const c = JSON.parse(read(path.join(CF, fn, 'function.config.json')));

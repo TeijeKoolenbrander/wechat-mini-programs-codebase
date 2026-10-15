@@ -56,7 +56,7 @@ function makeWx(opts, log, handlers) {
       if (opts.groupEnterFail) return o.fail({ errno: opts.groupEnterFail });
       o.success({ cloudID: 'cloud-1', encryptedData: 'x', iv: 'y' });
     },
-    cloud: { CloudID: (id) => ({ mockData: opts.groupData || { opengid: 'G1', chat_type: 3 }, id }) },
+    cloud: { CloudID: (id) => ({ cloudID: id, data: opts.groupData || { opengid: 'G1', chat_type: 3 } }) }, // what the server sees after the platform decrypts wx.cloud.CloudID
     openPrivacyContract: () => call('openPrivacyContract'),
     showModal: (o) => {
       call('showModal');

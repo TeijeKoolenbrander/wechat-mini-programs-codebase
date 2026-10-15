@@ -81,6 +81,7 @@ exports.main = store.handler(async (event, { openid }) => {
     serverNow: nowMs,
     resumed,
     timerSec: kindOfStep(n) === 'draw' ? cfg.timers.drawSec : cfg.timers.describeSec,
+    canReport: n > 1, // the previous 棒 can be reported from the claim screen
     prev,
   };
 });

@@ -17,7 +17,7 @@
  */
 
 const FALLBACK_IMAGE = 'assets/share-fallback.png';
-const ID_RE = /^[0-9A-Za-z]{10}$/;
+const ID_RE = /^[A-Z2-7]{10}$/; // the backend chainId format (cloudfunctions/common/input.js)
 
 /** '第 4 棒等你接，看看你能猜出什么？' / '第 3 棒等你接，你来画画看？' */
 function inviteTitle(nextStep, nextKind) {

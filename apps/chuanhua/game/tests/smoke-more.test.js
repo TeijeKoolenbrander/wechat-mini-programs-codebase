@@ -18,13 +18,13 @@ function world(t) {
   return { srv, adv: (ms) => (t.mock.timers.tick(ms), srv.sweep()) };
 }
 const agree = (srv, id) => srv.call('agreeRules', { version: 1 }, id);
-const join = (srv, id) => (agree(srv, id), srv.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } }, id).groupRef);
+const join = (srv, id) => (agree(srv, id), srv.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G1', chat_type: 3 } } }, id).groupRef);
 
 /** a UI client that opened a card in G1 (group context) and agreed to the rules, sitting on the home screen */
 async function homeClient(t, w, id, opts) {
   agree(w.srv, id);
   const c = makeClient(t, w.srv, id, opts);
-  await c.ctl.start(ENTER('zzzzzzzzzz', 't-' + id));
+  await c.ctl.start(ENTER('AAAAAAAAAA', 't-' + id));
   await c.settle();
   c.tapId('entry:home');
   await c.settle();
@@ -293,7 +293,7 @@ test('updatable invite card: template info on share; static fallback when the fe
   assert.equal(S1.log.shares.length, 1);
   // the card title and query carry no content
   assert.equal(S1.log.shares[0].title, '第 2 棒等你接，看看你能猜出什么？');
-  assert.match(S1.log.shares[0].query, /^k=[0-9a-z]{10}$/);
+  assert.match(S1.log.shares[0].query, /^k=[A-Z2-7]{10}$/);
   // fallback
   const w2 = world(t);
   w2.srv.knobs.updatableCard = false;
@@ -397,7 +397,7 @@ test('rules: the sheet gates start and claim; a server RULES_REQUIRED opens it; 
   const w = world(t);
   const { srv } = w;
   srv.call('agreeRules', { version: 1 }, 'S0');
-  const ref0 = srv.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } }, 'S0').groupRef;
+  const ref0 = srv.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G1', chat_type: 3 } } }, 'S0').groupRef;
   const cr = srv.call('createChain', { promptId: 'A01', groupRef: ref0 }, 'S0');
   srv.call('submitStep', { chainId: cr.chainId, claimId: cr.claim.claimId, strokes: drawing(2) }, 'S0');
   w.adv(61e3);

@@ -11,10 +11,12 @@ const { FakeDb } = require('./fake-db');
 
 const FAKE_CORE = path.resolve(__dirname, '..', 'fake-core');
 
-let stageRoot = null;
-function stage() {
-  if (stageRoot) return stageRoot;
-  stageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ch-stage-'));
+const stageRoots = {};
+/** realCore: stage with apps/chuanhua/game/core (the client contract test) instead of the test double */
+function stage(realCore) {
+  const key = realCore ? 'real' : 'fake';
+  if (stageRoots[key]) return stageRoots[key];
+  const stageRoot = (stageRoots[key] = fs.mkdtempSync(path.join(os.tmpdir(), 'ch-stage-' + key + '-')));
   for (const fn of sync.listFunctions()) {
     const src = path.join(sync.CF_ROOT, fn);
     for (const rel of sync.walk(src)) {
@@ -24,7 +26,7 @@ function stage() {
     }
   }
   sync.copyDir(path.join(sync.CF_ROOT, 'common'), path.join(stageRoot, 'common'));
-  sync.syncAll({ root: stageRoot, coreSrc: FAKE_CORE });
+  sync.syncAll({ root: stageRoot, coreSrc: realCore ? sync.DEFAULT_CORE : FAKE_CORE });
   return stageRoot;
 }
 
@@ -98,8 +100,8 @@ const realNow = Date.now;
 const ENV_KEYS = ['ENV_KIND', 'MODERATION_MODE', 'GROUP_REF_PEPPER', 'MOD_TEXT_DAILY_BUDGET', 'MOCK_MEDIA_DELAY_SEC', 'ADMIN_OPENIDS',
   'PUSH_TOKEN', 'PUSH_AES_KEY', 'PUSH_ALLOW_OPENID', 'MEDIA_CHECK_ROUTE', 'LAUNCH_DATE_KEY'];
 
-function createHarness({ now = Date.UTC(2026, 10, 3, 4, 0, 0), env = {} } = {}) { // 2026-11-03 12:00 BJT
-  const root = stage();
+function createHarness({ now = Date.UTC(2026, 10, 3, 4, 0, 0), env = {}, realCore = false } = {}) { // 2026-11-03 12:00 BJT
+  const root = stage(realCore);
   for (const k of Object.keys(require.cache)) if (k.startsWith(root)) delete require.cache[k];
   const db = new FakeDb();
   const sdk = makeSdk();

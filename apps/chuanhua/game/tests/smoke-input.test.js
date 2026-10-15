@@ -21,7 +21,7 @@ const agree = (srv, id) => srv.call('agreeRules', { version: 1 }, id);
 
 function seed(w) {
   agree(w.srv, 'S0');
-  const ref = w.srv.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } }, 'S0').groupRef;
+  const ref = w.srv.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G1', chat_type: 3 } } }, 'S0').groupRef;
   const cr = w.srv.call('createChain', { promptId: 'A01', groupRef: ref }, 'S0');
   w.srv.call('submitStep', { chainId: cr.chainId, claimId: cr.claim.claimId, strokes: drawing(2) }, 'S0');
   w.adv(61e3);

@@ -56,6 +56,7 @@ exports.main = store.handler(async (event, { openid }) => {
       teaser: {
         promptText: ugc.viewOk ? chain.promptText : null,
         finalText: ugc.viewOk ? finalText : null,
+        promptId: ugc.viewOk && canSameAgain ? chain.promptId : null,
         passed: chain.passed,
         canSameAgain,
         paused: !ugc.viewOk,
@@ -100,6 +101,7 @@ exports.main = store.handler(async (event, { openid }) => {
     participantCount: chain.participants.length,
     durationMs: Math.max(0, (chain.revealedAt || nowMs) - chain.createdAt),
     promptText: ugc.viewOk ? chain.promptText : null,
+    promptId: ugc.viewOk && canSameAgain ? chain.promptId : null, // preset prompts only: 同题再传 needs it
     custom: chain.custom,
     steps: list,
     nationalCount: national,

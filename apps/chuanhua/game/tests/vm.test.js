@@ -307,8 +307,8 @@ test('AC 10: getChain never carries prompt text, 棒 text or strokes for any sta
   const a = srv.as('A');
   const b = srv.as('B');
   [a, b].forEach((u) => u.call('agreeRules', { version: 1 }));
-  const ref = a.call('joinGroup', { groupData: { mockData: { opengid: 'G', chat_type: 3 } } }).groupRef;
-  const refB = b.call('joinGroup', { groupData: { mockData: { opengid: 'G', chat_type: 3 } } }).groupRef;
+  const ref = a.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G', chat_type: 3 } } }).groupRef;
+  const refB = b.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G', chat_type: 3 } } }).groupRef;
   const cr = a.call('createChain', { customText: '独一无二的题目', groupRef: ref });
   const secret = (r) => /独一无二|strokes|"text"|promptText|一句秘密的话|"s":\[/.test(JSON.stringify(r));
   const seen = new Set();
@@ -355,8 +355,8 @@ test('AC 73: no function returns an openid, group id, nickname or avatar to a cl
   const A = srv.as('openid-AAA');
   const B = srv.as('openid-BBB');
   [A, B].forEach((u) => u.call('agreeRules', { version: 1 }));
-  const ref = A.call('joinGroup', { groupData: { mockData: { opengid: 'OPENGID-777', chat_type: 3 } } });
-  const refB = B.call('joinGroup', { groupData: { mockData: { opengid: 'OPENGID-777', chat_type: 3 } } }).groupRef;
+  const ref = A.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'OPENGID-777', chat_type: 3 } } });
+  const refB = B.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'OPENGID-777', chat_type: 3 } } }).groupRef;
   const out = [ref];
   const cr = A.call('createChain', { promptId: 'A01', groupRef: ref.groupRef });
   out.push(cr, A.call('submitStep', { chainId: cr.chainId, claimId: cr.claim.claimId, strokes: strokes(2) }));

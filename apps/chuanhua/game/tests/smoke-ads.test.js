@@ -292,8 +292,8 @@ test('leaving a reveal at the 3rd lifetime reveal shows the interstitial (stub o
   const other = srv.as('B');
   me.call('agreeRules', { version: 1 });
   other.call('agreeRules', { version: 1 });
-  const ref = me.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } }).groupRef;
-  const refB = other.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } }).groupRef;
+  const ref = me.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G1', chat_type: 3 } } }).groupRef;
+  const refB = other.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G1', chat_type: 3 } } }).groupRef;
   const cr = me.call('createChain', { promptId: 'A01', groupRef: ref });
   me.call('submitStep', { chainId: cr.chainId, claimId: cr.claim.claimId, strokes: drawing(2) });
   const step = (u, r, n) => {

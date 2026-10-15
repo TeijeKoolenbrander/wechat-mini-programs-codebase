@@ -39,7 +39,10 @@ exports.main = store.handler(async (event, { openid }) => {
     expiresAt: chain.expiresAt,
     serverNow: nowMs,
     timeLeftMs: Math.max(0, chain.expiresAt - nowMs),
-    canSameAgain: !chain.custom && !!chain.promptId && !chain.hidden && ['revealed', 'expired'].includes(chain.state),
+    // AC 10: getChain never reveals the prompt, so "can reuse it" is only offered to someone who already knows it:
+    // anyone for a revealed chain (participants and the teaser both show the prompt), the starter for an expired one
+    canSameAgain: !chain.custom && !!chain.promptId && !chain.hidden && (chain.state === 'revealed' || (chain.state === 'expired' && isStarter)),
+    canRevealNow: false,
   };
   if (chain.state === 'removed' || chain.hidden) return entry('removed', null, { ...base, canSameAgain: false });
   if (chain.state === 'revealed') return entry(isParticipant ? 'revealedParticipant' : 'revealedTeaser', chain, base);
@@ -60,7 +63,7 @@ exports.main = store.handler(async (event, { openid }) => {
   else if (ev.code === 'CHAIN_CLOSED') state = 'notFound';
   else state = chainLib.ENTRY_STATE[ev.code] || 'error';
   if (!ev.ok) extra.code = ev.code; // the claim refusal, for the client's button copy
-  if (!ev.ok && ev.code === 'RESTRICTED') extra.restrictedUntil = ev.extra.until;
+  if (!ev.ok && ev.code === 'RESTRICTED') extra.until = ev.extra.until; // the client prints "（至 …）"
   if (state === 'taken') extra.takenEtaSec = Math.max(1, Math.ceil((chain.claim.expiresAt - nowMs) / 1000));
   extra.canRevealNow = isStarter && chainLib.canRevealNow(chain, openid, nowMs).ok;
   const sub = await store.getDoc('sub_grants', `${chainId}_${openid}`);

@@ -31,7 +31,7 @@ async function startChain(g, promptIdx) {
 function other(g, id, ref) {
   const u = g.srv.as(id);
   u.call('agreeRules', { version: 1 });
-  u.ref = ref || u.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } }).groupRef;
+  u.ref = ref || u.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: 'G1', chat_type: 3 } } }).groupRef;
   return u;
 }
 

@@ -10,6 +10,13 @@ const { fail, now, dateKeyAt, kindOfStep } = require('./common/util');
 
 const PAGE = 20;
 
+/** The prompt is shown only where the viewer already knows it: participants of a revealed chain, the starter of an expired one. */
+function promptView(c, status, openid) {
+  const participant = c.participants.includes(openid);
+  const show = !c.hidden && ((status === 'revealed' && participant) || (status === 'expired' && c.starter === openid));
+  return { promptText: show ? c.promptText : null, promptId: show && c.promptId && !c.custom ? c.promptId : null };
+}
+
 function modState(s) {
   return { passed: 'passed', pending: 'pending', blocked: 'blocked', void: 'void', hidden: 'hidden', deleted: 'deleted' }[s.state] || s.state;
 }
@@ -32,9 +39,16 @@ exports.main = store.handler(async (event, { openid }) => {
       text: s.kind === 'describe' && s.state === 'passed' ? s.text : undefined,
       canDelete: s.state === 'passed',
     }));
+    const status = chain.state === 'removed' || chain.hidden ? 'removed' : chain.state;
+    const blocked = mine.filter((m) => m.modState === 'blocked' && m.n >= chain.nextStep)[0];
     return {
       ok: true,
-      items: [{ chainId, status: chain.state, passed: chain.passed, mySteps: mine.filter((m) => ['passed', 'pending'].includes(m.modState)).map((m) => m.n), at: chain.lastActivityAt, unseen: false, mine }],
+      items: [{
+        chainId, status, passed: chain.passed, length: chain.length,
+        mySteps: mine.filter((m) => ['passed', 'pending'].includes(m.modState)).map((m) => m.n),
+        blockedStep: blocked ? blocked.n : null,
+        at: chain.lastActivityAt, unseen: false, ...promptView(chain, status, openid), mine,
+      }],
     };
   }
 
@@ -57,7 +71,7 @@ exports.main = store.handler(async (event, { openid }) => {
     else if (mine.length && !mine.some((s) => s.state === 'passed')) status = 'blocked';
     else status = 'open';
     const participant = c.participants.includes(openid);
-    const showPrompt = (status === 'revealed' && participant) || (status === 'expired' && c.starter === openid);
+    const blocked = mine.filter((s) => s.state === 'blocked' && s.n >= c.nextStep)[0];
     return {
       chainId: c._id,
       status,
@@ -66,7 +80,8 @@ exports.main = store.handler(async (event, { openid }) => {
       mySteps: myNs,
       at: c.lastActivityAt,
       unseen: status === 'revealed' && participant && !(player.seen || []).includes(c._id),
-      promptText: showPrompt && !c.hidden ? c.promptText : null,
+      blockedStep: blocked ? blocked.n : null,
+      ...promptView(c, status, openid),
     };
   });
   return {

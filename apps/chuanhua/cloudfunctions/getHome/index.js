@@ -50,8 +50,7 @@ exports.main = store.handler(async (event, { openid }) => {
   } catch (e) { /* cosmetic */ }
   const r = players.restriction(p, nowMs);
   const day = p.day && p.day.dateKey === dateKey ? p.day : players.freshDay(dateKey);
-  const warn = !!p.warnPending;
-  if (warn) await store.db().collection('players').doc(openid).update({ data: { warnPending: false } }); // read-once
+  const warn = !!p.warnPending; // stays true until ackWarning (or agreeRules) clears it
 
   const inter = (cfg.ads && cfg.ads.interstitial) || {};
   return {

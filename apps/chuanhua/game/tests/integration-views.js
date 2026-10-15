@@ -106,7 +106,7 @@ function makeWorld(t, probe, mode, screen) {
     srv.sweep();
   };
   w.agree = (id) => srv.call('agreeRules', { version: 1 }, id);
-  w.join = (id, gid) => (w.agree(id), srv.call('joinGroup', { groupData: { mockData: { opengid: gid || 'G1', chat_type: 3 } } }, id).groupRef);
+  w.join = (id, gid) => (w.agree(id), srv.call('joinGroup', { groupData: { cloudID: 'x', data: { opengid: gid || 'G1', chat_type: 3 } } }, id).groupRef);
   /** a UI client with the display mode applied; agreed = rules already agreed */
   w.client = (id, o) => {
     o = o || {};
@@ -572,11 +572,11 @@ async function tourStates(w) {
   w.join('X6');
   await enter(Xr, ENTER_INVITE(gone.chainId, 't-X6'));
   S1(Xr, 'entry_removed');
-  await enter(Xr, ENTER_INVITE('zzzzzzzzzz', 't-X6b'));
+  await enter(Xr, ENTER_INVITE('AAAAAAAAAA', 't-X6b'));
   S1(Xr, 'entry_notFound');
   await enter(Xr, ENTER_REVEAL(gone.chainId, 't-X6c'));
   S1(Xr, 'teaser_removed');
-  await enter(Xr, ENTER_REVEAL('zzzzzzzzzz', 't-X6d'));
+  await enter(Xr, ENTER_REVEAL('AAAAAAAAAA', 't-X6d'));
   S1(Xr, 'teaser_notFound');
   // restricted and kill switch
   const Xs = w.client('X7');
@@ -625,7 +625,7 @@ async function tourStates(w) {
   // picker and teaser failure states (forced: they need a failed create / a failed reveal fetch)
   const Xp = w.client('XP');
   w.join('XP');
-  await enter(Xp, ENTER_INVITE('zzzzzzzzzz', 't-XP'));
+  await enter(Xp, ENTER_INVITE('AAAAAAAAAA', 't-XP'));
   Xp.tapId('entry:home');
   await Xp.settle();
   closeSheet(Xp);
@@ -656,7 +656,7 @@ async function tourStates(w) {
   await G.settle();
   const H = w.client('H1');
   w.join('H1', 'G9');
-  await enter(H, { scene: 1044, query: { k: 'zzzzzzzzzz' }, shareTicket: 't-H', chatType: 3 });
+  await enter(H, { scene: 1044, query: { k: 'AAAAAAAAAA' }, shareTicket: 't-H', chatType: 3 });
   H.tapId('entry:home');
   await H.settle();
   closeSheet(H);

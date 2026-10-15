@@ -12,6 +12,7 @@ exports.main = store.handler(async (event, { openid }) => {
   await store.txn(async (t) => {
     const p = await players.loadPlayerT(t, openid, nowMs);
     p.rulesVersion = Math.max(p.rulesVersion || 0, v);
+    p.warnPending = false; // agreeing to the 公约 counts as having read the warning
     p.lastActiveAt = nowMs;
     await store.putT(t, 'players', p);
   });
