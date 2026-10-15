@@ -50,7 +50,7 @@ function build(raw) {
 function getContent(version) {
   const v = Number(version);
   if (v !== 1) return null;
-  if (!cache[v]) cache[v] = build(require('./content/spectra.v1'));
+  if (!cache[v]) cache[v] = build(require('./content/spectra.v1.js'));
   return cache[v];
 }
 

@@ -13,7 +13,7 @@
 
 const { sub, int, shuffle } = require('./rng');
 const { addDays } = require('./date');
-const { FESTIVALS, seasonOf, FESTIVAL_LEAD_DAYS } = require('./content/calendar.v1');
+const { FESTIVALS, seasonOf, FESTIVAL_LEAD_DAYS } = require('./content/calendar.v1.js');
 
 const SPECTRUM_GAP_DAYS = 21;
 

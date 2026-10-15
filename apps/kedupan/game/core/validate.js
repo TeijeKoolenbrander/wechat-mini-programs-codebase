@@ -3,7 +3,7 @@
  * and (copy) by CI. Every function returns an array of violation strings; [] means clean.
  */
 
-const forbidden = require('./content/forbidden.v1');
+const forbidden = require('./content/forbidden.v1.js');
 
 const QUOTAS = { food: 40, life: 40, home: 25, animal: 25, nature: 25, senses: 25, leisure: 25, travel: 20, study: 20, tech: 20, feel: 20, memory: 15 };
 const MIN_SPECTRA = 300;

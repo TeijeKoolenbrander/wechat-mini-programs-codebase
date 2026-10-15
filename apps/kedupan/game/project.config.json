@@ -1,0 +1,44 @@
+{
+  "TODO_founder": "H1: replace appid with the new mini game AppID (小游戏) before any upload. touristappid only runs the simulator and cannot upload or use cloud functions.",
+  "appid": "touristappid",
+  "compileType": "game",
+  "projectname": "kedupan-game",
+  "libVersion": "latest",
+  "setting": {
+    "es6": true,
+    "enhance": false,
+    "minified": false,
+    "postcss": false,
+    "compileWorklet": false,
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "useCompilerPlugins": false,
+    "condition": false,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
+  },
+  "packOptions": {
+    "ignore": [
+      { "value": "tests", "type": "folder" },
+      { "value": "tools", "type": "folder" },
+      { "value": "node_modules", "type": "folder" },
+      { "value": "package.json", "type": "file" },
+      { "value": "package-lock.json", "type": "file" },
+      { "value": "core/README.md", "type": "file" },
+      { "value": "js/README.md", "type": "file" }
+    ],
+    "include": []
+  },
+  "simulatorPluginLibVersion": {},
+  "isGameTourist": false,
+  "editorSetting": {}
+}
