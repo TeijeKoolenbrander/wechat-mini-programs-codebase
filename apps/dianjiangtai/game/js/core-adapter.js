@@ -83,7 +83,7 @@ function draftedFactions(run) {
   const out = {};
   for (const p of run.picks) {
     const t = run.finalTokens[p.round - 1];
-    out[p.slot] = t ? t.faction : run.content.byId[p.generalId].faction;
+    out[p.slot] = p.faction || (t ? t.faction : run.content.byId[p.generalId].faction);
   }
   return out;
 }

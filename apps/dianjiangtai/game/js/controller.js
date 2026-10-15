@@ -516,7 +516,7 @@ function createController(deps) {
   // ---------------------------------------------------------------- march / results
 
   function lineupOfRun(r) {
-    return draft.lineupOf(r.run).map((e) => ({ slot: e.slot, generalId: e.generalId }));
+    return draft.lineupOf(r.run).map((e) => (e.faction ? { slot: e.slot, generalId: e.generalId, faction: e.faction } : { slot: e.slot, generalId: e.generalId }));
   }
 
   function shareNamesOf(lineup) {
@@ -534,7 +534,9 @@ function createController(deps) {
   function moraleFor(lineup) {
     const ids = SLOTS.map((s) => lineup.find((e) => e.slot === s).generalId);
     const gIdx = ids.map((id) => content.indexOf[id]);
-    return moraleOf(content, config, gIdx, content.roleScores[gIdx[0]][0]);
+    // cohesion counts the faction of the cell each general was drafted from (spec 3.2); old entries have none
+    const facs = SLOTS.map((s) => lineup.find((e) => e.slot === s).faction);
+    return moraleOf(content, config, gIdx, content.roleScores[gIdx[0]][0], facs.every(Boolean) ? facs : undefined);
   }
 
   function makeResult(r, o) {
@@ -1099,7 +1101,7 @@ function createController(deps) {
     analytics.startTimer();
     if (!S.howtoSeen) c.home.sheet = 'howto';
     store.save();
-    share.register(() => (c.res && c.res.record ? { mode: c.res.mode, record: c.res.record, dateKey: c.res.dateKey, shareNames: c.res.shareNames } : null));
+    share.register(() => (c.res && c.res.record ? { mode: c.res.mode, record: c.res.record, dateKey: c.res.dateKey, shareNames: c.res.shareNames, variant: c.res.variant } : null));
     handleEntry(options, true);
     return refreshDaily().then(() => retryPending());
   };
@@ -1321,7 +1323,7 @@ function createController(deps) {
         if (res.mode === 'free') ads.interstitial({ mode: 'free', sessionFreeRuns: c.sessionFreeRuns, lifetimeRuns: S.lifetimeRuns }); // never awaited: does not delay
         return startFree('replay_button');
       case 'result:share':
-        return share.shareResult({ mode: res.mode, record: res.record, dateKey: res.dateKey, runId: res.runId, shareNames: res.shareNames, card: V.cardVm(res, content) });
+        return share.shareResult({ mode: res.mode, record: res.record, dateKey: res.dateKey, runId: res.runId, shareNames: res.shareNames, variant: res.variant, card: V.cardVm(res, content) });
       case 'result:challenge':
         return startChallengeShare(res);
       case 'result:replay':
@@ -1502,6 +1504,7 @@ function createController(deps) {
     return { screen: c.screen, vm, overlay };
   };
 
+  c.refreshDaily = refreshDaily; // test hook: re-read getDaily (and the remote features)
   c.state = c;
   return c;
 }

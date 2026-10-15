@@ -414,8 +414,8 @@ test('daily and challenge never offer ad re-spins (AC 9)', async (t) => {
   g.tapId('primary');
   await g.settle();
   g.wait(1300);
-  g.tapId('respin:faction');
-  g.tapId('respin:era');
+  if (g.has('respin:faction')) g.tapId('respin:faction'); // a re-spin may be unavailable on this token set
+  if (g.has('respin:era')) g.tapId('respin:era');
   const v = g.app.ctl.view().vm;
   assert.strictEqual(v.respin.adAllowed, false);
   assert.ok(!g.has('respinAd:faction'));

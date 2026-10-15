@@ -32,7 +32,7 @@ function boot(t, opts) {
     t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: opts.now || Date.UTC(2026, 10, 20, 4, 0, 0) });
   }
 
-  const log = { text: [], calls: [], storageWrites: 0, cloudWrites: [], shares: [], ads: [], menu: [], console: [] };
+  const log = { text: [], calls: [], storageWrites: 0, cloudWrites: [], shares: [], ads: [], menu: [], console: [], canvases: [] };
   const storage = opts.storage || {};
   const handlers = {};
   let raf = null;
@@ -44,7 +44,11 @@ function boot(t, opts) {
   const wx = {
     getWindowInfo: () => ({ ...SCREEN, safeArea: { bottom: 778 }, platform: 'ios' }),
     getMenuButtonBoundingClientRect: () => CAPSULE,
-    createCanvas: () => ({ width: 0, height: 0, getContext: () => fakeContext(log), toTempFilePath: (o) => o.success({ tempFilePath: 'tmp://card.png' }) }),
+    createCanvas: () => {
+      const cv = { width: 0, height: 0, getContext: () => fakeContext(log), toTempFilePath: (o) => o.success({ tempFilePath: 'tmp://card.png' }) };
+      log.canvases.push(cv);
+      return cv;
+    },
     createImage: () => ({}),
     createInnerAudioContext: () => ({ play: () => call('audio.play'), stop() {} }),
     vibrateShort: () => call('vibrateShort'),
@@ -77,7 +81,31 @@ function boot(t, opts) {
       if (p.refuse) o.fail({ errno: 104 });
       else o.success({});
     },
-    getSetting: (o) => o.success({ authSetting: p.scope === undefined ? {} : { 'scope.WxFriendInteraction': p.scope } }),
+    getSetting: (o) => {
+      call('getSetting');
+      const a = opts.album || {};
+      const auth = p.scope === undefined ? {} : { 'scope.WxFriendInteraction': p.scope };
+      if (a.scope !== undefined) auth['scope.writePhotosAlbum'] = a.scope;
+      o.success({ authSetting: auth });
+    },
+    // v1: subscribe message, save to album, banner, system font
+    requestSubscribeMessage: (o) => {
+      call('requestSubscribeMessage', o.tmplIds);
+      const s = opts.subscribe || {};
+      if (s.failCode) return o.fail({ errCode: s.failCode, errMsg: 'fail' });
+      o.success({ [o.tmplIds[0]]: s.result || 'accept' });
+    },
+    saveImageToPhotosAlbum: (o) => {
+      call('saveImageToPhotosAlbum', o.filePath);
+      const a = opts.album || {};
+      if (a.saveErr) return o.fail(a.saveErr);
+      o.success({});
+    },
+    createBannerAd: (o) => {
+      log.ads.push(['banner', o]);
+      return { onError() {}, onLoad() {}, onResize() {}, show: () => Promise.resolve(), hide() {}, destroy() {}, style: {} };
+    },
+    getAppBaseInfo: () => ({ fontSizeSetting: opts.fontSize || 16 }),
     authorize: (o) => {
       call('authorize', o.scope);
       if (p.refuseScope) o.fail({ errMsg: 'refused' });
