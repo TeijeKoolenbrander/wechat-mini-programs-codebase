@@ -1,0 +1,8 @@
+{
+  "name": "chuanhua-preview",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Renders every screen x state from fixture view models to PNG. Dev tool, not shipped.",
+  "scripts": { "render": "node render.js" },
+  "dependencies": { "@napi-rs/canvas": "^0.1.65" }
+}
