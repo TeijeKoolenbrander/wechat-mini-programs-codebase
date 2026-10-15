@@ -17,9 +17,11 @@ const V1 = {
   segment: { daily: [4, 8], free: [5, 10] },
   /** A free-deck fact may repeat only after this many other questions. */
   freeRecency: 10,
-  /** Daily: questions 1..themeSpan come from the weekday theme, the rest are mixed. */
-  themeSpan: 20,
-  /** Mixed daily segments: at most this many per measure. */
+  /** The category picker offers a category only when the free pool holds at least this many of its facts (smaller ones cannot make a 60-question deck). */
+  freeGroupMinFacts: 20,
+  /** Daily decks mix every measure that has at least this many daily facts (no weekday themes in v1). */
+  minDailyFactsPerMeasure: 6,
+  /** Daily segments: at most this many per measure. */
   mixedSegmentsPerMeasure: 2,
 
   /**

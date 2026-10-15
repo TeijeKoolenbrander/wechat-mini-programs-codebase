@@ -1,0 +1,318 @@
+{
+ "source": "GeoNames cities15000 (CC BY 4.0) https://www.geonames.org",
+ "retrievedAt": "2026-10-15",
+ "cities": [
+  {
+   "city": "北京",
+   "popFact": "f_prov_pop_beijing",
+   "geonameId": "1816670",
+   "geonamesName": "Beijing",
+   "lat": 39.9075,
+   "lon": 116.39723
+  },
+  {
+   "city": "上海",
+   "popFact": "f_prov_pop_shanghai",
+   "geonameId": "1796236",
+   "geonamesName": "Shanghai",
+   "lat": 31.22222,
+   "lon": 121.45806
+  },
+  {
+   "city": "天津",
+   "popFact": "f_prov_pop_tianjin",
+   "geonameId": "1792947",
+   "geonamesName": "Tianjin",
+   "lat": 39.14222,
+   "lon": 117.17667
+  },
+  {
+   "city": "重庆",
+   "popFact": "f_prov_pop_chongqing",
+   "geonameId": "1814906",
+   "geonamesName": "Chongqing",
+   "lat": 29.56026,
+   "lon": 106.55771
+  },
+  {
+   "city": "广州",
+   "popFact": "f_city_pop_guangzhou",
+   "geonameId": "1809858",
+   "geonamesName": "Guangzhou",
+   "lat": 23.11667,
+   "lon": 113.25
+  },
+  {
+   "city": "东莞",
+   "popFact": "f_city_pop_dongguan",
+   "geonameId": "1812545",
+   "geonamesName": "Dongguan",
+   "lat": 23.01797,
+   "lon": 113.74866
+  },
+  {
+   "city": "西安",
+   "popFact": "f_city_pop_xian",
+   "geonameId": "1790630",
+   "geonamesName": "Xi’an",
+   "lat": 34.25833,
+   "lon": 108.92861
+  },
+  {
+   "city": "郑州",
+   "popFact": "f_city_pop_zhengzhou",
+   "geonameId": "1784658",
+   "geonamesName": "Zhengzhou",
+   "lat": 34.75778,
+   "lon": 113.64861
+  },
+  {
+   "city": "武汉",
+   "popFact": "f_city_pop_wuhan",
+   "geonameId": "1791247",
+   "geonamesName": "Wuhan",
+   "lat": 30.58333,
+   "lon": 114.26667
+  },
+  {
+   "city": "宜昌",
+   "popFact": "f_city_pop_yichang",
+   "geonameId": "1786764",
+   "geonamesName": "Yichang",
+   "lat": 30.71444,
+   "lon": 111.28472
+  },
+  {
+   "city": "襄阳",
+   "popFact": "f_city_pop_xiangyang",
+   "geonameId": "1790587",
+   "geonamesName": "Xiangyang",
+   "lat": 32.0422,
+   "lon": 112.14479
+  },
+  {
+   "city": "十堰",
+   "popFact": "f_city_pop_shiyan",
+   "geonameId": "1794903",
+   "geonamesName": "Shiyan",
+   "lat": 32.6475,
+   "lon": 110.77806
+  },
+  {
+   "city": "南京",
+   "popFact": "f_city_pop_nanjing",
+   "geonameId": "1799962",
+   "geonamesName": "Nanjing",
+   "lat": 32.06167,
+   "lon": 118.77778
+  },
+  {
+   "city": "苏州",
+   "popFact": "f_city_pop_suzhou",
+   "geonameId": "1886760",
+   "geonamesName": "Suzhou",
+   "lat": 31.30408,
+   "lon": 120.59538
+  },
+  {
+   "city": "无锡",
+   "popFact": "f_city_pop_wuxi",
+   "geonameId": "1790923",
+   "geonamesName": "Wuxi",
+   "lat": 31.56887,
+   "lon": 120.28857
+  },
+  {
+   "city": "徐州",
+   "popFact": "f_city_pop_xuzhou",
+   "geonameId": "10630003",
+   "geonamesName": "Xuzhou",
+   "lat": 34.20442,
+   "lon": 117.28386
+  },
+  {
+   "city": "南通",
+   "popFact": "f_city_pop_nantong",
+   "geonameId": "1799722",
+   "geonamesName": "Nantong",
+   "lat": 32.03028,
+   "lon": 120.87472
+  },
+  {
+   "city": "扬州",
+   "popFact": "f_city_pop_yangzhou",
+   "geonameId": "1787227",
+   "geonamesName": "Yangzhou",
+   "lat": 32.39722,
+   "lon": 119.43583
+  },
+  {
+   "city": "连云港",
+   "popFact": "f_city_pop_lianyungang",
+   "geonameId": "10859300",
+   "geonamesName": "Lianyungang",
+   "lat": 34.59845,
+   "lon": 119.21556
+  },
+  {
+   "city": "盐城",
+   "popFact": "f_city_pop_yancheng",
+   "geonameId": "1787746",
+   "geonamesName": "Yancheng",
+   "lat": 33.3575,
+   "lon": 120.1573
+  },
+  {
+   "city": "哈尔滨",
+   "popFact": "f_city_pop_haerbin",
+   "geonameId": "2037013",
+   "geonamesName": "Harbin",
+   "lat": 45.75,
+   "lon": 126.65
+  },
+  {
+   "city": "齐齐哈尔",
+   "popFact": "f_city_pop_qiqihaer",
+   "geonameId": "2035265",
+   "geonamesName": "Qiqihar",
+   "lat": 47.33922,
+   "lon": 123.96154
+  },
+  {
+   "city": "大庆",
+   "popFact": "f_city_pop_daqing",
+   "geonameId": "2037860",
+   "geonamesName": "Daqing",
+   "lat": 46.58333,
+   "lon": 125
+  },
+  {
+   "city": "牡丹江",
+   "popFact": "f_city_pop_mudanjiang",
+   "geonameId": "2035715",
+   "geonamesName": "Mudanjiang",
+   "lat": 44.54804,
+   "lon": 129.62594
+  },
+  {
+   "city": "沈阳",
+   "popFact": "f_city_pop_shenyang",
+   "geonameId": "2034937",
+   "geonamesName": "Shenyang",
+   "lat": 41.79222,
+   "lon": 123.43278
+  },
+  {
+   "city": "大连",
+   "popFact": "f_city_pop_dalian",
+   "geonameId": "1814087",
+   "geonamesName": "Dalian",
+   "lat": 38.91222,
+   "lon": 121.60222
+  },
+  {
+   "city": "鞍山",
+   "popFact": "f_city_pop_anshan",
+   "geonameId": "2038632",
+   "geonamesName": "Anshan",
+   "lat": 41.12361,
+   "lon": 122.99
+  },
+  {
+   "city": "锦州",
+   "popFact": "f_city_pop_jinzhou",
+   "geonameId": "2036427",
+   "geonamesName": "Jinzhou",
+   "lat": 41.10778,
+   "lon": 121.14167
+  },
+  {
+   "city": "长春",
+   "popFact": "f_city_pop_changchun",
+   "geonameId": "2038180",
+   "geonamesName": "Changchun",
+   "lat": 43.88,
+   "lon": 125.32278
+  },
+  {
+   "city": "吉林",
+   "popFact": "f_city_pop_jilin",
+   "geonameId": "2036502",
+   "geonamesName": "Jilin",
+   "lat": 43.84652,
+   "lon": 126.5608
+  },
+  {
+   "city": "通化",
+   "popFact": "f_city_pop_tonghua",
+   "geonameId": "2034414",
+   "geonamesName": "Tonghua",
+   "lat": 41.71972,
+   "lon": 125.92639
+  },
+  {
+   "city": "福州",
+   "popFact": "f_city_pop_fuzhou",
+   "geonameId": "1810821",
+   "geonamesName": "Fuzhou",
+   "lat": 26.06139,
+   "lon": 119.30611
+  },
+  {
+   "city": "厦门",
+   "popFact": "f_city_pop_xiamen",
+   "geonameId": "1790645",
+   "geonamesName": "Xiamen",
+   "lat": 24.47979,
+   "lon": 118.08187
+  },
+  {
+   "city": "泉州",
+   "popFact": "f_city_pop_quanzhou",
+   "geonameId": "1797353",
+   "geonamesName": "Quanzhou",
+   "lat": 24.91389,
+   "lon": 118.58583
+  },
+  {
+   "city": "漳州",
+   "popFact": "f_city_pop_zhangzhou",
+   "geonameId": "1785018",
+   "geonamesName": "Zhangzhou",
+   "lat": 24.51333,
+   "lon": 117.65556
+  },
+  {
+   "city": "荆州",
+   "popFact": "f_city_pop_jingzhou",
+   "geonameId": "1805540",
+   "geonamesName": "Jingzhou",
+   "lat": 30.35028,
+   "lon": 112.19028
+  },
+  {
+   "city": "黄石",
+   "popFact": "f_city_pop_huangshi",
+   "geonameId": "1807234",
+   "geonamesName": "Huangshi",
+   "lat": 30.24706,
+   "lon": 115.04814
+  },
+  {
+   "city": "常州",
+   "popFact": "f_city_pop_changzhou",
+   "geonameId": "1815456",
+   "geonamesName": "Changzhou",
+   "lat": 31.77359,
+   "lon": 119.95401
+  },
+  {
+   "city": "镇江",
+   "popFact": "f_city_pop_zhenjiang",
+   "geonameId": "1784642",
+   "geonamesName": "Zhenjiang",
+   "lat": 32.21086,
+   "lon": 119.45508
+  }
+ ]
+}

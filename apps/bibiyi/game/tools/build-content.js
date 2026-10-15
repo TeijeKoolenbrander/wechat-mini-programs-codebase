@@ -2,13 +2,19 @@
 /**
  * Content pipeline (spec 3.10, PO-31, AC 15).
  *
- *   node tools/build-content.js [--src DIR] [--version N] [--strict] [--spotcheck] [--check]
+ *   node tools/build-content.js [--src DIR] [--version N] [--strict] [--spotcheck] [--check] [--write-pools]
  *
  * Reads apps/bibiyi/content-src/ (one file per measure: <measure>.jsonl, one
  * JSON object per line, or <measure>.csv with a header row; list fields are
- * separated by "|"). When that folder is missing or holds no data files, the
- * PLACEHOLDER fixture in tools/fixtures/content-src/ is used and every output
- * is flagged `placeholder: true`.
+ * separated by "|"). Two row shapes are accepted: the spec 3.2 shape (label, source,
+ * url, ...) and the collector shape of content-src (subject, source_name, source_url,
+ * retrieved_at, verified_by + verifier2, ...), which `fromCollector` converts. There is no
+ * placeholder fallback any more: a missing or empty content-src is an error.
+ *
+ * Pools: content-src/pools.json maps fact id -> 'free' | 'daily'. Ids missing from it are
+ * assigned deterministically (hash order, DAILY_SHARE of each measure to the daily pool)
+ * and written back with --write-pools. Existing assignments never move (graduation is
+ * one-way, spec 3.9); --check fails when pools.json is not up to date.
  *
  * Writes
  *   core/content/facts.free.js     free pool only, bundled in the game (display + value + source + url)
@@ -35,14 +41,30 @@ const { valueText } = require('../core/format');
 
 const GAME = path.join(__dirname, '..');
 const DEFAULT_SRC = path.join(GAME, '..', 'content-src');
-const FIXTURE_SRC = path.join(__dirname, 'fixtures', 'content-src');
+const POOLS_FILE = 'pools.json';
 const OUT_FREE = path.join(GAME, 'core', 'content', 'facts.free.js');
 const OUT_DIR = path.join(__dirname, 'out');
 
 /** Measures that spec 3.5 excludes: skipped if they appear in a source folder. */
 const EXCLUDED_MEASURES = ['prov_area', 'province_area', 'area', 'country_pop', 'country_area', 'border_len', 'gdp', 'income', 'house_price', 'price', 'person_height', 'death_toll'];
 
-const CLIENT_FIELDS = ['id', 'measure', 'pool', 'label', 'sub', 'value', 'approx', 'uncertainty', 'year', 'source', 'publisher', 'url', 'licence', 'retrievedAt', 'note', 'noPairWith', 'status', 'since'];
+const CLIENT_FIELDS = ['id', 'measure', 'pool', 'label', 'sub', 'value', 'approx', 'uncertainty', 'year', 'source', 'publisher', 'url', 'licence', 'retrievedAt', 'note', 'method', 'attribution', 'noPairWith', 'status', 'since'];
+
+/** Share of each measure's facts that goes to the (server-only) daily pool when pools.json has no entry yet. */
+const DAILY_SHARE = {};
+const DEFAULT_DAILY_SHARE = 0.55;
+
+/** Tags a collector adds as advisory notes are dropped, except these (kept for reviewers or the removal check). */
+const KEEP_TAGS = ['border-feature'];
+/** A fact carrying one of these must not ship (the reviewer asked for removal, or it was moved out). */
+const REMOVE_TAGS = ['recommend-remove', 'dropped'];
+
+/** Publisher names shortened for the one-line source under a card. The full name stays in `source`. */
+const PUBLISHER_SHORT = {
+  'Human Ageing Genomic Resources (HAGR)': 'AnAge（HAGR）',
+  'USDA Agricultural Research Service, FoodData Central': 'USDA FoodData Central',
+  'NASA / NSSDCA': 'NASA',
+};
 
 // ---------------------------------------------------------------- parsing
 
@@ -87,8 +109,62 @@ function parseCsv(text) {
 const NUM_FIELDS = ['value', 'uncertainty', 'year', 'since'];
 const LIST_FIELDS = ['verifiedBy', 'tags', 'noPairWith'];
 
+/** Where a reader can open the value: USDA API URLs (with a demo key) become the public food page; http becomes https. */
+function publicUrl(url, sourceName) {
+  let u = String(url || '');
+  const fdc = /fdcId\s+(\d+)/.exec(sourceName || '');
+  if (/^https:\/\/api\.nal\.usda\.gov\//.test(u) && fdc) u = 'https://fdc.nal.usda.gov/fdc-app.html#/food-details/' + fdc[1] + '/nutrients';
+  return u.replace(/^http:\/\//i, 'https://');
+}
+
+/**
+ * Collector row (content-src) -> spec 3.2 fact. Rows already in the spec shape (no `subject`) pass through.
+ * verified_by names the author; verifier2 must start with "ok" or the row has only one role and the validator rejects it.
+ */
+function fromCollector(r) {
+  if (r.subject === undefined) return r;
+  const f = {
+    id: r.id, measure: r.measure, label: r.subject, value: r.value, year: r.as_of_year, source: r.source_name,
+    publisher: PUBLISHER_SHORT[r.publisher] || r.publisher, url: publicUrl(r.source_url, r.source_name), licence: r.licence, retrievedAt: r.retrieved_at,
+    note: r.note || null, tags: (r.tags || []).filter((t) => KEEP_TAGS.indexOf(t) >= 0 || REMOVE_TAGS.indexOf(t) >= 0),
+  };
+  if (r.approx) f.approx = true;
+  if (f.measure === 'prov_pop' && !/普查|七普/.test(f.note || '')) f.note = '七普口径：2020年11月1日零时';
+  if (r.method) f.method = r.method;
+  if (r.attribution) f.attribution = r.attribution;
+  const author = String(r.verified_by || '').split(/[\s:]/)[0];
+  const second = /^ok\b/.test(String(r.verifier2 || ''));
+  f.verifiedBy = author && second ? ['author:' + author, 'verifier:second-check'] : author ? ['author:' + author] : [];
+  return f;
+}
+
+/** Fill pools from pools.json; assign new ids stratified per measure by hash order. Existing entries never move. */
+function assignPools(facts, existing) {
+  const pools = Object.assign({}, existing || {});
+  const byMeasure = {};
+  facts.forEach((f) => {
+    (byMeasure[f.measure] = byMeasure[f.measure] || []).push(f);
+  });
+  Object.keys(byMeasure).forEach((m) => {
+    const list = byMeasure[m];
+    const share = DAILY_SHARE[m] !== undefined ? DAILY_SHARE[m] : DEFAULT_DAILY_SHARE;
+    const want = Math.round(list.length * share);
+    let daily = list.filter((f) => pools[f.id] === 'daily').length;
+    list
+      .filter((f) => !pools[f.id])
+      .sort((a, b) => hash32('pool|' + a.id) - hash32('pool|' + b.id))
+      .forEach((f) => {
+        if (daily < want) {
+          pools[f.id] = 'daily';
+          daily++;
+        } else pools[f.id] = 'free';
+      });
+  });
+  return pools;
+}
+
 function normaliseRow(o, measureKey, contentVersion) {
-  const f = Object.assign({}, o);
+  const f = Object.assign({}, fromCollector(o));
   if (!f.measure) f.measure = measureKey;
   NUM_FIELDS.forEach((k) => {
     if (typeof f[k] === 'string') f[k] = Number(f[k]);
@@ -177,10 +253,10 @@ function manifestOf(info, validation) {
 /** AC 15: no daily-pool id or label may appear in the game output text. */
 function leaks(dailyFacts, freeText, freeFacts) {
   const bad = [];
-  const freeLabels = new Set(freeFacts.map((f) => f.label));
+  const freeLabels = new Set(freeFacts.map((f) => f.measure + '|' + f.label));
   dailyFacts.forEach((f) => {
     if (freeText.indexOf('"id":"' + f.id + '"') >= 0) bad.push('daily id in game output: ' + f.id);
-    if (freeLabels.has(f.label)) bad.push('daily label in game output: ' + f.label);
+    if (freeLabels.has(f.measure + '|' + f.label)) bad.push('daily label in game output: ' + f.label);
   });
   return bad;
 }
@@ -208,20 +284,32 @@ function spotcheck(info, dir) {
 function build(opts) {
   const o = opts || {};
   const contentVersion = o.version || 1;
-  let src = o.src || DEFAULT_SRC;
-  let placeholder = false;
+  const src = o.src || DEFAULT_SRC;
+  const placeholder = false;
   const haveData = (d) => fs.existsSync(d) && fs.readdirSync(d).some((n) => /\.(jsonl|csv)$/i.test(n));
-  if (!haveData(src)) {
-    if (o.src) throw new Error('no .jsonl / .csv files in ' + src);
-    src = FIXTURE_SRC;
-    placeholder = true;
-  }
+  if (!haveData(src)) throw new Error('no .jsonl / .csv files in ' + src + ' (there is no placeholder fallback)');
   const read = readSource(src, contentVersion);
-  const validation = validateContent(read.facts, { strict: !!o.strict });
-  const all = read.facts;
+  const poolsPath = path.join(src, POOLS_FILE);
+  const existing = fs.existsSync(poolsPath) ? JSON.parse(fs.readFileSync(poolsPath, 'utf8')) : {};
+  const pools = assignPools(read.facts, o.pools || existing);
+  read.facts.forEach((f) => {
+    if (!f.pool) f.pool = pools[f.id];
+  });
+  const removed = read.facts.filter((f) => (f.tags || []).some((t) => REMOVE_TAGS.indexOf(t) >= 0));
+  const all = read.facts.filter((f) => removed.indexOf(f) < 0);
+  removed.forEach((f) => read.warnings.push('skipped ' + f.id + ' (tagged ' + f.tags.join(',') + ')'));
+  const validation = validateContent(all, { strict: !!o.strict });
+  const keep = {};
+  all.forEach((f) => {
+    keep[f.id] = pools[f.id] || f.pool;
+  });
+  const sorted = {};
+  Object.keys(keep).sort().forEach((id) => {
+    sorted[id] = keep[id];
+  });
   const info = {
     contentVersion, placeholder, generatedFrom: path.relative(path.join(GAME, '..', '..'), src).split(path.sep).join('/'),
-    all, facts: all.filter((f) => f.pool === 'free'), daily: all.filter((f) => f.pool === 'daily'), warnings: read.warnings,
+    all, facts: all.filter((f) => f.pool === 'free'), daily: all.filter((f) => f.pool === 'daily'), warnings: read.warnings, poolsPath, poolsText: JSON.stringify(sorted, null, 1) + '\n',
   };
   const freeText = freeModuleText(info);
   const problems = validation.errors.slice();
@@ -237,7 +325,6 @@ function main() {
   };
   const r = build({ src: opt('--src'), version: opt('--version') ? Number(opt('--version')) : 1, strict: argv.indexOf('--strict') >= 0 });
   r.info.warnings.forEach((w) => console.warn('warning: ' + w));
-  if (r.info.placeholder) console.warn('warning: content-src/ not found, using the PLACEHOLDER fixture (invented data, not for release)');
   if (r.problems.length) {
     console.error(r.problems.length + ' problem(s):');
     r.problems.slice(0, 50).forEach((p) => console.error('  ' + p));
@@ -249,9 +336,15 @@ function main() {
       console.error('drift: core/content/facts.free.js is out of date, run tools/build-content.js');
       process.exit(1);
     }
+    const poolsOnDisk = fs.existsSync(r.info.poolsPath) ? fs.readFileSync(r.info.poolsPath, 'utf8').split(String.fromCharCode(13)).join('') : '';
+    if (poolsOnDisk !== r.info.poolsText) {
+      console.error('drift: content-src/pools.json is out of date, run tools/build-content.js --write-pools');
+      process.exit(1);
+    }
     console.log('content up to date: ' + r.info.facts.length + ' free, ' + r.info.daily.length + ' daily');
     return;
   }
+  if (argv.indexOf('--write-pools') >= 0) fs.writeFileSync(r.info.poolsPath, r.info.poolsText, 'utf8');
   fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.mkdirSync(path.dirname(OUT_FREE), { recursive: true });
   fs.writeFileSync(OUT_FREE, r.freeText, 'utf8');
@@ -263,4 +356,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { build, parseCsv, readSource, normaliseRow, clientFact, leaks, EXCLUDED_MEASURES, FIXTURE_SRC };
+module.exports = { build, parseCsv, readSource, normaliseRow, fromCollector, assignPools, publicUrl, clientFact, leaks, EXCLUDED_MEASURES, DAILY_SHARE };

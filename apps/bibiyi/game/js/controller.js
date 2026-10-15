@@ -26,7 +26,7 @@ const { buildFreeDeck } = require('../core/deck');
 const { questionPayload, revealOf, segmentBannerText, pairText } = require('../core/question');
 const { randomSeed } = require('../core/rng');
 const { beijingDateKey } = require('../core/date');
-const { countByGroup } = require('../core/content');
+const { countByGroup, offeredGroups } = require('../core/content');
 const { FREE_GROUPS, BY_KEY } = require('../core/measures');
 const { parseEnter } = require('./share');
 const V = require('./vm');
@@ -96,6 +96,8 @@ function createController(deps) {
     invalidate();
   }
   const todayKey = () => beijingDateKey(now() + c.dailyOffsetMs);
+  /** The saved free-play category, or 全部 when it is not offered (small categories, or a changed content set). */
+  const offeredFreeGroup = () => (offeredGroups(content, config.freeGroupMinFacts).indexOf(S.freeGroup) >= 0 ? S.freeGroup : 'all');
   const groupLabel = (key) => (FREE_GROUPS.find((g) => g.key === key) || FREE_GROUPS[0]).label;
   const topSheet = () => c.sheets[c.sheets.length - 1] || null;
   const openSheet = (kind) => {
@@ -242,7 +244,7 @@ function createController(deps) {
   function startFree(source, seedInfo) {
     const info = seedInfo || {};
     const seed = info.seed !== undefined ? info.seed >>> 0 : randomSeed();
-    const group = info.group || S.freeGroup || 'all';
+    const group = info.group || offeredFreeGroup();
     const r = baseRun({
       mode: info.challengeId ? 'challenge' : 'free', deckKind: 'free', friendly: !!info.challengeId, seed, group, source: source || 'home', deckLength: config.deckLen.free,
       challengeId: info.challengeId, challengeInfo: info.challengeId ? { ownerStreak: info.ownerStreak, kind: 'free' } : null,
@@ -1552,7 +1554,7 @@ function createController(deps) {
       case 'settings':
         return V.settingsVm(S, { album: c.ui.saveState === 'denied' ? 'denied' : 'unknown', friendBoardEnabled: privacy.friendBoardEnabled() });
       case 'category':
-        return V.categoryVm(S.freeGroup, countByGroup(content));
+        return V.categoryVm(offeredFreeGroup(), countByGroup(content), config.freeGroupMinFacts);
       case 'continue':
         return V.continueSheetVm(r, c.ui.adState, r && J.canUseLife(r.run));
       case 'source':
@@ -1578,7 +1580,7 @@ function createController(deps) {
         const a = S.active;
         const resume = a && !a.server && a.answers.length ? '继续上局 · 已连对 ' + (a.streak || 0) : null;
         vm = V.homeVm(c.home.daily, {
-          free: { categoryKey: S.freeGroup, categoryLabel: groupLabel(S.freeGroup), bestText: S.bestFree > 0 ? '随便比比最佳 ' + S.bestFree : null, resumeText: resume },
+          free: { categoryKey: offeredFreeGroup(), categoryLabel: groupLabel(offeredFreeGroup()), bestText: S.bestFree > 0 ? '随便比比最佳 ' + S.bestFree : null, resumeText: resume },
           hasGroupContext: c.group.status === 'ok', muted: S.muted, showHowToOnce: sheet === 'howto' && !S.howtoSeen, friendBoardEnabled: privacy.friendBoardEnabled(),
           sheet, sheetVm, display, t,
         });

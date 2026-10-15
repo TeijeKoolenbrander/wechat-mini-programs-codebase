@@ -42,9 +42,9 @@ function displayNumber(measure, value) {
   return Math.round((value / measure.scale) * f) / f;
 }
 
-/** "来源：<publisher> · <year>" */
+/** "来源：<publisher> · <year>"; computed facts say so ("来源：GeoNames，本游戏计算 · 2026"). */
 function sourceText(fact) {
-  return '来源：' + fact.publisher + ' · ' + fact.year;
+  return '来源：' + fact.publisher + (fact.method === 'computed' ? '，本游戏计算' : '') + ' · ' + fact.year;
 }
 
 module.exports = { fixedWithSeparators, yearText, numberText, valueText, unitText, displayNumber, sourceText };

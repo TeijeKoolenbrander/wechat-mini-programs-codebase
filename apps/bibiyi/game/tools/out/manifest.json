@@ -1,81 +1,103 @@
 {
   "contentVersion": 1,
-  "placeholder": true,
-  "generatedFrom": "bibiyi/game/tools/fixtures/content-src",
-  "total": 1040,
-  "free": 520,
-  "daily": 520,
+  "placeholder": false,
+  "generatedFrom": "bibiyi/content-src",
+  "total": 386,
+  "free": 172,
+  "daily": 214,
   "perMeasure": {
     "city_pop": {
-      "total": 80,
-      "free": 40,
+      "total": 72,
+      "free": 32,
       "daily": 40
     },
     "prov_pop": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 31,
+      "free": 14,
+      "daily": 17
     },
     "mountain": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 11,
+      "free": 5,
+      "daily": 6
     },
     "river": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 0,
+      "free": 0,
+      "daily": 0
     },
     "lake": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 0,
+      "free": 0,
+      "daily": 0
     },
     "year": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 0,
+      "free": 0,
+      "daily": 0
     },
     "animal_weight": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 40,
+      "free": 18,
+      "daily": 22
     },
     "animal_life": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 38,
+      "free": 17,
+      "daily": 21
     },
     "space_diameter": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 21,
+      "free": 9,
+      "daily": 12
     },
     "structure_len": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 0,
+      "free": 0,
+      "daily": 0
     },
     "structure_height": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 0,
+      "free": 0,
+      "daily": 0
     },
     "food_kcal": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 23,
+      "free": 10,
+      "daily": 13
     },
     "distance": {
-      "total": 80,
-      "free": 40,
-      "daily": 40
+      "total": 150,
+      "free": 67,
+      "daily": 83
     }
   },
   "licences": {
-    "CC0": 1040
+    "CC-BY-3.0": 78,
+    "CN-GOV-STAT": 103,
+    "CC-BY-4.0": 150,
+    "CC0": 23,
+    "CN-GOV-GEO": 11,
+    "US-PD": 21
   },
   "publishers": {
-    "样例出版方": 1040
+    "AnAge（HAGR）": 78,
+    "湖北省统计局": 12,
+    "江苏省统计局": 13,
+    "黑龙江省统计局（黑龙江省人民政府网发布）": 12,
+    "辽宁省统计局": 14,
+    "吉林省统计局": 8,
+    "福建省统计局": 9,
+    "广州市统计局（广州市人民政府网站发布）": 1,
+    "郑州市统计局": 1,
+    "东莞市统计局": 1,
+    "西安市统计局（经西安高新区管委会网站转载）": 1,
+    "GeoNames": 150,
+    "USDA FoodData Central": 23,
+    "自然资源部公布数据，经人民日报/中国气象局网站转载": 1,
+    "自然资源部、国家林业和草原局": 9,
+    "云南省自然资源厅（转述自然资源部、国家林草局公告）": 1,
+    "国家统计局": 31,
+    "NASA": 21
   }
 }

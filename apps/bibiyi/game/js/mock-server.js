@@ -40,7 +40,7 @@ const SYN_RANGE = {
 };
 
 /** The mock's own invented daily pool: 40 facts per measure, labels 模拟<measure index>-<n>. Never real data. */
-function syntheticDaily() {
+function syntheticDaily(measureKeys) {
   const out = [];
   MEASURES.forEach((m, mi) => {
     const rng = mulberry32(hash32('mock-daily:' + m.key));
@@ -68,7 +68,7 @@ function createMockServer(opts) {
   const cfgNum = opts.configVersion || LATEST_CONFIG_VERSION;
   const config = getConfig(cfgNum);
   const free = getContent(cv);
-  const dailyList = opts.dailyFacts || syntheticDaily();
+  const dailyList = opts.dailyFacts || syntheticDaily(MEASURES.filter((m) => free.byMeasure[m.key].length > 0).map((m) => m.key)); // only the measures v1 ships
   const dailyIdx = indexFacts(dailyList, cv);
   const allIdx = indexFacts(free.facts.concat(dailyList), cv);
   const launchKey = opts.launchDateKey || config.daily.launchDateKey;

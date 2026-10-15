@@ -104,8 +104,10 @@ function settingsVm(S, extra) {
   return { muted: !!S.muted, largeText: !!S.largeText, highContrast: !!S.highContrast, privacy: S.privacy.privacy, friendScope: S.privacy.friendScope, album: extra.album || 'unknown', friendBoardEnabled: !!extra.friendBoardEnabled };
 }
 
-function categoryVm(selected, counts) {
-  return { selected, options: FREE_GROUPS.map((g) => ({ key: g.key, label: g.label, factCount: counts[g.key] || 0 })) };
+/** `minFacts`: categories with fewer free facts are not offered (config.freeGroupMinFacts). 全部 is always there. */
+function categoryVm(selected, counts, minFacts) {
+  const min = minFacts || 0;
+  return { selected, options: FREE_GROUPS.filter((g) => g.key === 'all' || (counts[g.key] || 0) >= min).map((g) => ({ key: g.key, label: g.label, factCount: counts[g.key] || 0 })) };
 }
 
 // ---------------------------------------------------------------- play

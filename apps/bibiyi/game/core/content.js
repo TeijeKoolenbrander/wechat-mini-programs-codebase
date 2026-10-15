@@ -7,10 +7,10 @@
  * AC 22). Daily-pool facts never exist in the game package.
  */
 
-const { MEASURES, BY_KEY, THEME_GROUPS } = require('./measures');
+const { MEASURES, BY_KEY } = require('./measures');
 const { findForbidden } = require('./forbidden');
 
-const LICENCES = ['CN-GOV-STAT', 'CN-GOV-GEO', 'CN-GOV-OTHER', 'US-PD', 'CC0', 'CC-BY-4.0', 'FACT-CITED'];
+const LICENCES = ['CN-GOV-STAT', 'CN-GOV-GEO', 'CN-GOV-OTHER', 'US-PD', 'CC0', 'CC-BY-3.0', 'CC-BY-4.0', 'FACT-CITED'];
 const POOLS = ['free', 'daily'];
 const STATUSES = ['active', 'suspended', 'retired'];
 const MAX_FACT_CITED_PER_SOURCE = 25;
@@ -27,13 +27,16 @@ const EXCLUSION_TAGS = ['politics', 'person', 'ethnicity', 'religion', 'quality-
 /** City items are 地级市 / 副省级市 / 直辖市 only (spec 3.5.3). */
 const CITY_EXCLUDED_SUFFIX = ['自治州', '自治县', '盟', '地区'];
 
-/** Launch counts (spec 3.3), checked in strict mode. total / free / daily. */
-const LAUNCH_COUNTS = {
-  city_pop: [131, 87, 44], prov_pop: [31, 21, 10], mountain: [50, 34, 16], river: [40, 26, 14], lake: [30, 20, 10],
-  year: [90, 50, 40], animal_weight: [50, 32, 18], animal_life: [30, 18, 12], space_diameter: [40, 26, 14],
-  structure_len: [30, 20, 10], structure_height: [30, 20, 10], food_kcal: [70, 46, 24], distance: [60, 40, 20],
+/**
+ * v1 content (CTO decisions 2026-10-15): the measures that ship and the least each must hold, checked in
+ * strict mode. river, lake, year, structure_len and structure_height are NOT in v1 (they must hold no facts),
+ * and there are no weekday themes, so no per-theme minimum. total / free / daily.
+ */
+const V1_MEASURES = {
+  city_pop: [60, 20, 20], prov_pop: [25, 8, 8], mountain: [8, 3, 3], animal_weight: [30, 10, 10], animal_life: [30, 10, 10],
+  space_diameter: [15, 5, 6], food_kcal: [18, 6, 6], distance: [100, 30, 40],
 };
-const MIN_DAILY_PER_THEME_GROUP = 30;
+const NOT_IN_V1 = ['river', 'lake', 'year', 'structure_len', 'structure_height'];
 
 function hostOf(url) {
   const m = /^https:\/\/([^/:?#]+)/i.exec(String(url || ''));
@@ -123,14 +126,13 @@ function validateContent(facts, opts) {
   });
 
   if (o.strict) {
-    Object.keys(LAUNCH_COUNTS).forEach((k) => {
-      const want = LAUNCH_COUNTS[k];
+    Object.keys(V1_MEASURES).forEach((k) => {
+      const want = V1_MEASURES[k];
       const got = counts[k];
-      if (got.total !== want[0] || got.free !== want[1] || got.daily !== want[2]) errors.push('measure ' + k + ': counts ' + got.total + '/' + got.free + '/' + got.daily + ' expected ' + want.join('/'));
+      if (got.total < want[0] || got.free < want[1] || got.daily < want[2]) errors.push('measure ' + k + ': counts ' + got.total + '/' + got.free + '/' + got.daily + ' below the v1 minimum ' + want.join('/'));
     });
-    THEME_GROUPS.forEach((g) => {
-      const n = (facts || []).filter((f) => f.pool === 'daily' && g.categories.indexOf(BY_KEY[f.measure] && BY_KEY[f.measure].category) >= 0).length;
-      if (n < MIN_DAILY_PER_THEME_GROUP) errors.push('theme group ' + g.label + ': ' + n + ' daily facts (min ' + MIN_DAILY_PER_THEME_GROUP + ')');
+    NOT_IN_V1.forEach((k) => {
+      if (counts[k] && counts[k].total) errors.push('measure ' + k + ' is not in v1 but has ' + counts[k].total + ' facts');
     });
   }
   return { ok: errors.length === 0, errors, counts, cited };
@@ -174,6 +176,12 @@ function getContent(version) {
   return BUNDLES[version === undefined ? LATEST_CONTENT_VERSION : version] || null;
 }
 
+/** The free-play groups worth offering: 'all' plus every category with at least `minFacts` usable free facts. */
+function offeredGroups(index, minFacts) {
+  const counts = countByGroup(index);
+  return Object.keys(counts).filter((g) => g === 'all' || counts[g] >= minFacts);
+}
+
 /** Facts of a free-play category group ('all' or a category key), usable in decks. */
 function groupMeasures(group) {
   return MEASURES.filter((m) => group === 'all' || !group || m.category === group).map((m) => m.key);
@@ -190,8 +198,8 @@ function countByGroup(index) {
 }
 
 module.exports = {
-  LICENCES, POOLS, BANNED_HOSTS, EXCLUSION_TAGS, LAUNCH_COUNTS, MAX_FACT_CITED_PER_SOURCE,
-  validateContent, indexFacts, registerBundle, getContent, isActive, groupMeasures, countByGroup, hostOf, isBannedHost,
+  LICENCES, POOLS, BANNED_HOSTS, EXCLUSION_TAGS, V1_MEASURES, NOT_IN_V1, MAX_FACT_CITED_PER_SOURCE,
+  validateContent, indexFacts, registerBundle, getContent, isActive, groupMeasures, countByGroup, offeredGroups, hostOf, isBannedHost,
   get LATEST_CONTENT_VERSION() {
     return LATEST_CONTENT_VERSION;
   },

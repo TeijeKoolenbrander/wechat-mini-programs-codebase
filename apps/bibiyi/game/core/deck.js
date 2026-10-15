@@ -9,10 +9,9 @@
  */
 
 const { sub, int, shuffle, hash32 } = require('./rng');
-const { BY_KEY, THEMES, MEASURES } = require('./measures');
+const { BY_KEY, DAILY_THEME, MEASURES } = require('./measures');
 const { getConfig, bandAt } = require('./config');
 const { displayNumber } = require('./format');
-const { weekdayOf } = require('./date');
 const { getContent, isActive } = require('./content');
 const { deckStats, passesGates } = require('./gates');
 
@@ -231,9 +230,10 @@ function dailySeed(dateKey) {
   return hash32('bibiyi:daily:' + dateKey);
 }
 
-/** The weekday theme of a Beijing date key. */
+/** The theme of a Beijing date key. v1 has no weekday themes: every day is the same mixed theme. */
 function themeOf(dateKey) {
-  return THEMES[weekdayOf(dateKey)];
+  void dateKey;
+  return DAILY_THEME;
 }
 
 /**
@@ -251,27 +251,19 @@ function buildDailyDeck(opts) {
     byMeasure[m.key] = (opts.index.byMeasure[m.key] || []).filter((f) => f.pool === 'daily');
   });
   const S = { kind: 'daily', rng, config, byMeasure, used: new Set(), exclude: opts.exclude || null, suspended: opts.suspended || null };
-  const allKeys = measuresWithFacts(byMeasure, MEASURES.map((m) => m.key), 6);
-  const themeKeys = theme.categories ? measuresWithFacts(byMeasure, MEASURES.filter((m) => theme.categories.indexOf(m.category) >= 0).map((m) => m.key), 6) : null;
-  if (!allKeys.length || (themeKeys && !themeKeys.length)) return null;
+  const allKeys = measuresWithFacts(byMeasure, MEASURES.map((m) => m.key), config.minDailyFactsPerMeasure);
+  if (!allKeys.length) return null;
 
   const total = config.deckLen.daily;
-  const span = Math.min(config.themeSpan, total);
   const [lo, hi] = config.segment.daily;
-  const lens = partition(rng, span, lo, hi).concat(partition(rng, total - span, lo, hi));
-  // recompute the split point exactly: segments of the first part sum to span
-  let acc = 0;
-  let firstPartSegs = 0;
-  while (acc < span) acc += lens[firstPartSegs++];
+  const lens = partition(rng, total, lo, hi);
 
   const mixedCount = {};
   const questions = [];
   let prev = null;
   let k = 1;
   for (let si = 0; si < lens.length; si++) {
-    const themed = !!themeKeys && si < firstPartSegs;
-    let pool = themed ? themeKeys : allKeys;
-    if (!themed) pool = pool.filter((key) => (mixedCount[key] || 0) < config.mixedSegmentsPerMeasure);
+    const pool = allKeys.filter((key) => (mixedCount[key] || 0) < config.mixedSegmentsPerMeasure);
     let order = shuffle(rng, pool.slice());
     if (order.length > 1 && prev) order = order.filter((x) => x !== prev).concat(order.filter((x) => x === prev));
     let seg = null;
@@ -281,7 +273,7 @@ function buildDailyDeck(opts) {
       if (seg) used = order[oi];
     }
     if (!seg) return null;
-    if (!themed) mixedCount[used] = (mixedCount[used] || 0) + 1;
+    mixedCount[used] = (mixedCount[used] || 0) + 1;
     seg.forEach((q) => questions.push(q));
     prev = used;
     k += lens[si];

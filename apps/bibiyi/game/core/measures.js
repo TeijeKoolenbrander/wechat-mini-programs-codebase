@@ -34,7 +34,7 @@ const MEASURES = [
   { key: 'lake', category: 'geo', subLabel: '面积', unit: '平方公里', scale: 1, decimals: 0, hi: '更大', lo: '更小', kind: 'ratio', minGap: 1.25, icon: 'lake', knowledgeScale: 0.45 },
   { key: 'year', category: 'era', subLabel: '年代', unit: '年', scale: 1, decimals: 0, hi: '更晚', lo: '更早', kind: 'year', minGap: 30, icon: 'year', knowledgeScale: 1.5 },
   { key: 'animal_weight', category: 'animal', subLabel: '成年体重（约）', unit: '千克', scale: 1, decimals: 1, hi: '更重', lo: '更轻', kind: 'ratio', minGap: 1.5, icon: 'animal', knowledgeScale: 0.6 },
-  { key: 'animal_life', category: 'animal', subLabel: '寿命（约）', unit: '年', scale: 1, decimals: 0, hi: '更长', lo: '更短', kind: 'ratio', minGap: 1.5, icon: 'animal', knowledgeScale: 0.6 },
+  { key: 'animal_life', category: 'animal', subLabel: '最长寿命纪录', unit: '年', scale: 1, decimals: 0, hi: '更长', lo: '更短', kind: 'ratio', minGap: 1.5, icon: 'animal', knowledgeScale: 0.6 },
   { key: 'space_diameter', category: 'space', subLabel: '直径', unit: '公里', scale: 1, decimals: 0, hi: '更大', lo: '更小', kind: 'ratio', minGap: 1.05, icon: 'planet', knowledgeScale: 0.5 },
   { key: 'structure_len', category: 'build', subLabel: '全长', unit: '米', scale: 1, decimals: 0, hi: '更长', lo: '更短', kind: 'ratio', minGap: 1.1, icon: 'bridge', knowledgeScale: 0.4 },
   { key: 'structure_height', category: 'build', subLabel: '高度', unit: '米', scale: 1, decimals: 0, hi: '更高', lo: '更低', kind: 'ratio', minGap: 1.1, icon: 'tower', knowledgeScale: 0.4 },
@@ -52,28 +52,12 @@ CATEGORIES.forEach((c) => {
 });
 
 /**
- * Weekday themes (spec 4.3), keyed by Beijing weekday 0 = Sunday. Questions
- * 1-20 come from `categories` (null = mixed), 21-40 are always mixed.
+ * Daily themes. v1 has NO weekday themes (CTO decision 2026-10-15, docs/bibiyi/decisions.md):
+ * every daily deck mixes all measures that have daily facts. The theme object stays in the
+ * wire format (`theme`, `themeLabel`) so a later version can add themes without a contract
+ * change; its label is empty and the UI leaves it out.
  */
-const THEMES = {
-  1: { key: 'city', label: '城市', categories: ['city'] },
-  2: { key: 'geo', label: '山河', categories: ['geo'] },
-  3: { key: 'era', label: '古今', categories: ['era'] },
-  4: { key: 'animal', label: '动物', categories: ['animal'] },
-  5: { key: 'spacebuild', label: '天文与工程', categories: ['space', 'build'] },
-  6: { key: 'foodist', label: '吃喝与距离', categories: ['food', 'dist'] },
-  0: { key: 'mix', label: '大杂烩', categories: null },
-};
-
-/** Daily theme groups used by the validator's per-group minimum (spec 3.3). */
-const THEME_GROUPS = [
-  { key: 'city', label: '城市', categories: ['city'] },
-  { key: 'geo', label: '山河', categories: ['geo'] },
-  { key: 'era', label: '古今', categories: ['era'] },
-  { key: 'animal', label: '动物', categories: ['animal'] },
-  { key: 'spacebuild', label: '天文与工程', categories: ['space', 'build'] },
-  { key: 'foodist', label: '吃喝与距离', categories: ['food', 'dist'] },
-];
+const DAILY_THEME = { key: 'mix', label: '', categories: null };
 
 /** Free-play category filter options (spec 6.14). */
 const FREE_GROUPS = [{ key: 'all', label: '全部' }].concat(CATEGORIES.map((c) => ({ key: c.key, label: c.label })));
@@ -86,4 +70,4 @@ function measuresOfCategories(cats) {
   return MEASURES.filter((m) => !cats || cats.indexOf(m.category) >= 0);
 }
 
-module.exports = { CATEGORIES, MEASURES, THEMES, THEME_GROUPS, FREE_GROUPS, getMeasure, measuresOfCategories, BY_KEY, CAT_BY_KEY };
+module.exports = { CATEGORIES, MEASURES, DAILY_THEME, FREE_GROUPS, getMeasure, measuresOfCategories, BY_KEY, CAT_BY_KEY };
