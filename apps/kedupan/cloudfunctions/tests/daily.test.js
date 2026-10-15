@@ -98,9 +98,9 @@ test('ops replaces a card in the console: next getDaily shows it, earlier answer
 });
 
 test('getDaily features come from app_config; hidden when absent', async () => {
-  assert.equal((await dailyOf('A')).features.subscribeTmplId, null);
+  assert.equal((await dailyOf('A')).features.subscribe, null);
   const store = h.mod('getDaily', ['common', 'store.js']);
   store.resetAppConfigCache();
   h.db.put('app_config', { _id: 'live', subscribe: { tmplId: 'TPL1' }, ads: { banner: { enabled: false } } });
-  assert.equal((await dailyOf('A')).features.subscribeTmplId, 'TPL1');
+  assert.equal((await dailyOf('A')).features.subscribe.tmplId, 'TPL1');
 });

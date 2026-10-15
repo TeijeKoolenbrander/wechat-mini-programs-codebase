@@ -64,20 +64,12 @@ exports.main = store.handler(async (event, { openid }) => {
     const fin = await daily.ensureFinal(ySet, nowMs);
     if (fin) {
       const yTotal = daily.scoreEntry(yEntry.pos, fin).total;
-      let pct = null;
-      if (ySet.finalCount >= 30 && Array.isArray(ySet.finalHist)) {
-        let below = 0;
-        for (let b = 0; b < core.totalBin(yTotal); b++) below += ySet.finalHist[b] || 0;
-        pct = Math.floor((100 * below) / ySet.finalCount);
-      }
+      const pct = Array.isArray(ySet.finalHist) ? core.percentile(ySet.finalHist, yTotal, ySet.finalCount) : null;
       out.yesterday = { total: yTotal, pct, final: true };
     }
   }
 
   const cfg = await store.getAppConfig();
-  out.features = {
-    subscribeTmplId: (cfg.subscribe && cfg.subscribe.tmplId) || null,
-    ads: cfg.ads || null,
-  };
+  out.features = core.features(cfg);
   return out;
 });

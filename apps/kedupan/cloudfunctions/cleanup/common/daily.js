@@ -30,7 +30,7 @@ function cardFromItem(it) {
 }
 /** what clients may see: never the anchor */
 function publicCard(c, idx) {
-  return { idx, itemId: c.itemId, spectrumId: c.spectrumId, left: c.left, right: c.right, prompt: c.prompt };
+  return { idx, itemId: c.itemId, spectrumId: c.spectrumId, left: c.left, right: c.right, prompt: c.prompt, catLabel: core.catLabel(c.cat) };
 }
 
 // ---------- daily_sets: idempotent create ----------
@@ -53,9 +53,12 @@ async function ensureDaily(dateKey) {
   let source = 'schedule';
   if (!items) {
     const used = new Set((await store.queryAll('item_usage', {}, { field: { _id: true } })).map((d) => d._id));
-    items = core.autoCards(used, `auto|${dateKey}`);
+    const _ = store._();
+    const recent = (await store.db().collection('daily_sets').where({ _id: _.lt(dateKey) }).orderBy('_id', 'desc').limit(20).get()).data;
+    const recentSpectra = new Set(recent.flatMap((s) => s.cards.map((c) => c.spectrumId)));
+    items = core.autoCards(dateKey, used, recentSpectra);
     source = 'auto';
-    console.error(`[ALERT] schedule exhausted at issue ${issueNo} (${dateKey}); ${items ? 'auto path used' : 'auto path FAILED'}`);
+    console.error(`[ALERT] ${core.hasSchedule() ? 'schedule exhausted' : 'no shipped schedule'} at issue ${issueNo} (${dateKey}); ${items ? 'auto path used' : 'auto path FAILED'}`);
   }
   if (!items) throw new AppError('DAILY_UNAVAILABLE', 'no daily set could be created');
 

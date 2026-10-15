@@ -1,166 +1,129 @@
 'use strict';
 // The ONLY place that touches the shared game core (copied into ./core by scripts/sync-core.js).
-// Real core contract: apps/kedupan/game/core/README.md (written by minigame-dev).
-//
-// ASSUMED core surface (adjust ONLY here when the real core differs):
-//   core/date.js     beijingDateKey(ms)
-//   core/score.js    cardScore(d), cardLabel(d), medianOfHist(hist101), medianOfValues(values),
-//                    referenceFromHist(hist101, anchor, W), dayBand(total)
-//   core/config.js   getConfig() -> {score:{priorVotes,agreeMin,agreeRadius}, boardListCap, groupRowCap}
-//   core/content.js  LATEST_CONTENT_VERSION, getSpectrum(id), getItem(id) -> {id,text,anchor,tags,spectrumId,left,right,cat},
-//                    allItems(), scheduleFor(issueNo) -> 5 item ids | null
-// Group formulas (PD-5) are composed here from the primitives so client and server share the primitives.
+// Real core contract: apps/kedupan/game/core/README.md (minigame-dev). Used surface:
+//   core/date.js      beijingDateKey
+//   core/score.js     cardScore, labelFor, bandFor, medianOf, nationalRef, agreePct, divisiveIdx, histBins21, totalBin,
+//                     percentile, looRef, groupScore, groupMq, groupMedian, roundMq, bestGuess
+//   core/config.js    getConfig(1), normalizeFeatures
+//   core/content.js   getContent(1) -> {spectrumById, itemById, ...}
+//   core/content/schedule.v1.js   {days:[[5 item ids]...]} (optional until the content owner generates it)
+//   core/schedule.js  pickAutoDaily(content, dateKey, usedSet, recentSpectraSet)
 const dateMod = require('../core/date');
 const score = require('../core/score');
 const config = require('../core/config');
-const content = require('../core/content');
-const crypto = require('crypto');
+const contentMod = require('../core/content');
+const scheduleMod = require('../core/schedule');
 const { CARDS } = require('./util');
 
 function cfg() {
-  const c = (config.getConfig && config.getConfig()) || {};
+  const c = config.getConfig(config.LATEST_CONFIG_VERSION) || {};
   const s = c.score || {};
+  const r = c.rounds || {};
+  const x = c.extras || {};
+  const num = (v, d) => (Number.isInteger(v) && v > 0 ? v : d);
   return {
-    priorVotes: Number.isInteger(s.priorVotes) ? s.priorVotes : 10,
-    agreeMin: Number.isInteger(s.agreeMin) ? s.agreeMin : 30,
-    agreeRadius: Number.isInteger(s.agreeRadius) ? s.agreeRadius : 10,
-    boardListCap: Number.isInteger(c.boardListCap) && c.boardListCap > 0 ? c.boardListCap : 3000,
-    groupRowCap: Number.isInteger(c.groupRowCap) && c.groupRowCap > 0 ? c.groupRowCap : 500,
+    boardListCap: num(c.boardListCap, 3000),
+    groupRowCap: num(s.groupRowCap, 500),
+    bonusPerDay: num(x.bonusPerDay, 3),
+    distributionPerDay: num(x.distributionPerDay, 3),
+    reportsPerDay: num(x.reportsPerDay, 10),
+    roundsPerDay: num(r.perDayLimit, 20),
+    targetMin: num(r.targetMin, 5),
+    targetMax: num(r.targetMax, 95),
+    revealMinGuesses: num(r.revealMinGuesses, 2),
+    autoRevealAt: num(r.autoRevealAt, 8),
+    autoRevealMs: num(r.autoRevealMs, 24 * 3600e3),
+    guessWindowMs: num(r.guessWindowMs, 7 * 24 * 3600e3),
+    draftMs: num(r.draftMs, 30 * 60e3),
+    groupRefsCap: num(r.groupRefsCap, 10),
   };
 }
 
-/** Beijing date key for a ms timestamp (core date.js; explicit UTC+8 arithmetic). */
-function dateKeyAt(ms) {
-  return dateMod.beijingDateKey(ms);
+/** the remote-features block the client uses (core/config.js normalizeFeatures) */
+function features(appConfig) {
+  const a = appConfig || {};
+  const ads = a.ads || {};
+  return config.normalizeFeatures({ subscribe: a.subscribe, banner: ads.banner, interstitial: ads.interstitial });
 }
+
+const content = () => contentMod.getContent(contentMod.LATEST_CONTENT_VERSION);
+
+/** Beijing date key for a ms timestamp (core date.js; explicit UTC+8 arithmetic). */
+const dateKeyAt = (ms) => dateMod.beijingDateKey(ms);
 
 // ---- scoring primitives ----
 const cardScore = (d) => score.cardScore(d);
-const cardLabel = (d) => score.cardLabel(d);
-const dayBand = (t) => score.dayBand(t);
-const medianOfValues = (v) => score.medianOfValues(v);
+const cardLabel = (d) => score.labelFor(d).label;
+const dayBand = (t) => score.bandFor(t).label;
+const medianOfValues = (v) => score.medianOf(v);
 /** R_c = median(real positions + W virtual votes at the anchor), PD-4 */
-function refFromHist(hist, anchor) {
-  return score.referenceFromHist(hist, anchor, cfg().priorVotes);
+const refFromHist = (hist, anchor) => score.nationalRef(hist, anchor);
+/** share (0-100) of real positions within the agree radius of p (hist INCLUDES p); null below the minimum */
+const agreePct = (hist, p) => score.agreePct(hist, p);
+const hist21 = (hist) => score.histBins21(hist);
+const totalBin = (t) => score.totalBin(t);
+/** 定分 percentile from finalHist; null below the minimum count */
+const percentile = (finalHist, total, count) => score.percentile(finalHist, total, count);
+/** card with the widest national spread; null when nobody has answered anything */
+function divisiveIdx(hists, refs) {
+  if (!hists.some((h) => h.some((c) => c > 0))) return null;
+  return score.divisiveIdx(hists, refs);
 }
-/** share (0-100 integer) of real positions within the agree radius of p; null below agreeMin real answers */
-function agreePct(hist, n, p) {
-  const c = cfg();
-  if (!(n >= c.agreeMin)) return null;
-  let k = 0;
-  for (let v = Math.max(0, p - c.agreeRadius); v <= Math.min(100, p + c.agreeRadius); v++) k += hist[v] || 0;
-  return Math.round((100 * k) / n);
-}
-/** mean absolute deviation of real positions from `ref`; null when there are none */
-function madFromHist(hist, n, ref) {
-  if (!(n > 0)) return null;
-  let sum = 0;
-  for (let v = 0; v <= 100; v++) sum += (hist[v] || 0) * Math.abs(v - ref);
-  return sum / n;
-}
-/** 101 bins -> 21 bins of width 5 (the last bin is the single value 100) */
-function hist21(hist) {
-  const out = new Array(21).fill(0);
-  for (let v = 0; v <= 100; v++) out[Math.floor(v / 5)] += hist[v] || 0;
-  return out;
-}
-/** finalHist bin for a day total 0-500 (101 bins of width 5) */
-function totalBin(total) {
-  return Math.min(100, Math.floor(total / 5));
-}
+const looRef = (positions, i) => score.looRef(positions, i);
 
-// ---- group formulas (PD-5) ----
-/** leave-one-out reference for member i on one card: median of the others' positions */
-function looRef(positions, i) {
-  const others = positions.filter((_, j) => j !== i);
-  return others.length ? medianOfValues(others) : null;
-}
-/** 群默契度 for one card: max(0, 100 - ceil(2.5 * MAD)) where MAD is around the group median */
-function cardQuality(positions) {
-  const m = medianOfValues(positions);
-  const mad = positions.reduce((a, p) => a + Math.abs(p - m), 0) / positions.length;
-  return Math.max(0, 100 - Math.ceil(2.5 * mad));
-}
 /**
- * members: [{pos:[5 ints]}] (complete dailies only).
- * -> {gs:[number|null per member], mq:number|null}; gs needs n >= 2, mq needs n >= 3.
+ * members: [{pos:[5 ints]}] (complete dailies only) -> {gs:[number|null per member], mq:number|null}
+ * (PD-5: gs needs n >= 2, mq needs n >= 3; both rules live in core/score.js).
  */
 function groupScores(members) {
-  const n = members.length;
-  const gs = members.map((m, i) => {
-    if (n < 2) return null;
-    let sum = 0;
-    for (let c = 0; c < CARDS; c++) {
-      const r = looRef(members.map((x) => x.pos[c]), i);
-      sum += cardScore(Math.abs(m.pos[c] - r));
-    }
-    return sum;
-  });
-  let mq = null;
-  if (n >= 3) {
-    let q = 0;
-    for (let c = 0; c < CARDS; c++) q += cardQuality(members.map((x) => x.pos[c]));
-    mq = Math.round(q / CARDS);
-  }
-  return { gs, mq };
+  const cards = [];
+  for (let c = 0; c < CARDS; c++) cards.push(members.map((m) => m.pos[c]));
+  return { gs: members.map((_, i) => score.groupScore(cards, i)), mq: score.groupMq(cards) };
 }
 
+// ---- host rounds ----
+const roundMq = (guesses, target) => score.roundMq(guesses, target);
+const bestGuess = (guesses, target) => score.bestGuess(guesses, target);
+
 // ---- content ----
-const CONTENT_VERSION = () => content.LATEST_CONTENT_VERSION;
-const getItem = (id) => content.getItem(id) || null;
-const getSpectrum = (id) => content.getSpectrum(id) || null;
-/** items of the schedule for issue n (resolved), or null if exhausted / unresolvable */
+const CONTENT_VERSION = () => contentMod.LATEST_CONTENT_VERSION;
+const getItem = (id) => content().itemById[id] || null;
+const catLabel = (cat) => (content().catLabel && content().catLabel[cat]) || null;
+const getSpectrum = (id) => content().spectrumById[id] || null;
+
+let scheduleDays;
+/** the shipped schedule's days (arrays of 5 item ids), or null while core/content/schedule.v1.js does not exist */
+function loadSchedule() {
+  if (scheduleDays !== undefined) return scheduleDays;
+  try {
+    // eslint-disable-next-line global-require
+    const s = require('../core/content/schedule.v1');
+    scheduleDays = Array.isArray(s) ? s : s && Array.isArray(s.days) ? s.days : null;
+  } catch (e) {
+    scheduleDays = null;
+  }
+  return scheduleDays;
+}
+/** items of the schedule for issue n (resolved); null when the schedule is missing, exhausted or unresolvable */
 function scheduleCards(issueNo) {
-  const ids = content.scheduleFor(issueNo);
+  const days = loadSchedule();
+  if (!days) return null;
+  const ids = days[issueNo - 1];
   if (!Array.isArray(ids) || ids.length !== CARDS) return null;
   const items = ids.map(getItem);
   return items.every(Boolean) ? items : null;
 }
+const hasSchedule = () => !!loadSchedule();
 
-/** small deterministic PRNG from a string seed */
-function seeded(seedStr) {
-  let a = crypto.createHash('sha256').update(String(seedStr)).digest().readUInt32BE(0);
-  return () => {
-    a = (a + 0x6D2B79F5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-/**
- * Auto path (spec 4.2) when the schedule is exhausted: 5 unused items, 5 different categories and spectra,
- * card 1 `easy`, at least one `split`. Deterministic for a seed string. null if impossible.
- */
-function autoCards(usedIds, seedStr) {
-  const rnd = seeded(seedStr);
-  const free = content.allItems().filter((it) => !usedIds.has(it.id));
-  const pick = (pool) => pool[Math.floor(rnd() * pool.length)];
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const chosen = [];
-    const cats = new Set();
-    const specs = new Set();
-    const take = (pred) => {
-      const pool = free.filter((it) => !cats.has(it.cat) && !specs.has(it.spectrumId) && !chosen.includes(it) && pred(it));
-      if (!pool.length) return false;
-      const it = pick(pool);
-      chosen.push(it); cats.add(it.cat); specs.add(it.spectrumId);
-      return true;
-    };
-    if (!take((it) => (it.tags || []).includes('easy'))) continue;
-    if (!take((it) => (it.tags || []).includes('split'))) continue;
-    let ok = true;
-    while (chosen.length < CARDS && ok) ok = take(() => true);
-    if (ok) {
-      // order: the easy item stays first, the rest shuffled deterministically
-      const rest = chosen.slice(1).map((it) => [rnd(), it]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
-      return [chosen[0], ...rest];
-    }
-  }
-  return null;
+/** Auto path (spec 4.2): 5 unused items by the schedule rules, deterministic per dateKey; null when impossible */
+function autoCards(dateKey, usedIds, recentSpectra) {
+  const ids = scheduleMod.pickAutoDaily(content(), dateKey, usedIds, recentSpectra);
+  if (!ids) return null;
+  const items = ids.map(getItem);
+  return items.every(Boolean) ? items : null;
 }
 
 module.exports = {
-  cfg, dateKeyAt, cardScore, cardLabel, dayBand, medianOfValues, refFromHist, agreePct, madFromHist, hist21, totalBin,
-  looRef, groupScores, CONTENT_VERSION, getItem, getSpectrum, scheduleCards, autoCards,
+  cfg, features, dateKeyAt, cardScore, cardLabel, dayBand, medianOfValues, refFromHist, agreePct, hist21, totalBin, percentile,
+  divisiveIdx, looRef, groupScores, roundMq, bestGuess, CONTENT_VERSION, catLabel, getItem, getSpectrum, scheduleCards, hasSchedule, autoCards,
 };

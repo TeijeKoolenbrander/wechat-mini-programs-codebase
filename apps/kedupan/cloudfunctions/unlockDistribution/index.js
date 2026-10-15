@@ -9,7 +9,6 @@ const input = require('./common/input');
 const daily = require('./common/daily');
 const { fail, now, isDayClosed, CARDS } = require('./common/util');
 
-const MAX_PER_DAY = 3;
 
 exports.main = store.handler(async (event, { openid }) => {
   const dateKey = input.dateKey(event.dateKey);
@@ -18,7 +17,7 @@ exports.main = store.handler(async (event, { openid }) => {
   if (dateKey > today) fail('INVALID_INPUT', 'date is in the future');
   const set = await store.getDoc('daily_sets', dateKey);
   if (!set) fail('INVALID_INPUT', 'no such day');
-  await store.rateLimitDay(openid, 'distribution', today, MAX_PER_DAY);
+  await store.rateLimitDay(openid, 'distribution', today, core.cfg().distributionPerDay);
 
   const stats = await daily.statsDocs(dateKey);
   let answered = new Array(CARDS).fill(true);

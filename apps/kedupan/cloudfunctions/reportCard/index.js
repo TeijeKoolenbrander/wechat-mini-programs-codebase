@@ -5,7 +5,6 @@ const store = require('./common/store');
 const input = require('./common/input');
 const { fail, now } = require('./common/util');
 
-const MAX_PER_DAY = 10;
 
 exports.main = store.handler(async (event, { openid }) => {
   const itemId = input.itemId(event.itemId);
@@ -13,7 +12,7 @@ exports.main = store.handler(async (event, { openid }) => {
   const dateKey = input.optDateKey(event.dateKey);
   if (!core.getItem(itemId)) fail('INVALID_INPUT', 'unknown item');
   const nowMs = now();
-  await store.rateLimitDay(openid, 'report', core.dateKeyAt(nowMs), MAX_PER_DAY);
+  await store.rateLimitDay(openid, 'report', core.dateKeyAt(nowMs), core.cfg().reportsPerDay);
   await store.db().collection('card_reports').add({ data: { openid, dateKey, itemId, reason, ts: nowMs } });
   return { ok: true };
 });

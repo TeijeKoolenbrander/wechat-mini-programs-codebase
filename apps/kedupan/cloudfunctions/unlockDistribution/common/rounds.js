@@ -7,11 +7,12 @@ const groups = require('./groups');
 const { AppError, fail, now, sha256hex } = require('./util');
 
 const HOUR = 3600e3;
-const DRAFT_TTL_MS = 30 * 60e3;
-const AUTO_REVEAL_MS = 24 * HOUR;
-const GUESS_WINDOW_MS = 7 * 24 * HOUR;
-const MIN_TO_REVEAL = 2;
-const AUTO_REVEAL_AT = 8;
+const R = core.cfg(); // host-round rules live in core/config.js (rounds.*)
+const DRAFT_TTL_MS = R.draftMs;
+const AUTO_REVEAL_MS = R.autoRevealMs;
+const GUESS_WINDOW_MS = R.guessWindowMs;
+const MIN_TO_REVEAL = R.revealMinGuesses;
+const AUTO_REVEAL_AT = R.autoRevealAt;
 const GUESS_CAP_PER_ROUND_READ = 2000;
 
 const hashOf = (openid, salt) => sha256hex(`${openid}|${salt}`).slice(0, 12);
@@ -27,9 +28,9 @@ async function loadRound(roundId, openid, nowMs) {
 /** score of a guess against the target */
 const guessScore = (pos, target) => core.cardScore(Math.abs(pos - target));
 
+/** 本题默契值 (core/score.js roundMq: rounded mean of the on-time scores) */
 function computeMq(onTime, target) {
-  if (!onTime.length) return null;
-  return Math.round(onTime.reduce((a, g) => a + guessScore(g.pos, target), 0) / onTime.length);
+  return core.roundMq(onTime.map((g) => ({ pos: g.pos, late: false })), target);
 }
 
 async function loadGuesses(roundId) {
@@ -42,11 +43,9 @@ async function revealPayload(round, openid) {
   const onTime = guesses.filter((g) => !g.late).sort((a, b) => a.ts - b.ts || (a._id < b._id ? -1 : 1));
   const late = guesses.filter((g) => g.late).sort((a, b) => a.ts - b.ts);
   const mq = round.mq != null ? round.mq : computeMq(onTime, round.target);
-  // 最懂你: smallest distance, ties -> earliest guess (onTime is already ordered by time)
-  let best = null;
-  for (const g of onTime) {
-    if (best === null || Math.abs(g.pos - round.target) < Math.abs(best.pos - round.target)) best = g;
-  }
+  // 最懂你: smallest distance, ties -> earliest guess (core/score.js bestGuess; onTime is ordered by time)
+  const best = core.bestGuess(onTime.map((g) => ({ pos: g.pos, ts: g.ts, late: false, ref: g })), round.target);
+  const bestG = best ? best.ref : null;
   const row = (g) => [hashOf(g.openid, round.salt), g.pos, guessScore(g.pos, round.target), !!g.late, false];
   const rows = [
     [hashOf(round.hostOpenid, round.salt), null, null, false, true],
@@ -55,7 +54,7 @@ async function revealPayload(round, openid) {
   ];
   return {
     status: round.status, target: round.target, mq, salt: round.salt, selfHash: hashOf(openid, round.salt),
-    bestH: best ? hashOf(best.openid, round.salt) : null, guesses: onTime.length, rows,
+    bestH: bestG ? hashOf(bestG.openid, round.salt) : null, guesses: onTime.length, rows,
   };
 }
 

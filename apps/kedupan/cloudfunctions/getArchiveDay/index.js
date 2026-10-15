@@ -22,10 +22,9 @@ exports.main = store.handler(async (event, { openid }) => {
   if (e && e.pos.some((p) => p != null)) {
     const { total, cardScores } = daily.scoreEntry(e.pos, finals);
     const mine = { pos: e.pos, total, cardScores, complete: !!e.complete };
-    if (e.complete && set.finalCount >= 30 && Array.isArray(set.finalHist)) {
-      let below = 0;
-      for (let b = 0; b < core.totalBin(total); b++) below += set.finalHist[b] || 0;
-      mine.pct = Math.floor((100 * below) / set.finalCount);
+    if (e.complete && Array.isArray(set.finalHist)) {
+      const pct = core.percentile(set.finalHist, total, set.finalCount);
+      if (pct !== null) mine.pct = pct;
     }
     out.mine = mine;
   }

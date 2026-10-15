@@ -10,7 +10,7 @@ function buildReveal(idx, pos, refs, stats, final) {
     idx, pos, ref, d,
     score: core.cardScore(d),
     label: core.cardLabel(d),
-    agreePct: core.agreePct(stats[idx].hist, stats[idx].n, pos),
+    agreePct: core.agreePct(stats[idx].hist, pos),
     n: stats[idx].n,
     final: !!final,
   };

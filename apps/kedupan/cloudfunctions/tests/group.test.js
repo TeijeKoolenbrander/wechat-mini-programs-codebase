@@ -168,8 +168,8 @@ test('rounds list: last rounds that received a guess carrying this groupRef (AC 
 
 test('group rows cap at groupRowCap plus the caller (spec 8.4)', async () => {
   const ref = (await join('M0', { opengid: 'OG9', chat_type: 3 })).groupRef;
-  const cfg = h.mod('getGroupDay', ['core', 'config.js']);
-  cfg.CONFIG.groupRowCap = 3;
+  const cfg = h.mod('getGroupDay', ['core', 'config.js']).getConfig(1);
+  cfg.score.groupRowCap = 3;
   try {
     for (let i = 1; i <= 5; i++) {
       await join(`P${i}`, { opengid: 'OG9', chat_type: 3 });
@@ -181,7 +181,7 @@ test('group rows cap at groupRowCap plus the caller (spec 8.4)', async () => {
     assert.equal(r.n, 6);
     assert.ok(r.rows.length <= 4);
     assert.ok(r.rows.some((row) => row[0] === r.selfHash), 'the caller is always included');
-  } finally { cfg.CONFIG.groupRowCap = 500; }
+  } finally { cfg.score.groupRowCap = 500; }
 });
 
 test('friend board: ranked by national score then completion time; positions/refs only for a viewer who completed (AC 46)', async () => {
@@ -205,15 +205,15 @@ test('friend board: ranked by national score then completion time; positions/ref
 });
 
 test('friend board: selfOnly above boardListCap, ranked row is the caller only (AC 46)', async () => {
-  const cfg = h.mod('getFriendBoard', ['core', 'config.js']);
-  cfg.CONFIG.boardListCap = 2;
+  const cfg = h.mod('getFriendBoard', ['core', 'config.js']).getConfig(1);
+  cfg.boardListCap = 2;
   try {
     for (const o of ['A', 'B', 'C']) await play(h, o, [20, 20, 20, 20, 20]);
     const f = await h.call('getFriendBoard', { dateKey: TODAY }, { openid: 'A' });
     assert.equal(f.mode, 'selfOnly');
     assert.equal(f.rows.length, 1);
     assert.equal(f.rows[0][0], f.selfHash);
-  } finally { cfg.CONFIG.boardListCap = 3000; }
+  } finally { cfg.boardListCap = 3000; }
 });
 
 test('a tampered client score cannot reach a board: rows come only from daily_entries (AC 43)', async () => {

@@ -2,6 +2,7 @@
 // submitGuess (spec 11.2, PD-8, AC 31, AC 32). One guess per user per round; the host cannot guess.
 // The guess, the on-time counter and the 8th-guess reveal are serialised by a transaction on the round
 // document, so concurrent 8th guesses produce exactly one reveal and the 9th becomes `late`.
+const core = require('./common/coreapi');
 const store = require('./common/store');
 const input = require('./common/input');
 const groups = require('./common/groups');
@@ -49,7 +50,7 @@ exports.main = store.handler(async (event, { openid }) => {
           revealedHere = true;
         }
       }
-      if (validGroup && !(cur.groupRefs || []).includes(validGroup) && (cur.groupRefs || []).length < 10) {
+      if (validGroup && !(cur.groupRefs || []).includes(validGroup) && (cur.groupRefs || []).length < core.cfg().groupRefsCap) {
         upd.groupRefs = [...(cur.groupRefs || []), validGroup];
       }
       if (Object.keys(upd).length) await t.collection('rounds').doc(roundId).update({ data: upd });

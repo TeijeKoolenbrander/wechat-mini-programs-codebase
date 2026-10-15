@@ -53,15 +53,9 @@ function computeGroup(completeEntries) {
   return { n: members.length, mq, members: members.map((e, i) => ({ openid: e.openid, gs: gs[i], entry: e })) };
 }
 
-/** card with the widest national spread (MAD around R_c), ties -> lower index; null when no data */
+/** card with the widest national spread (core/score.js), null when nobody has answered */
 function divisiveIdx(stats, refs) {
-  let best = null;
-  let bestMad = -1;
-  for (let c = 0; c < CARDS; c++) {
-    const mad = core.madFromHist(stats[c].hist, stats[c].n, refs[c]);
-    if (mad !== null && mad > bestMad) { bestMad = mad; best = c; }
-  }
-  return best;
+  return core.divisiveIdx(stats.map((s) => s.hist), refs);
 }
 
 /** the other members' positions for one card, excluding `exceptOpenid` (unnamed, sorted: no id leakage) */

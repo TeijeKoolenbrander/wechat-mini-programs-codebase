@@ -2,7 +2,7 @@
 
 WeChat Cloud Development backend for the mini game `kedupan`. Spec: `docs/kedupan/spec.md` §3, §5, §8, §11, §13, §15, §17; decisions in `docs/kedupan/decisions.md`. Patterns copied from `apps/dianjiangtai/cloudfunctions` (never imported).
 
-Status: code and tests complete. **Not deployed** (no AppID or cloud environment yet). The tests run against a **test double of the game core** (`tests/fake-core/`) until `apps/kedupan/game/core/` exists; see "Core API assumptions".
+Status: code and tests complete. **Not deployed** (no AppID or cloud environment yet). The tests run against the real game core when `apps/kedupan/game/core/` exists, otherwise against a small test double (`tests/fake-core/`); see "Core API used".
 
 ## Functions
 
@@ -47,9 +47,11 @@ npm test         # sync first (pretest), then everything
 
 `<fn>/core/` is generated and git-ignored. **Only `common/coreapi.js` touches the core.** Before a deploy, `npm run sync` must have used the REAL core (it prints a WARNING when it falls back to the double).
 
-### Core API assumptions (adjust only in `common/coreapi.js`)
+### Core API used (all behind `common/coreapi.js`)
 
-`core/date.js beijingDateKey(ms)`; `core/score.js cardScore(d), cardLabel(d), medianOfHist(hist101), medianOfValues(values), referenceFromHist(hist101, anchor, W), dayBand(total)`; `core/config.js getConfig() -> {score:{priorVotes,agreeMin,agreeRadius}, boardListCap, groupRowCap}`; `core/content.js LATEST_CONTENT_VERSION, getSpectrum(id), getItem(id) -> {id,text,anchor,tags,spectrumId,left,right,cat}, allItems(), scheduleFor(issueNo) -> 5 item ids | null`. The group formulas (leave-one-out, 群默契度), 21-bin histograms and the auto path are composed in `coreapi.js` from those primitives.
+From `apps/kedupan/game/core/README.md` (minigame-dev), as of commit `4f98619`: `date.js beijingDateKey`; `score.js cardScore, labelFor, bandFor, medianOf, nationalRef, agreePct, divisiveIdx, histBins21, totalBin, percentile, looRef, groupScore, groupMq, roundMq, bestGuess`; `config.js getConfig(1) (score.*, rounds.*, extras.*, boardListCap), normalizeFeatures`; `content.js getContent(1) -> {spectrumById, itemById, catLabel}`; `schedule.js pickAutoDaily`; optional `content/schedule.v1.js` (`{days:[[5 ids]...]}` or a bare array, issue N = `days[N-1]`). **Until `schedule.v1.js` exists the server uses the auto path** (and logs `[ALERT] no shipped schedule`); the shipped schedule must be generated before launch. All scoring, labels, bands, percentile, group formulas and round 默契值/最懂你 come from `core/score.js`; the server composes nothing of its own except the card-score sum.
+
+`tests/fake-core/` is a small test double with the same exported names (40 generated spectra, an 80-day schedule). The suite passes against both the double and the real core (checked at `4f98619`).
 
 ## Environment variables (cloud environment config; never committed)
 

@@ -44,7 +44,7 @@ test('group fixture: members {10,20,90}: leave-one-out reference of member 1 is 
   assert.equal(three.mq, 33);
   const two = c.groupScores([pos(10), pos(20)]);
   assert.equal(two.mq, null);
-  assert.deepEqual(two.gs, [375, 375], 'each is the other member's reference: d 10 -> 75 x 5');
+  assert.deepEqual(two.gs, [375, 375]);
   assert.deepEqual(c.groupScores([pos(10)]).gs, [null]);
   // a perfectly agreeing group of 3 has 群默契度 100
   assert.equal(c.groupScores([pos(50), pos(50), pos(50)]).mq, 100);

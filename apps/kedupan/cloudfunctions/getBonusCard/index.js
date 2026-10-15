@@ -7,7 +7,6 @@ const store = require('./common/store');
 const daily = require('./common/daily');
 const { AppError, fail, now, addDaysKey, isDayClosed, CARDS } = require('./common/util');
 
-const MAX_PER_DAY = 3;
 const LOOKBACK_DAYS = 60;
 
 exports.main = store.handler(async (event, { openid }) => {
@@ -15,7 +14,7 @@ exports.main = store.handler(async (event, { openid }) => {
   const today = core.dateKeyAt(nowMs);
   const todayEntry = await store.getDoc('daily_entries', daily.entryId(today, openid));
   if (!todayEntry || !todayEntry.complete) fail('FORBIDDEN', 'finish today\'s daily first');
-  await store.rateLimitDay(openid, 'bonus', today, MAX_PER_DAY);
+  await store.rateLimitDay(openid, 'bonus', today, core.cfg().bonusPerDay);
 
   const _ = store._();
   let upper = addDaysKey(today, -1);

@@ -6,16 +6,15 @@ const store = require('./common/store');
 const input = require('./common/input');
 const { fail, now, randomId8, randomHex, randomIntInclusive } = require('./common/util');
 
-const MAX_PER_DAY = 20;
 
 exports.main = store.handler(async (event, { openid }) => {
   const spectrumId = input.spectrumId(event.spectrumId);
   const sp = core.getSpectrum(spectrumId);
   if (!sp) fail('INVALID_INPUT', 'unknown spectrum');
   const nowMs = now();
-  await store.rateLimitDay(openid, 'round', core.dateKeyAt(nowMs), MAX_PER_DAY);
+  await store.rateLimitDay(openid, 'round', core.dateKeyAt(nowMs), core.cfg().roundsPerDay);
 
-  const target = randomIntInclusive(5, 95);
+  const target = randomIntInclusive(core.cfg().targetMin, core.cfg().targetMax);
   for (let attempt = 0; attempt < 5; attempt++) {
     const roundId = randomId8();
     const created = await store.addIfAbsent('rounds', {
