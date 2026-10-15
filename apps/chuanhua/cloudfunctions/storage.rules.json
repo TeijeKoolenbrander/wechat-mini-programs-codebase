@@ -1,0 +1,5 @@
+{
+  "_comment": "Cloud storage security rule for the whole bucket (console: Storage > Permissions > custom rule). Moderation PNGs live under chuanhua/mod/<YYYYMM>/<chainId>/<n>_<attempt>.png and are written ONLY by submitStep / modSweeper (admin rights) and read ONLY by the content-security service (via a short-lived temp URL created by the server) and by the admin function. NO client may read or write any object: chain participants get drawings as validated stroke data from claimStep/getReveal, which are the participant access checks (spec 13.3, PO-7, PO-10). If custom storage rules turn out to be unavailable in a mini-game environment (V9), use the default 'creator and admins only' rule: the creator is the server, so other users are denied as well.",
+  "read": false,
+  "write": false
+}
