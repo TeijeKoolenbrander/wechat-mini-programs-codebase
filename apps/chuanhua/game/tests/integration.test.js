@@ -190,6 +190,22 @@ test('safety: while a drawing is under review the author sees it as pending, nev
   }
 });
 
+test('share cards: the vms share.js builds are what shareCard.js reads, and no drawing or other 棒 text can reach the image', () => {
+  const { inviteCardVm, revealCardVm } = require('../js/share');
+  const sc = require('../js/render/shareCard');
+  const texts = [];
+  const ctx = new Proxy({ measureText: (s) => ({ width: String(s).length * 10 }), createLinearGradient: () => ({ addColorStop() {} }), fillText: (s) => texts.push(String(s)) }, { get: (t, k) => (k in t ? t[k] : () => {}), set: (t, k, v) => ((t[k] = v), true) });
+  const hostile = { passed: 3, promptText: '起点', finalText: '终点', participantCount: 5, strokes: { v: 1, s: [[0, 1, 5, 5]] }, steps: [{ text: '机密中间句' }], text: '机密中间句' };
+  sc.draw(ctx, inviteCardVm(hostile));
+  sc.draw(ctx, revealCardVm(hostile));
+  const all = texts.join('|');
+  assert.ok(/已传 3\/6 棒/.test(all), all);
+  assert.ok(/5 位群友接力/.test(all), 'the participant count arrives as `people`: ' + all);
+  assert.ok(all.includes('起点') && all.includes('终点'));
+  assert.ok(!all.includes('机密中间句') && !/undefined|NaN/.test(all));
+  assert.ok(!/require\(['"]\.\/strokes/.test(fs.readFileSync(path.join(ROOT, 'js', 'render', 'shareCard.js'), 'utf8')), 'the share card module cannot draw strokes');
+});
+
 test('DUMP_VIEWS writes the real view models for the preview tool', () => {
   if (!process.env.DUMP_VIEWS) return;
   fs.mkdirSync(process.env.DUMP_VIEWS, { recursive: true });

@@ -933,7 +933,7 @@ function createController(deps) {
     if (r && r.ok) {
       noteServerTime(r);
       if (r.prev.kind === 'paused') {
-        api.releaseClaim({ chainId: e.chainId, claimId: r.claimId });
+        if (r.claimId) api.releaseClaim({ chainId: e.chainId, claimId: r.claimId }); // the backend takes no lock while viewing is off
         toast(V.COPY.paused);
         return loadEntry();
       }
@@ -1056,7 +1056,12 @@ function createController(deps) {
     } else if (r && r.code === 'NOT_PARTICIPANT') {
       c.reveal = null;
       return showTeaser(rv.chainId, r.teaser);
-    } else if (r && r.code === 'CHAIN_REMOVED') {
+    } else if (r && (r.code === 'NOT_MEMBER')) {
+      // not a member of the chain's group (or no such chain): no teaser, and no hint that the chain exists
+      c.reveal = null;
+      c.teaser = { chainId: rv.chainId, state: 'notFound' };
+      c.screen = 'teaser';
+    } else if (r && (r.code === 'CHAIN_REMOVED' || r.code === 'CHAIN_HIDDEN')) {
       c.reveal = null;
       c.teaser = { chainId: rv.chainId, state: 'removed' };
       c.screen = 'teaser';

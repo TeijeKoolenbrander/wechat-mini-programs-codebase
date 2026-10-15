@@ -314,9 +314,9 @@ test('invite card renderer hook: the card vm never carries content (AC 95)', asy
   S1.ctl.state.hits = [];
   const share = require('../js/share');
   const vmi = share.inviteCardVm({ passed: 3, nextStep: 4, nextKind: 'describe', promptText: '不该出现', strokes: [1], text: 'x' });
-  assert.deepEqual(Object.keys(vmi).sort(), ['kind', 'length', 'nextKind', 'nextStep', 'passed']);
+  assert.deepEqual(Object.keys(vmi).sort(), ['kind', 'passed', 'total']);
   const vmr = share.revealCardVm({ promptText: '月亮吃月饼', finalText: '外星人', passed: 6, participantCount: 6, strokes: [1], steps: [] });
-  assert.deepEqual(Object.keys(vmr).sort(), ['finalText', 'kind', 'participantCount', 'passed', 'promptText']);
+  assert.deepEqual(Object.keys(vmr).sort(), ['finalText', 'kind', 'passed', 'people', 'promptText']);
   void cards;
   assert.equal(share.revealTitle('月亮吃月饼', null, 6), '「月亮吃月饼」传了 6 棒，看看变成了什么');
   assert.equal(share.revealTitle('', null, 6), '一条接龙揭晓了，看看变成了什么');

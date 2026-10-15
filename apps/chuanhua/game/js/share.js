@@ -33,12 +33,12 @@ function revealTitle(promptText, finalText, passed) {
 
 /** Content-free card data for the invite image (AC 95). */
 function inviteCardVm(o) {
-  return { kind: 'invite', passed: o.passed, length: 6, nextStep: o.nextStep, nextKind: o.nextKind };
+  return { kind: 'invite', passed: o.passed, total: 6 };
 }
 
 /** Reveal card data: the two passed texts only, never a drawing (AC 95). */
 function revealCardVm(o) {
-  return { kind: 'reveal', promptText: o.promptText || '', finalText: o.finalText || '', passed: o.passed, participantCount: o.participantCount || 0 };
+  return { kind: 'reveal', promptText: o.promptText || '', finalText: o.finalText || '', passed: o.passed, people: o.participantCount || o.people || 0 };
 }
 
 function parseQuery(q) {

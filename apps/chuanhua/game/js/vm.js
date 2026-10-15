@@ -461,7 +461,7 @@ function teaserVm(t) {
 
 // ---------------------------------------------------------------- 本群接龙
 
-const WHY_TEXT = { pending: (n) => '第 ' + n + ' 棒审核中', taken: (n) => '有群友在接第 ' + n + ' 棒', prevMine: (n) => '第 ' + n + ' 棒等别人来接', capReached: (n) => '第 ' + n + ' 棒你已接满，留给群友' };
+const WHY_TEXT = { pending: (n) => '第 ' + n + ' 棒审核中', taken: (n) => '有群友在接第 ' + n + ' 棒', prevMine: (n) => '第 ' + n + ' 棒等别人来接', capReached: (n) => '第 ' + n + ' 棒你已接满，留给群友', restricted: (n) => '第 ' + n + ' 棒暂时接不了', rules: (n) => '第 ' + n + ' 棒需要先同意接龙公约', paused: (n) => '接龙维护中，第 ' + n + ' 棒稍后再接', closed: (n) => '第 ' + n + ' 棒已关闭', group: (n) => '第 ' + n + ' 棒要在发起的群里接' };
 
 /** g = { state, data (getGroupChains), banner } */
 function groupVm(g) {
