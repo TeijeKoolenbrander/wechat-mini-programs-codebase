@@ -1,0 +1,14 @@
+{
+  "triggers": [
+    {
+      "name": "cleanupTimer",
+      "type": "timer",
+      "config": "0 0 4 * * * *"
+    }
+  ],
+  "permissions": {
+    "openapi": [
+      "subscribeMessage.send"
+    ]
+  }
+}
