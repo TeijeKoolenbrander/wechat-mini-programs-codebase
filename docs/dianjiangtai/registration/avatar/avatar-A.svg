@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><defs>
+<radialGradient id="g" cx="50%" cy="45%" r="75%"><stop offset="0" stop-color="#f3eadb"/><stop offset="1" stop-color="#e3d2ab"/></radialGradient>
+<filter id="rough" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="7" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="9"/></filter>
+</defs><rect width="1024" height="1024" fill="url(#g)"/><g transform="translate(512 512) scale(1.07) rotate(-6) translate(-512 -512)" filter="url(#rough)"><rect x="232" y="232" width="560" height="560" rx="14" fill="#b3261e"/>
+<rect x="254" y="254" width="516" height="516" fill="none" stroke="#f6e9d0" stroke-width="10"/>
+<text x="512" y="482" font-family="Noto Serif SC" font-size="230" font-weight="900" fill="#f6e9d0" stroke="#f6e9d0" stroke-width="8" stroke-linejoin="round" text-anchor="middle">点</text>
+<text x="512" y="717" font-family="Noto Serif SC" font-size="230" font-weight="900" fill="#f6e9d0" stroke="#f6e9d0" stroke-width="8" stroke-linejoin="round" text-anchor="middle">将</text></g></svg>
