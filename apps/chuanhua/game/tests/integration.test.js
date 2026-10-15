@@ -225,6 +225,25 @@ test('share: the static fallback image ships (without it WeChat screenshots the 
   assert.equal(b.readUInt32BE(20), 400);
 });
 
+test('package: the shipped main package (project.config.json packOptions.ignore applied) is far under 4 MB and has no dev folders, docs or test files', () => {
+  const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'project.config.json'), 'utf8'));
+  const ignore = cfg.packOptions.ignore.map((i) => i.value);
+  const files = [];
+  (function walk(dir, rel) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const r = rel ? rel + '/' + e.name : e.name;
+      if (ignore.includes(r) || ignore.includes(e.name)) continue;
+      if (e.isDirectory()) walk(path.join(dir, e.name), r);
+      else files.push(r);
+    }
+  })(ROOT, '');
+  const bytes = files.reduce((n, f) => n + fs.statSync(path.join(ROOT, f)).size, 0);
+  assert.ok(bytes < 4 * 1024 * 1024, 'package bytes ' + bytes);
+  assert.ok(bytes < 1024 * 1024, 'the whole game stays under 1 MB: ' + bytes);
+  assert.deepStrictEqual(files.filter((f) => /^(tests|tools|node_modules)\//.test(f) || /\.md$/.test(f) || /\.test\.js$/.test(f)), []);
+  assert.ok(files.includes('assets/share-fallback.png') && files.includes('game.js') && files.includes('game.json'));
+});
+
 test('DUMP_VIEWS writes the real view models for the preview tool', () => {
   if (!process.env.DUMP_VIEWS) return;
   fs.mkdirSync(process.env.DUMP_VIEWS, { recursive: true });
