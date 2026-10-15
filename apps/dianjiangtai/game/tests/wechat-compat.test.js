@@ -121,3 +121,19 @@ test('the whole game graph loads under WeChat rules (entry, every core and js mo
   const { getContent } = loader.require(path.join(GAME, 'game.js'), './core/content');
   assert.equal(getContent(1).generals.length, 32);
 });
+
+test('openDataContext isolation: main domain never requires opendata/, opendata/ never requires outside itself', () => {
+  const bad = [];
+  for (const f of FILES) {
+    const rel = path.relative(GAME, f).split(path.sep);
+    const inOpen = rel[0] === 'opendata';
+    for (const r of requiresOf(f)) {
+      if (r.request === null || !r.request.startsWith('.')) continue;
+      const tRel = path.relative(GAME, path.resolve(path.dirname(f), r.request)).split(path.sep);
+      const targetOpen = tRel[0] === 'opendata';
+      if (!inOpen && targetOpen) bad.push(`${rel.join('/')}:${r.line} (main domain) requires ${r.request} inside opendata/`);
+      if (inOpen && !targetOpen) bad.push(`${rel.join('/')}:${r.line} (opendata) requires ${r.request} outside opendata/`);
+    }
+  }
+  assert.deepEqual(bad, []);
+});
