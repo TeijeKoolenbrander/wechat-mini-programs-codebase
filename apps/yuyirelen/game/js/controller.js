@@ -87,7 +87,6 @@ function createController(deps) {
       c.p.kb.open = false;
       c.p.kb.text = '';
       c.p.kb.suggestions = [];
-      c.p.kb.heightPx = c.p.kb.heightPx;
     }
   }
 
@@ -410,8 +409,8 @@ function createController(deps) {
     store.save();
     if (p.ranked && p.kind === 'daily') {
       privacy.writeMarker(p.dateKey, { s: steps, h: hints, st: outcome }).then((res) => {
-        if (res === 'privacyDenied' && c.rv && c.rv.p === p) {
-          c.rv.privacyNote = true;
+        if (res === 'privacyDenied') {
+          p.privacyNote = true;
           invalidate();
         }
       });
@@ -771,7 +770,8 @@ function createController(deps) {
     a.hasMore = !!r.nextCursor;
     a.bestStreak = r.bestStreak || 0;
     a.practice = r.practice || a.practice;
-    a.state = a.items.length || a.practice.total ? 'ready' : 'empty';
+    // launch day: only today's issue exists -> "还没有往期，先去练习吧" under the list (practice still offered)
+    a.state = a.items.some((i) => !i.today) ? 'ready' : 'empty';
     if (!more) track('archive_view', { items: a.items.length, state: a.state });
     invalidate();
   }
@@ -1209,7 +1209,7 @@ function createController(deps) {
           outcome: p.status === 'solved' ? 'solved' : 'gaveup', guesses: p.guesses, hintsUsed: p.hintsUsed, adHints: p.adHints,
           stats: rv.stats, streak: rv.streak || c.home.streak, top: rv.top, compare: rv.compare, sheet: rv.sheet, scrollY: rv.scrollY, nextBusy: rv.nextBusy, display: display(), t,
         });
-        vm.privacyNote = !!rv.privacyNote;
+        vm.privacyNote = !!p.privacyNote;
         break;
       }
       case 'challenge':

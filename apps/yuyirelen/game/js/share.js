@@ -70,7 +70,6 @@ function parseEnter(options) {
 function createShare(opts) {
   const { wx, api, analytics } = opts;
   const share = { cardRenderer: null, FALLBACK_IMAGE };
-  let finishedGetter = null;
 
   async function cardImage(card) {
     if (share.cardRenderer) {
@@ -84,9 +83,8 @@ function createShare(opts) {
     return FALLBACK_IMAGE;
   }
 
-  /** Capsule menu: share is off by default in mini games. `getFinished` is unused for content: the menu card is generic. */
-  share.register = function (getFinished) {
-    finishedGetter = getFinished;
+  /** Capsule menu: share is off by default in mini games. The menu card is generic (no result). */
+  share.register = function () {
     if (wx.showShareMenu) wx.showShareMenu({ menus: ['shareAppMessage'] });
     if (wx.updateShareMenu) wx.updateShareMenu({ withShareTicket: true });
     if (wx.onShareAppMessage) {
@@ -155,7 +153,6 @@ function createShare(opts) {
     });
   };
 
-  void finishedGetter;
   return share;
 }
 

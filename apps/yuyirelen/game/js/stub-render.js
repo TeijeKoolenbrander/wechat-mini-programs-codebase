@@ -169,11 +169,12 @@ const drawers = {
     }
     // ladder (first rows only; the real renderer scrolls)
     const top = p.y;
+    const hitIdx = p.hits.length; // the scroll area goes UNDER the rows so row taps win
     const shown = vm.ladder.slice(0, 6);
     shown.forEach((r, i) => {
       p.button('row:' + i, (r.isHint ? '提示·' : '') + r.word + ' ' + r.rankLabel + ' ' + r.bandLabel + (r.isSyn ? ' 意思一样！' : ''), { h: 36, color: r.isLatest ? '#7A5230' : '#8a8a8a' });
     });
-    p.hits.push({ id: 'play:ladder', x: L.x0, y: top, w: L.contentW, h: Math.max(40, p.y - top) });
+    p.hits.splice(hitIdx, 0, { id: 'play:ladder', x: L.x0, y: top, w: L.contentW, h: Math.max(40, p.y - top) });
     p.hits.scrollMax['play:ladder'] = Math.max(0, (vm.ladder.length - 6) * 44);
     p.y = Math.max(p.y, L.thumbTop);
     p.button('hint:use', vm.hint.label, { disabled: vm.hint.state === 'locked' || vm.hint.state === 'exhausted', inline: true, w: (L.contentW - 8) / 2 });
