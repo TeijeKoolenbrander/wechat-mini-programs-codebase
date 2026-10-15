@@ -37,7 +37,7 @@ function redraw() {
   if (!msg) return;
   const { ctx, w, h } = canvasAndCtx();
   const m = model || { ranked: [], unverified: [], kind: msg.kind };
-  const res = drawBoard(ctx, m, { width: w, height: h, scroll, roster: msg.roster, images, message: status });
+  const res = drawBoard(ctx, m, { width: w, height: h, scroll, roster: msg.roster, images, message: status, display: msg.display });
   scroll = Math.min(scroll, res.maxScroll);
 }
 

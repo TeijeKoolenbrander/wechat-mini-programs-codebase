@@ -47,7 +47,7 @@ function parseLineup(x) {
 function buildModel(msg, rawRows) {
   const server = {};
   (msg.rows || []).forEach((r) => {
-    server[r[0]] = { w: r[1], s: r[2], x: r[3] };
+    server[r[0]] = { w: r[1], s: r[2], x: r[3], k: typeof r[4] === 'number' ? r[4] : 0 };
   });
   const key = 'd_' + msg.dateKey;
   const matchedHashes = {};
@@ -61,7 +61,7 @@ function buildModel(msg, rawRows) {
     const isSelf = h === msg.selfHash;
     if (sv && !matchedHashes[h]) {
       matchedHashes[h] = true;
-      ranked.push({ h, name: isSelf ? '你' : row.nickname || '', avatarUrl: isSelf ? null : row.avatarUrl, w: sv.w, l: BATTLES - sv.w, s: sv.s, self: isSelf, lineup: msg.viewerPlayed ? parseLineup(sv.x) : null });
+      ranked.push({ h, name: isSelf ? '你' : row.nickname || '', avatarUrl: isSelf ? null : row.avatarUrl, w: sv.w, l: BATTLES - sv.w, s: sv.s, self: isSelf, k: sv.k, lineup: msg.viewerPlayed ? parseLineup(sv.x) : null });
     } else if (!sv) {
       const kv = parseKv(row, key);
       if (kv && msg.showUnverified !== false) unverified.push({ name: row.nickname || '', avatarUrl: row.avatarUrl, w: kv.w, l: kv.l, self: false });
@@ -71,7 +71,7 @@ function buildModel(msg, rawRows) {
   // the viewer's own server row, even if WeChat did not list them
   if (msg.selfHash && server[msg.selfHash] && !matchedHashes[msg.selfHash]) {
     const sv = server[msg.selfHash];
-    ranked.push({ h: msg.selfHash, name: '你', avatarUrl: null, w: sv.w, l: BATTLES - sv.w, s: sv.s, self: true, lineup: msg.viewerPlayed ? parseLineup(sv.x) : null });
+    ranked.push({ h: msg.selfHash, name: '你', avatarUrl: null, w: sv.w, l: BATTLES - sv.w, s: sv.s, self: true, k: sv.k, lineup: msg.viewerPlayed ? parseLineup(sv.x) : null });
   }
 
   ranked.sort((a, b) => b.w - a.w || a.s - b.s || (a.h < b.h ? -1 : 1));

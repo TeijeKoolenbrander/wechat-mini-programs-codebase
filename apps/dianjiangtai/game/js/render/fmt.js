@@ -24,4 +24,11 @@ function recordDash(rec) {
   return rec.w + '-' + rec.l;
 }
 
-module.exports = { cnNum, recordCn, recordDigits, recordDash };
+/** "20261014" or "2026-10-14" -> "10月14日". */
+function dateText(key) {
+  const d = String(key || '').replace(/\D/g, '');
+  if (d.length < 8) return '';
+  return Number(d.slice(4, 6)) + '月' + Number(d.slice(6, 8)) + '日';
+}
+
+module.exports = { cnNum, recordCn, recordDigits, recordDash, dateText };
