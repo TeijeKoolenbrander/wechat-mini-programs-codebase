@@ -1,0 +1,44 @@
+{
+  "appid": "touristappid",
+  "_todo": "TODO(founder, H1): replace touristappid with the real mini game AppID once registered.",
+  "compileType": "game",
+  "projectname": "yuyirelen-game",
+  "libVersion": "latest",
+  "setting": {
+    "es6": true,
+    "enhance": false,
+    "minified": false,
+    "postcss": false,
+    "compileWorklet": false,
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "useCompilerPlugins": false,
+    "condition": false,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
+  },
+  "packOptions": {
+    "ignore": [
+      { "value": "tests", "type": "folder" },
+      { "value": "tools", "type": "folder" },
+      { "value": "node_modules", "type": "folder" },
+      { "value": "package.json", "type": "file" },
+      { "value": "package-lock.json", "type": "file" },
+      { "value": "core/README.md", "type": "file" },
+      { "value": "js/HOOKS.md", "type": "file" }
+    ],
+    "include": []
+  },
+  "simulatorPluginLibVersion": {},
+  "isGameTourist": false,
+  "editorSetting": {}
+}

@@ -1,0 +1,9 @@
+{
+  "name": "yuyirelen-game",
+  "version": "0.1.0",
+  "private": true,
+  "description": "语义热冷 (yuyirelen) WeChat mini game. See docs/yuyirelen/spec.md.",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}
