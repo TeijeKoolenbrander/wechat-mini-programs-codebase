@@ -19,16 +19,38 @@
     "disableUseStrict": false,
     "useCompilerPlugins": false,
     "condition": false,
-    "babelSetting": { "ignore": [], "disablePlugins": [], "outputPath": "" }
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
   },
   "packOptions": {
     "ignore": [
-      { "value": "tests", "type": "folder" },
-      { "value": "tools", "type": "folder" },
-      { "value": "node_modules", "type": "folder" },
-      { "value": "package.json", "type": "file" },
-      { "value": "package-lock.json", "type": "file" },
-      { "value": "core/README.md", "type": "file" }
+      {
+        "value": "tests",
+        "type": "folder"
+      },
+      {
+        "value": "tools",
+        "type": "folder"
+      },
+      {
+        "value": "node_modules",
+        "type": "folder"
+      },
+      {
+        "value": "package.json",
+        "type": "file"
+      },
+      {
+        "value": "package-lock.json",
+        "type": "file"
+      },
+      {
+        "value": "core/README.md",
+        "type": "file"
+      }
     ],
     "include": []
   },

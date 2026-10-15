@@ -146,14 +146,24 @@ test('board lineups (x) are absent for a caller whose only run is a friendly cha
 test('no AppSecret, session_key or access_token anywhere in app source (AC: no AppSecret) and no seed-bank file is committed (AC 54)', () => {
   const root = path.join(CF, '..');
   const bad = [];
+  const isTracked = (f) => {
+    try { return require('child_process').execFileSync('git', ['ls-files', '--', f], { cwd: path.dirname(f) }).toString().trim() !== ''; } catch (_) { return true; }
+  };
   (function walk(d) {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       if (e.name === 'node_modules' || e.name === '.git') continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) { walk(p); continue; }
       if (/bank/i.test(e.name) && /\.(json|jsonl|ndjson)$/i.test(e.name)) bad.push('bank file: ' + p);
+      if (e.name === 'project.private.config.json') {
+        // untracked DevTools-local file: skipped; a tracked one is a leak
+        if (isTracked(p)) bad.push('tracked private config: ' + p);
+        continue;
+      }
       if (!/\.(js|json|md|wxss|wxml)$/.test(e.name) || /\.test\.js$/.test(e.name)) continue;
-      const src = fs.readFileSync(p, 'utf8');
+      let src = fs.readFileSync(p, 'utf8');
+      // the public AppID is required in project.config.json ("appid" field only)
+      if (e.name === 'project.config.json') src = src.replace(/("appid"\s*:\s*)"wx[0-9a-f]{16}"/g, '$1"<public-appid>"');
       if (/app_?secret\s*[:=]\s*['"][0-9a-f]{16,}|secret\s*[:=]\s*['"][0-9a-f]{32}['"]|access_token\s*[:=]\s*['"]/i.test(src)) bad.push('secret-like: ' + p);
       if (/\bwx[0-9a-f]{16}\b/.test(src) && !/test|touristappid/i.test(p)) bad.push('appid literal: ' + p);
     }
