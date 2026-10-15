@@ -584,6 +584,7 @@ function scrollBody(ctx, hits, area, contentH, scroll, id, drawFn) {
   drawFn(sc);
   hits.endScroll();
   ctx.restore();
+  if (hits.pendingClose && area.y < hits.pendingClose.y + hits.pendingClose.h) sheetClose(ctx, hits);
   if (maxScroll > 0) {
     const bh = Math.max(24, area.h * (area.h / contentH));
     const by = area.y + (area.h - bh) * (sc / maxScroll);
@@ -627,11 +628,28 @@ function sheet(ctx, L, hits, o) {
   if (o.title) {
     text(ctx, o.title, inner.x, y + L.u(36), { size: T.FS.title, weight: 800, serif: true, maxW: w - 2 * L.pad - L.u(56) });
   }
-  iconClose(ctx, x + w - L.pad - L.u(12), y + L.u(36), L.u(16), C.sub);
-  hits.add(closeId, x + w - L.u(60), y + L.u(10), L.u(60), T.MIN_TAP);
+  // The X is registered again by sheetClose() after the sheet's scroll area, so the drag area (which may start
+  // above the X's bottom edge) and scrolled content can never swallow the tap. Later hit areas win.
+  const cw = Math.max(L.u(60), T.MIN_TAP);
+  const ch = Math.max(L.u(56), T.MIN_TAP);
+  hits.pendingClose = { id: closeId, x: x + w - cw, y: y + L.u(10), w: cw, h: ch, ix: x + w - L.pad - L.u(12), iy: y + L.u(36), is: L.u(16), bg: C.sheet };
+  sheetClose(ctx, hits);
   inner.top = y + L.u(T.isLarge() ? 68 : 60);
   inner.bottom = L.bottomEdge - L.bottomPad;
   return inner;
+}
+
+/**
+ * Draw the sheet's X (over a sheet-coloured backing, so scrolled content never shows through) and register its
+ * hit area. sheet() calls it once; scrollBody() calls it again after the scrolled content so it is the last, and
+ * therefore winning, area. Min tap target 48.
+ */
+function sheetClose(ctx, hits) {
+  const c = hits.pendingClose;
+  if (!c) return;
+  fillRR(ctx, c.x + c.w / 2 - c.h / 2 + 2, c.y + 2, c.h - 4, c.h - 4, 10, c.bg);
+  iconClose(ctx, c.ix, c.iy, c.is, C.sub);
+  hits.add(c.id, c.x, c.y, c.w, c.h);
 }
 
 /** Header row: back button level with the capsule, and an optional title line below. */
