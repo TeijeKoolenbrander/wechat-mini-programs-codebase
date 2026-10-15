@@ -1,7 +1,7 @@
 'use strict';
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { createHarness, bestActions } = require('./helpers/harness');
+const { createHarness, bestActions, CV } = require('./helpers/harness');
 const { runId, startDaily, playDaily, releaseAll, sheetOf } = require('./helpers/fixtures');
 
 const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT
@@ -94,10 +94,10 @@ test('rejects duplicate general (same cell drafted twice)', async () => {
   const core = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js'));
   let seed = 1;
   for (; seed < 5000; seed++) {
-    const r = core.buildSheet(seed, 1);
+    const r = core.buildSheet(seed, CV);
     if (r[0].faction === r[1].faction && r[0].era === r[1].era) break;
   }
-  const rounds = core.buildSheet(seed, 1);
+  const rounds = core.buildSheet(seed, CV);
   const a = bestActions(rounds); // best-power picks are distinct by construction
   const g1 = a.find((x) => x.type === 'pick' && x.round === 1).generalId;
   a.find((x) => x.type === 'pick' && x.round === 2).generalId = g1;
@@ -131,7 +131,7 @@ test('rejects malformed input shapes', async () => {
 
 test('free mode: unknown contentVersion rejected, bad seed rejected, ad re-spins allowed (<= 2), unranked', async () => {
   const seed = 4242;
-  const rounds = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, 1);
+  const rounds = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, CV);
   const a = bestActions(rounds, { mode: 'free' });
   const ok = await h.call('submitRun', { mode: 'free', clientRunId: runId(), seed, actions: a }, { openid: 'u' });
   assert.equal(ok.ok, true, JSON.stringify(ok));
@@ -285,7 +285,7 @@ test('startRun: daily only for today; resumed flag; free needs no start', async 
 
 test('submitRun is rate limited per openid', async () => {
   const seed = 99;
-  const rounds = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, 1);
+  const rounds = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, CV);
   const a = bestActions(rounds);
   let limited = 0;
   for (let i = 0; i < 35; i++) {
@@ -326,7 +326,7 @@ test('getReplay uses final tokens after a free re-spin (复盘 lineup is drawabl
   const rep = await h.call('getReplay', { runId: run.clientRunId }, { openid: 'userA' });
   assert.equal(rep.ok, true, JSON.stringify(rep));
   assert.ok(rep.best.record.w >= sub.record.w, 'best is at least as good as the run');
-  const gens = require(require('path').join(h.root, 'getDaily', 'core', 'content.js')).getContent(1).byId;
+  const gens = require(require('path').join(h.root, 'getDaily', 'core', 'content.js')).getContent(CV).byId;
   for (const l of rep.best.lineup) {
     const g = gens[l.generalId];
     assert.ok(run.finalTokens.some((t) => g.faction === t.faction && g.eras.includes(t.era)), l.generalId + ' not drawable from the final tokens');

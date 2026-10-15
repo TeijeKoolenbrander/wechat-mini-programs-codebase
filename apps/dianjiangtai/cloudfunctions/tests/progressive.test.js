@@ -2,7 +2,7 @@
 // v1 progressive daily delivery (spec 5.2, AC 86, 88): getRound / startRun / submitRun prefix rules.
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { createHarness, bestActions } = require('./helpers/harness');
+const { createHarness, bestActions, CV } = require('./helpers/harness');
 const { runId, prefixThroughPick, sheetOf, releaseAll, allStrings, allKeys } = require('./helpers/fixtures');
 
 const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT (Tuesday)
@@ -175,7 +175,7 @@ test('free play, friendly challenges and past-seed challenges still get the full
   const core = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js'));
   const seed = 4242;
   const id = runId();
-  await h.call('submitRun', { mode: 'free', clientRunId: id, seed, actions: bestActions(core.buildSheet(seed, 1), { mode: 'free' }) }, { openid: 'owner' });
+  await h.call('submitRun', { mode: 'free', clientRunId: id, seed, actions: bestActions(core.buildSheet(seed, CV), { mode: 'free' }) }, { openid: 'owner' });
   h.setEnv('GROUP_REF_PEPPER', 'pepper-for-tests');
   const c = await h.call('createChallenge', { runId: id }, { openid: 'owner' });
   const v = await h.call('getChallenge', { challengeId: c.challengeId }, { openid: 'friend' });

@@ -2,10 +2,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { prepare } = require('../scripts/prepare-bank');
-const { OPTIMAL_SEEDS } = require('./helpers/harness');
+const { OPTIMAL_SEEDS, CV, CFG, GATE } = require('./helpers/harness');
 
 const entry = (i, over = {}) => ({
-  seed: OPTIMAL_SEEDS[i].seed, contentVersion: 1, configVersion: 1, gateVersion: 1,
+  seed: OPTIMAL_SEEDS[i].seed, contentVersion: CV, configVersion: CFG, gateVersion: GATE,
   best: { lineup: OPTIMAL_SEEDS[i].lineup, record: { w: 12, l: 0 } }, gates: { pass: true }, used: false, ...over,
 });
 
@@ -21,7 +21,7 @@ test('prepare-bank: valid generator output becomes console-importable docs with 
 
 test('prepare-bank: skips bad seeds, duplicates, version mismatches and non-12-0 lineups', () => {
   const bad = entry(2);
-  const c = require('../../game/core/content').getContent(1);
+  const c = require(require('path').join(require('../scripts/sync-core').DEFAULT_CORE, 'content')).getContent(CV);
   const weakest = c.generals.map((g) => [g.id, Object.values(g.stats).reduce((a, b) => a + b, 0)]).sort((a, b) => a[1] - b[1]).slice(0, 5);
   bad.best = { lineup: OPTIMAL_SEEDS[2].lineup.map((l, i) => ({ slot: l.slot, generalId: weakest[i][0] })), record: { w: 12, l: 0 } }; // claims 12-0, plays badly
   const { out, problems } = prepare([
@@ -34,8 +34,8 @@ test('prepare-bank: skips bad seeds, duplicates, version mismatches and non-12-0
 });
 
 test('fixtures: tests/fixtures/optimal-seeds.json still holds 12-0 optima for the live core (regenerate after a core retune)', () => {
-  const sim = require('../../game/core/sim');
-  const cfgV = require('../../game/core/config').LATEST_CONFIG_VERSION;
+  const sim = require(require('path').join(require('../scripts/sync-core').DEFAULT_CORE, 'sim'));
+  const cfgV = require(require('path').join(require('../scripts/sync-core').DEFAULT_CORE, 'config')).LATEST_CONFIG_VERSION;
   assert.ok(OPTIMAL_SEEDS.length >= 8);
-  for (const f of OPTIMAL_SEEDS) assert.equal(sim.simulate(f.lineup, f.seed, 1, cfgV).record.w, 12, 'seed ' + f.seed);
+  for (const f of OPTIMAL_SEEDS) assert.equal(sim.simulate(f.lineup, f.seed, CV, cfgV).record.w, 12, 'seed ' + f.seed);
 });

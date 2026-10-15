@@ -2,7 +2,7 @@
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { createHarness, bestActions } = require('./helpers/harness');
+const { createHarness, bestActions, CV } = require('./helpers/harness');
 const { runId, playDaily, releaseAll } = require('./helpers/fixtures');
 
 const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT
@@ -13,7 +13,7 @@ beforeEach(() => {
 });
 afterEach(() => h.teardown());
 
-const sheet = (seed) => require(path.join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, 1);
+const sheet = (seed) => require(path.join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, CV);
 
 /** owner plays a free run on `seed` and creates a challenge from it */
 async function freeChallenge(owner, seed = 777) {

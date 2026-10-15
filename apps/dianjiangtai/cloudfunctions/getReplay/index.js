@@ -15,7 +15,7 @@ exports.main = store.handler(async (event, { openid }) => {
   if (await rules.dailyLocked(await rules.dailyDateOfRun(run), openid, now())) fail('REPLAY_LOCKED', 'finish the daily first');
   let best = run.best;
   if (!best) {
-    const r = core.bestLineup(run.seed, run.contentVersion, run.finalTokens);
+    const r = core.bestLineup(run.seed, run.contentVersion, run.finalTokens, run.configVersion);
     if (!r) return { ok: true, best: null }; // five distinct generals cannot be drafted from these tokens
     best = { lineup: core.normaliseLineup(r.lineup) || r.lineup, record: r.record };
     await store.db().collection('runs').doc(run._id).update({ data: { best } });

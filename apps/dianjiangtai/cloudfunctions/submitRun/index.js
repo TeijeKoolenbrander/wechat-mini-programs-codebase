@@ -110,7 +110,7 @@ exports.main = store.handler(async (event, { openid }) => {
     const cv = input.optContentVersion(event.contentVersion);
     const v = core.currentVersions();
     contentVersion = cv || v.contentVersion;
-    configVersion = v.configVersion;
+    configVersion = core.configVersionFor(contentVersion);
     core.roster(contentVersion); // unknown version -> INVALID_ACTIONS
     rounds = core.buildSheet(seed, contentVersion, configVersion);
   }
@@ -173,7 +173,7 @@ exports.main = store.handler(async (event, { openid }) => {
         await t.collection('daily_results').add({
           data: {
             _id: `${dateKey}_${openid}`, dateKey, openid, runId: clientRunId, w: record.w, l: record.l,
-            submittedAt: nowMs, lineupIdx: run.lineupIdx, lineupFac: finalTokens.map((x) => x.faction),
+            submittedAt: nowMs, lineupIdx: run.lineupIdx, lineupFac: core.lineupFactions(lineup, actions, finalTokens),
             streak: st.streak, contentVersion,
           },
         });

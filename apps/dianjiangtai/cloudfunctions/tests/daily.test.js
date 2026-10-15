@@ -1,7 +1,7 @@
 'use strict';
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { createHarness, OPTIMAL_SEEDS } = require('./helpers/harness');
+const { createHarness, OPTIMAL_SEEDS, CV, CFG, GATE } = require('./helpers/harness');
 
 const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT
 let h;
@@ -12,9 +12,9 @@ afterEach(() => h.teardown());
 const bankEntry = (id, i = 0, over = {}) => {
   const f = OPTIMAL_SEEDS[i];
   return {
-    _id: id, seed: f.seed, contentVersion: 1, configVersion: 1, gateVersion: 1,
+    _id: id, seed: f.seed, contentVersion: CV, configVersion: CFG, gateVersion: GATE,
     best: { lineup: f.lineup, record: { w: 12, l: 0 } },
-    gates: { optimal: { w: 12, l: 0 }, greedyRate: 0.02, randomRate: 0, K: 400, gateVersion: 1, relaxed: false },
+    gates: { optimal: { w: 12, l: 0 }, greedyRate: 0.02, randomRate: 0, K: 400, gateVersion: GATE, relaxed: false },
     used: false, importedAt: 1, ...over,
   };
 };
@@ -107,13 +107,15 @@ test('genDaily races the lazy getDaily path: one document, one bank entry', asyn
 });
 
 test('bank is the primary path: next unused entry in _id order, version-matched, re-verified 12-0, marked used (AC 54)', async () => {
-  h.db.put('daily_seed_bank', bankEntry('b1', 0, { contentVersion: 2 }));
+  h.db.put('daily_seed_bank', bankEntry('b1', 0, { contentVersion: CV + 7 }));
   h.db.put('daily_seed_bank', bankEntry('b2', 0, { gateVersion: 0 }));
   h.db.put('daily_seed_bank', bankEntry('b3', 0, { configVersion: 9 }));
   h.db.put('daily_seed_bank', bankEntry('b4', 0, { used: true }));
   // b5: the stored best belongs to another seed -> does not score 12-0 on this seed -> skipped by the cheap re-check
   const weak = bankEntry('b5', 1);
-  weak.best = { lineup: OPTIMAL_SEEDS[2].lineup, record: { w: 12, l: 0 } };
+  const roster = require(require('path').join(require('../scripts/sync-core').DEFAULT_CORE, 'content')).getContent(CV).generals;
+  const weakest = roster.map((g) => [g.id, Object.values(g.stats).reduce((x, y) => x + y, 0)]).sort((x, y) => x[1] - y[1]).slice(0, 5);
+  weak.best = { lineup: OPTIMAL_SEEDS[2].lineup.map((l, i) => ({ slot: l.slot, generalId: weakest[i][0] })), record: { w: 12, l: 0 } }; // claims 12-0 but plays badly
   h.db.put('daily_seed_bank', weak);
   h.db.put('daily_seed_bank', bankEntry('b6', 3));
   h.db.put('daily_seed_bank', bankEntry('b7', 4));

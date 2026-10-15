@@ -3,7 +3,7 @@
 // may reach a caller who has not yet got their ranked daily result for that date.
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { createHarness, bestActions } = require('./helpers/harness');
+const { createHarness, bestActions, CV } = require('./helpers/harness');
 const { runId, playDaily, releaseAll, sheetOf } = require('./helpers/fixtures');
 
 const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT
@@ -63,7 +63,7 @@ test('an ordinary free run is not locked', async () => {
   const core = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js'));
   const seed = 31337;
   const id = runId();
-  await h.call('submitRun', { mode: 'free', clientRunId: id, seed, actions: bestActions(core.buildSheet(seed, 1), { mode: 'free' }) }, { openid: 'u' });
+  await h.call('submitRun', { mode: 'free', clientRunId: id, seed, actions: bestActions(core.buildSheet(seed, CV), { mode: 'free' }) }, { openid: 'u' });
   assert.equal((await h.call('getReplay', { runId: id }, { openid: 'u' })).ok, true);
 });
 

@@ -27,6 +27,14 @@ function currentVersions() {
   };
 }
 
+/** config version that goes with a content version (core: content 1 -> config 1, content 2 -> config 2) */
+function configVersionFor(contentVersion) {
+  if (typeof config.defaultConfigVersion === 'function') {
+    const v = config.defaultConfigVersion(contentVersion);
+    if (v) return v;
+  }
+  return config.LATEST_CONFIG_VERSION;
+}
 /** versioned config; null for an unknown version */
 function getConfig(version) {
   return config.getConfig(version) || null;
@@ -72,12 +80,13 @@ function simulate(lineup, seed, contentVersion, configVersion) {
   return sim.simulate(lineup, seed, contentVersion, configVersion);
 }
 /** null when five distinct generals cannot be drafted */
-function bestLineup(seed, contentVersion, finalTokens) {
-  return search.bestLineup(seed, contentVersion, finalTokens);
+function bestLineup(seed, contentVersion, finalTokens, configVersion) {
+  return search.bestLineup(seed, contentVersion, finalTokens, configVersion ? { configVersion } : undefined);
 }
-/** -> {accepted, gates, best?, rounds?} */
+/** -> {accepted, gates, best?, rounds?} for the live content/config versions */
 function acceptDailySeed(seed) {
-  return gates.acceptDailySeed(seed);
+  const v = currentVersions();
+  return gates.acceptDailySeed(seed, { contentVersion: v.contentVersion, configVersion: v.configVersion });
 }
 
 
@@ -109,6 +118,7 @@ function replayPartial(seed, contentVersion, actions, mode, rounds, configVersio
 function variantFor(dateKey) {
   const c = getConfig(currentVersions().configVersion) || {};
   const wd = c.shiren && Number.isInteger(c.shiren.weekday) ? c.shiren.weekday : 0;
+  if (typeof dateMod.variantOf === 'function') return dateMod.variantOf(dateKey, wd);
   return new Date(utcMidnight(dateKey)).getUTCDay() === wd ? 'shiren' : 'standard';
 }
 /** observe-only anomaly threshold: ranked daily submitted faster than this after its start (ms) */
@@ -138,7 +148,9 @@ function bandOf(configVersion, wins) {
   }
 }
 
-/** lineup (any order, [{slot, generalId}]) -> normalised slot order, or null if malformed */
+/** lineup (any order, [{slot, generalId, faction?}]) -> normalised slot order, or null if malformed.
+ *  `faction` (the cell a general was drafted from, content 2 cohesion) is kept when present: pass the
+ *  lineup returned by replay/bestLineup back into simulate unchanged. */
 function normaliseLineup(lineup) {
   if (!Array.isArray(lineup) || lineup.length !== 5) return null;
   const out = [];
@@ -147,7 +159,7 @@ function normaliseLineup(lineup) {
     const e = lineup.find((l) => l && l.slot === slot);
     if (!e || typeof e.generalId !== 'string' || seen.has(e.generalId)) return null;
     seen.add(e.generalId);
-    out.push({ slot, generalId: e.generalId });
+    out.push(e.faction ? { slot, generalId: e.generalId, faction: e.faction } : { slot, generalId: e.generalId });
   }
   return out;
 }
@@ -174,9 +186,23 @@ function finalTokens(rounds, actions, replayResult) {
   });
 }
 
+/** faction keys of the cells the 5 lineup generals were drafted from, in slot order */
+function lineupFactions(lineup, actions, finalTokens) {
+  if (lineup.every((l) => l.faction)) return lineup.map((l) => l.faction);
+  const picks = []; // replay the pick/undo sequence: the token of a pick's round is its cell
+  for (const a of actions) {
+    if (a.type === 'pick') picks.push(a);
+    else if (a.type === 'undo') picks.pop();
+  }
+  return lineup.map((l) => {
+    const p = picks.find((x) => x.slot === l.slot);
+    return p && finalTokens[p.round - 1] ? finalTokens[p.round - 1].faction : null;
+  });
+}
+
 module.exports = {
-  dateKeyAt, currentVersions, getConfig, boardListCap, bankLowWarn, roster,
+  dateKeyAt, currentVersions, configVersionFor, getConfig, boardListCap, bankLowWarn, roster,
   buildSheet, primaryTokens, replay, simulate, bestLineup, acceptDailySeed,
   normaliseLineup, lineupToIdx, finalTokens,
-  replayPartial, variantFor, anomalyMinMs, interstitialDefaults, bandOf,
+  lineupFactions, replayPartial, variantFor, anomalyMinMs, interstitialDefaults, bandOf,
 };
