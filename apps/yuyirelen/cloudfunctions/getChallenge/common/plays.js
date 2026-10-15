@@ -48,7 +48,6 @@ async function rateLimitT(t, openid, nowMs) {
 
 /** apply the finish side effects that live in documents other than the play (inside the transaction) */
 async function finishEffectsT(t, openid, play, prevKey, nowMs, outcome) {
-  const _ = store._();
   const cur = await store.getDocT(t, 'player_stats', openid);
   const s = cur || { _id: openid, curStreak: 0, bestStreak: 0, lastSolvedDate: null, dailiesSolved: 0, dailiesGaveUp: 0, finishedTotal: 0, flags7d: [], suspect: false };
   s.finishedTotal = (s.finishedTotal || 0) + 1;
@@ -65,16 +64,6 @@ async function finishEffectsT(t, openid, play, prevKey, nowMs, outcome) {
     delete data._id;
     await t.collection('player_stats').doc(openid).set({ data });
   } else await t.collection('player_stats').add({ data: s });
-
-  // challenge bookkeeping (non-owner finishing a challenged puzzle): counter + best steps
-  if (play.viaChallenge) {
-    const ch = await store.getDocT(t, 'challenges', play.viaChallenge);
-    if (ch && ch.ownerOpenid !== openid && ch.puzzleId === play.puzzleId) {
-      const data = { finishers: _.inc(1) };
-      if (outcome === 'solved' && (ch.bestSteps == null || play.steps < ch.bestSteps)) data.bestSteps = play.steps;
-      await t.collection('challenges').doc(ch._id).update({ data });
-    }
-  }
 }
 
 /**
@@ -165,9 +154,18 @@ function chipsFor(vocab, coreapi, idx, play, limit = rules.LIMITS.chips) {
   return out;
 }
 
-/** ladder rows the client may see: words, ranks and temperatures only (no answer, no ids) */
-function viewGuesses(play, vocab) {
-  return play.guesses.filter((g) => g.w >= 0).map((g) => ({ word: vocab.words[g.w], r: g.r, t: g.t, src: g.src }));
+/**
+ * The step log the client may see, in guess order: words, ranks and temperatures only (no answer, no ids).
+ * The first-character hint (提示 3) is a step with word:null, r:null, t:null and `ch` (the client contract);
+ * `syn` marks the synonym that solved the puzzle.
+ */
+function viewGuesses(play, vocab, firstChar) {
+  return play.guesses.map((g) => {
+    if (g.w < 0) return { word: null, r: null, t: null, src: 'hint', ch: firstChar };
+    const o = { word: vocab.words[g.w], r: g.r, t: g.t, src: g.src };
+    if (g.sv === 'synonym') o.syn = true;
+    return o;
+  });
 }
 
 module.exports = { playId, freshPlay, isFinished, rateLimitT, mutate, recordDailyStats, flag, chipsFor, viewGuesses };

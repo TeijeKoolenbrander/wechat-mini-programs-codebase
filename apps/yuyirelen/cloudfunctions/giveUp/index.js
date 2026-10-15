@@ -22,5 +22,5 @@ exports.main = store.handler(async (event, { openid }) => {
     return { data: {}, finish: 'gaveup' };
   });
   await plays.recordDailyStats(result);
-  return { ok: true, answer: meta.word, steps: result.play.steps, best: result.play.best };
+  return { ok: true, answer: meta.word, steps: result.play.steps, best: result.play.best, status: result.play.status };
 });

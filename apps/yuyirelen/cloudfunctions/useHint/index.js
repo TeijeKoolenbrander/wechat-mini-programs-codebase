@@ -69,6 +69,7 @@ exports.main = store.handler(async (event, { openid }) => {
   await plays.recordDailyStats(result);
   const { play, data } = result;
   const out = { ok: true, kind: data.kind, steps: play.steps, best: play.best, ranked: play.ranked };
+  if (data.row.k) out.k = data.row.k;
   if (data.kind === 'word') {
     out.word = vocab.words[data.row.w];
     out.r = data.row.r;

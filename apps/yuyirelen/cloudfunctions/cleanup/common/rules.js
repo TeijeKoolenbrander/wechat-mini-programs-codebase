@@ -121,12 +121,8 @@ function effectiveStreak(stats, todayKey, prevKey) {
   return { current: alive ? stats.curStreak || 0 : 0, best: stats.bestStreak || 0 };
 }
 
-/** Normalise typed text the way the client does (PO-25): NFKC, strip spaces/punctuation, t2s per character. */
-function normalizeWord(s) {
-  if (typeof s !== 'string') return '';
-  const stripped = s.normalize('NFKC').replace(/[\s\p{P}\p{S}\p{Cc}\p{Cf}]/gu, '');
-  return Array.from(stripped).map(coreapi.t2sChar).join('');
-}
+/** Normalise typed text exactly like the client (core normalizeInput + t2s when synced): PO-25. */
+const normalizeWord = (s) => coreapi.normalize(s);
 
 /** vocabulary index of typed/tapped text, or throws NOT_IN_VOCAB. The text is never stored or logged. */
 function lookupWord(vocab, text) {

@@ -119,10 +119,10 @@ function handler(fn, { auth = true, serverOnly = false } = {}) {
       return await fn(event && typeof event === 'object' ? event : {}, { openid, startedAt });
     } catch (e) {
       if (e instanceof AppError || (e && e.code && e.extra !== undefined)) {
-        return { ok: false, code: e.code, message: e.message, ...(e.extra || {}) };
+        return { ok: false, code: e.code, message: e.message, msg: e.message, ...(e.extra || {}) };
       }
       console.error('unhandled', errText(e), e && e.stack);
-      return { ok: false, code: 'INTERNAL', message: 'internal error' };
+      return { ok: false, code: 'INTERNAL', message: 'internal error', msg: 'internal error' };
     }
   };
 }

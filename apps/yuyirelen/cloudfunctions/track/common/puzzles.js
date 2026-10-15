@@ -6,7 +6,6 @@
 const coreapi = require('./coreapi');
 const store = require('./store');
 const rules = require('./rules');
-const rng = require('./rng');
 const { AppError, fail, now, addDaysKey, daysBetween, isDateKey, randomHex } = require('./util');
 
 const ID_RE = /^(?:d(\d{8})|p([1-9]\d{0,4}))$/;
@@ -27,8 +26,7 @@ function parseId(id) {
 
 /** warm-up words: deterministic per key from the reviewed starter list; never sees an answer (PO-22) */
 function warmupsFor(key, vocab) {
-  const list = coreapi.starters().filter((w) => vocab.index.has(w));
-  return rng.drawDistinct(list, rules.LIMITS.warmups, key, 'warmups');
+  return coreapi.warmups(key, vocab, rules.LIMITS.warmups);
 }
 
 async function getDailyDoc(dateKey) {

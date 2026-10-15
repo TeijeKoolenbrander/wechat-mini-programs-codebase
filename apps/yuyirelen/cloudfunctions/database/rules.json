@@ -1,16 +1,59 @@
 {
   "_comment": "Cloud database security rules, one entry per collection. EVERY collection is deny-all for clients: the mini game never touches the database directly; all access is through cloud functions, which run with admin rights and bypass these rules. Paste each value into the console (Database > collection > Permissions > Custom rules). See README 'Database security rules' for why each collection needs deny-all.",
-  "answer_bank": { "read": false, "write": false },
-  "answer_ranks": { "read": false, "write": false },
-  "daily_puzzles": { "read": false, "write": false },
-  "plays": { "read": false, "write": false },
-  "player_stats": { "read": false, "write": false },
-  "daily_stats": { "read": false, "write": false },
-  "challenges": { "read": false, "write": false },
-  "group_members": { "read": false, "write": false },
-  "events": { "read": false, "write": false },
-  "anomalies": { "read": false, "write": false },
-  "app_config": { "read": false, "write": false },
-  "rate_limits": { "read": false, "write": false },
-  "meta": { "read": false, "write": false }
+  "answer_bank": {
+    "read": false,
+    "write": false
+  },
+  "answer_ranks": {
+    "read": false,
+    "write": false
+  },
+  "daily_puzzles": {
+    "read": false,
+    "write": false
+  },
+  "plays": {
+    "read": false,
+    "write": false
+  },
+  "player_stats": {
+    "read": false,
+    "write": false
+  },
+  "daily_stats": {
+    "read": false,
+    "write": false
+  },
+  "challenges": {
+    "read": false,
+    "write": false
+  },
+  "challenge_takers": {
+    "read": false,
+    "write": false
+  },
+  "group_members": {
+    "read": false,
+    "write": false
+  },
+  "events": {
+    "read": false,
+    "write": false
+  },
+  "anomalies": {
+    "read": false,
+    "write": false
+  },
+  "app_config": {
+    "read": false,
+    "write": false
+  },
+  "rate_limits": {
+    "read": false,
+    "write": false
+  },
+  "meta": {
+    "read": false,
+    "write": false
+  }
 }

@@ -1,6 +1,6 @@
 'use strict';
 // cleanup: timer (config.json, 04:00 BJT). 180-day retention (spec 14.2, 16).
-// Deletes plays, challenges, events, anomalies older than 180 days, group_members by lastSeen, player_stats by
+// Deletes plays, challenges, challenge_takers, events, anomalies older than 180 days, group_members by lastSeen, player_stats by
 // updatedAt, and expired rate_limits. KEEPS daily_stats, daily_puzzles, answer_bank, answer_ranks (aggregates / content).
 // Also writes the daily anomaly roll-up (`anomaly_daily` event, one per date). Idempotent. Server-only.
 const coreapi = require('./common/coreapi');
@@ -10,6 +10,7 @@ const { now, addDaysKey, DAY_MS, RETENTION_DAYS, configuredTimeoutMs } = require
 const TARGETS = [
   { col: 'plays', field: 'lastAt' },
   { col: 'challenges', field: 'createdAt' },
+  { col: 'challenge_takers', field: 'createdAt' },
   { col: 'events', field: 'ts' },
   { col: 'anomalies', field: 'ts' },
   { col: 'player_stats', field: 'updatedAt' },

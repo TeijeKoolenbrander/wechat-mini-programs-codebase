@@ -28,11 +28,6 @@ function guessSource(v) {
   if (!GUESS_SOURCES.includes(v)) fail('INVALID_INPUT', 'bad src');
   return v;
 }
-function optChallengeId(v) {
-  if (v === undefined || v === null) return null;
-  if (typeof v !== 'string' || !CHALLENGE_ID_RE.test(v)) fail('INVALID_INPUT', 'bad challengeId');
-  return v;
-}
 function challengeId(v) {
   if (typeof v !== 'string' || !CHALLENGE_ID_RE.test(v)) fail('CHALLENGE_NOT_FOUND', 'unknown challenge');
   return v;
@@ -63,5 +58,5 @@ function optCursor(v) {
 
 module.exports = {
   PUZZLE_ID_RE, GUESS_SOURCES, isPlainObject,
-  puzzleId, wordText, clientGuessId, guessSource, optChallengeId, challengeId, groupRef, dateKey, hintSource, optHintK, optCursor,
+  puzzleId, wordText, clientGuessId, guessSource, challengeId, groupRef, dateKey, hintSource, optHintK, optCursor,
 };

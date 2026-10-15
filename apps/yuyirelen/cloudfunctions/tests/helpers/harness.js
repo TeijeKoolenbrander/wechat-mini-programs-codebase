@@ -70,6 +70,8 @@ function createHarness({ now = T0, V = 120 } = {}) {
     setNow(ms) { t = ms; },
     advance(ms) { t += ms; },
     now() { return t; },
+    /** make this harness's clock the active Date.now (after another harness was torn down) */
+    activate() { Date.now = () => t; },
     setEnv(k, v) { if (!(k in env)) env[k] = process.env[k]; if (v === undefined) delete process.env[k]; else process.env[k] = v; },
     /** call a function as `openid` (undefined => a server/timer-style call with no OPENID) */
     call(fn, event, { openid } = {}) {

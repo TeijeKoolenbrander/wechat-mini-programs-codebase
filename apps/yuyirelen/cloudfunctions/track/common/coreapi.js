@@ -4,11 +4,11 @@
 // Everything is optional with a documented fallback, so the functions keep working while the
 // game core and the pipeline are being built in parallel. Contracts we rely on:
 //
-//   core/date.js     beijingDateKey(ms)                         (fallback: local UTC+8 arithmetic)
-//   core/config.js   LATEST_CONFIG_VERSION                      (fallback: 1)
-//   core/starters.js an array of the 120 starter words, or an object holding one array
-//                    (STARTERS / starters / words / list)       (REQUIRED for warm-ups)
-//   core/t2s.js      optional traditional->simplified map or function
+//   core/date.js      beijingDateKey(ms)                         (fallback: local UTC+8 arithmetic)
+//   core/config.js    LATEST_CONFIG_VERSION, getConfig(v).gateVersion   (fallback: manifest.json, then 1)
+//   core/starters.js  warmupsFor(key, n) and STARTERS (array of 120 words)   (REQUIRED for warm-ups; matches the client)
+//   core/normalize.js normalizeInput(raw, t2sMap)                 (fallback: local equivalent)
+//   core/t2s.js       traditional->simplified char map             (optional)
 //
 //   data/manifest.json   {vocabVersion, gateVersion, configVersion?}  (written by import-data.js)
 //   data/vocab.v<N>.txt  one word per line; line number = vocabIdx
@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const { fail, keyFromUtcMidnight, BJT_MS } = require('./util');
+const rng = require('./rng');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 
@@ -51,32 +52,59 @@ function currentVersions() {
   const cfg = optionalRequire('../core/config');
   const configVersion = (cfg && Number.isInteger(cfg.LATEST_CONFIG_VERSION) && cfg.LATEST_CONFIG_VERSION)
     || (Number.isInteger(m.configVersion) && m.configVersion) || 1;
+  let coreGate = null;
+  try {
+    const g = cfg && typeof cfg.getConfig === 'function' ? cfg.getConfig(configVersion).gateVersion : null;
+    if (Number.isInteger(g)) coreGate = g;
+  } catch (e) { /* fall back to the manifest */ }
   return {
     vocabVersion: Number.isInteger(m.vocabVersion) ? m.vocabVersion : 1,
-    gateVersion: Number.isInteger(m.gateVersion) ? m.gateVersion : 1,
+    gateVersion: coreGate !== null ? coreGate : Number.isInteger(m.gateVersion) ? m.gateVersion : 1,
     configVersion,
   };
 }
 
-// ---- starters (warm-up source) ----
-function starters() {
+// ---- starters and warm-ups ----
+function starterList() {
   const s = optionalRequire('../core/starters');
   let list = null;
   if (Array.isArray(s)) list = s;
   else if (s && typeof s === 'object') {
-    for (const k of ['STARTERS', 'starters', 'words', 'list', 'default']) if (Array.isArray(s[k])) { list = s[k]; break; }
+    for (const k of ['STARTERS', 'starters', 'words', 'list']) if (Array.isArray(s[k])) { list = s[k]; break; }
   }
   if (!list || !list.every((w) => typeof w === 'string')) fail('SERVER_CONFIG', 'core/starters.js missing or unreadable');
   return list;
 }
+/**
+ * The 6 warm-up words for a key (a dateKey or "p<n>"): the core's own warmupsFor when present (so client and server
+ * agree), restricted to words of this vocabulary. Depends only on the key: never on any answer (PO-22).
+ */
+function warmups(key, vocabulary, n = 6) {
+  const s = optionalRequire('../core/starters');
+  if (s && typeof s.warmupsFor === 'function') {
+    const w = s.warmupsFor(key, n);
+    if (Array.isArray(w) && w.length === n && w.every((x) => vocabulary.index.has(x))) return w;
+  }
+  return rng.drawDistinct(starterList().filter((x) => vocabulary.index.has(x)), n, key, 'warmups');
+}
 
-// ---- optional traditional->simplified map for input normalisation ----
+// ---- input normalisation: the core's normalizeInput (with its t2s map) so server and client agree ----
 function t2sChar(ch) {
   const m = optionalRequire('../core/t2s');
   if (!m) return ch;
   if (typeof m === 'function') return m(ch) || ch;
   const map = m.T2S || m.map || m;
   return (map && typeof map === 'object' && typeof map[ch] === 'string' && map[ch]) || ch;
+}
+function normalize(text) {
+  if (typeof text !== 'string') return '';
+  const n = optionalRequire('../core/normalize');
+  if (n && typeof n.normalizeInput === 'function') {
+    const t2s = optionalRequire('../core/t2s');
+    return n.normalizeInput(text, t2s && typeof t2s === 'object' ? t2s : null);
+  }
+  const stripped = text.normalize('NFKC').replace(/[\s\p{P}\p{S}\p{Cc}\p{Cf}]/gu, '');
+  return Array.from(stripped).map(t2sChar).join('');
 }
 
 // ---- vocabulary and neighbour table ----
@@ -128,4 +156,4 @@ function resetCaches() {
   manifestCache = undefined;
 }
 
-module.exports = { dateKeyAt, currentVersions, starters, t2sChar, vocab, neighbours, NEAR_K, resetCaches, DATA_DIR };
+module.exports = { dateKeyAt, currentVersions, warmups, normalize, vocab, neighbours, NEAR_K, resetCaches, DATA_DIR };

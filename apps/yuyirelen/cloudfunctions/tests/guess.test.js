@@ -20,6 +20,7 @@ test('a guess returns its rank, temperature, band and step count (AC 29, 30)', a
   const r = await guess('u1', wrong(0));
   const rank = sc.answer.ranks[wrong(0)];
   assert.equal(r.ok, true);
+  assert.equal(r.word, h.words[wrong(0)]);
   assert.equal(r.r, rank);
   assert.equal(r.t, Math.round(100 * (1 - Math.log(rank) / Math.log(h.V))));
   assert.equal(r.steps, 1);

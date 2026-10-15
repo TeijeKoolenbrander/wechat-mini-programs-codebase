@@ -39,7 +39,7 @@ exports.main = store.handler(async (event, { openid }) => {
     configVersion: doc.configVersion,
     my: play
       ? { status: play.status, steps: play.steps, best: play.best, hints: play.hintsUsed.length }
-      : { status: 'new', steps: 0, best: null, hints: 0 },
+      : { status: 'none', steps: 0, best: null, hints: 0 },
     myStreak: rules.effectiveStreak(stats, dateKey, prevKey),
     features: feat,
   };

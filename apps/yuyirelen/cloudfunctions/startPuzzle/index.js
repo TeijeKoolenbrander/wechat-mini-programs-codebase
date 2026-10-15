@@ -1,7 +1,8 @@
 'use strict';
 // startPuzzle: open (or resume) a puzzle and return the caller's play (spec 14.2).
 // It does NOT create a play: opening without guessing doesn't count as playing (the first guess does).
-// {next:true} resolves 再来一题: the newest unfinished past daily, else the lowest unfinished practice puzzle (5.3).
+// {next:true} resolves 再来一题: the newest unfinished past daily, else the lowest unfinished practice puzzle (5.3);
+// {next:true, pool:'practice'} skips the dailies (去练习).
 const store = require('./common/store');
 const input = require('./common/input');
 const coreapi = require('./common/coreapi');
@@ -23,14 +24,18 @@ async function finishedPlayIds(ids) {
   return out;
 }
 
-async function resolveNext(openid, nowMs) {
+async function newestUnfinishedPastDaily(openid, nowMs) {
   const _ = store._();
   const today = coreapi.dateKeyAt(nowMs);
   const past = await store.db().collection('daily_puzzles').where({ _id: _.lt(today) }).orderBy('_id', 'desc').limit(NEXT_SCAN).field({ _id: true }).get();
   const keys = past.data.map((d) => d._id).filter((k) => rules.windowState(k, nowMs) === 'late');
   const done = await finishedPlayIds(keys.map((k) => plays.playId('d' + k, openid)));
   for (const k of keys) if (!done.has('d' + k)) return 'd' + k;
+  return null;
+}
 
+async function lowestUnfinishedPractice(openid, nowMs) {
+  const _ = store._();
   const fin = await store.queryAll('plays', { openid, kind: 'practice', status: _.neq('playing') }, { field: { puzzleId: true } });
   const finished = new Set(fin.map((p) => p.puzzleId));
   for (let n = 1; n < 100000; n++) {
@@ -50,7 +55,7 @@ exports.main = store.handler(async (event, { openid }) => {
   const nowMs = now();
   let puzzleId;
   if (event.next === true) {
-    puzzleId = await resolveNext(openid, nowMs);
+    puzzleId = (event.pool !== 'practice' && (await newestUnfinishedPastDaily(openid, nowMs))) || (await lowestUnfinishedPractice(openid, nowMs));
     if (!puzzleId) fail('PUZZLE_NOT_FOUND', 'nothing left to play');
   } else puzzleId = input.puzzleId(event.puzzleId);
 
@@ -59,6 +64,10 @@ exports.main = store.handler(async (event, { openid }) => {
   const play = await store.getDoc('plays', plays.playId(puzzleId, openid));
 
   const ranked = play ? play.ranked && rules.inRankedWindow(play.dateKey, nowMs) : puzzle.kind === 'daily';
+  const needsAnswer = !!play && (play.hintsUsed.includes(3) || plays.isFinished(play));
+  const meta = needsAnswer ? await answers.getMeta(puzzle.answerRef) : null;
+  const firstChar = meta && play.hintsUsed.includes(3) ? Array.from(meta.word)[0] : undefined;
+
   const out = {
     ok: true,
     puzzleId,
@@ -72,18 +81,15 @@ exports.main = store.handler(async (event, { openid }) => {
     configVersion: puzzle.configVersion,
     serverNow: nowMs,
     play: {
-      guesses: play ? plays.viewGuesses(play, vocab) : [],
+      guesses: play ? plays.viewGuesses(play, vocab, firstChar) : [],
       steps: play ? play.steps : 0,
       hintsUsed: play ? play.hintsUsed : [],
       adHints: play ? play.adHints : 0,
       best: play ? play.best : null,
-      status: play ? play.status : 'new',
+      status: play ? play.status : 'playing',
     },
   };
-  if (play && (play.hintsUsed.includes(3) || plays.isFinished(play))) {
-    const meta = await answers.getMeta(puzzle.answerRef);
-    if (play.hintsUsed.includes(3)) out.play.firstChar = Array.from(meta.word)[0];
-    if (plays.isFinished(play)) out.answer = meta.word; // finished plays only (spoiler rule 14.4)
-  }
+  if (firstChar) out.play.firstChar = firstChar;
+  if (play && plays.isFinished(play)) out.answer = meta.word; // finished plays only (spoiler rule 14.4)
   return out;
 });

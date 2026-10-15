@@ -58,7 +58,7 @@ exports.main = store.handler(async (event, { openid }) => {
   const dateKey = input.dateKey(event.dateKey);
   const nowMs = now();
   const today = coreapi.dateKeyAt(nowMs);
-  if (dateKey > today || dateKey < addDaysKey(today, -1)) fail('INVALID_INPUT', 'board date out of range');
+  if (dateKey > today || dateKey < addDaysKey(today, -1)) fail('PUZZLE_NOT_FOUND', 'board date out of range');
 
   let groupRef = null;
   if (kind === 'group') {

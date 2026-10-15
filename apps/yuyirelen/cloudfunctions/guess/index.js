@@ -15,6 +15,7 @@ function respond({ row, stepNo, play, vocab, dup, entry }) {
   const solved = play.status === 'solved' && row.sv !== undefined;
   const out = {
     ok: true,
+    word: vocab.words[row.w],
     r: row.r,
     t: row.t,
     band: rules.bandOf(row.r),
@@ -38,7 +39,6 @@ exports.main = store.handler(async (event, { openid }) => {
   const text = input.wordText(event.word);
   const cg = input.clientGuessId(event.clientGuessId);
   const src = input.guessSource(event.src);
-  const viaChallenge = input.optChallengeId(event.challengeId);
   const nowMs = now();
 
   const puzzle = await puzzles.load(puzzleId, nowMs);
@@ -71,7 +71,6 @@ exports.main = store.handler(async (event, { openid }) => {
       play.guesses.push(row);
       play.steps = play.guesses.length;
       play.best = play.best == null ? r : Math.min(play.best, r);
-      if (viaChallenge && !play.viaChallenge) play.viaChallenge = viaChallenge;
       const data = { row, stepNo: play.steps, dup: false, hintUnlocked: rules.newlyUnlocked(prevSteps, play.steps, play.hintsUsed) };
       return solvedBy ? { data, finish: 'solved' } : { data };
     });

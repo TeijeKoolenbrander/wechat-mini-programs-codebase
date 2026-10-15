@@ -1,8 +1,8 @@
 'use strict';
 // track: batched analytics (spec 15; pattern copied from apps/dianjiangtai). <= 50 events per call, rate limited.
 // Identity is the context OPENID. Props are sanitised:
-//  - an event carrying a prop named text / input / query (at any depth) is REJECTED whole (PO-23, AC 25):
-//    typed text must never reach analytics;
+//  - a batch with an event carrying a prop named text / input / query (at any depth) is REFUSED with BAD_EVENT and
+//    nothing is stored (PO-23, AC 25): typed text must never reach analytics;
 //  - identifier-like keys (openid, groupRef, cloudID, ...) are dropped.
 const store = require('./common/store');
 const { fail, now, isPlainObject, isInt } = require('./common/util');
@@ -52,12 +52,14 @@ exports.main = store.handler(async (event, { openid }) => {
   if (!Array.isArray(list) || list.length === 0 || list.length > MAX_BATCH) fail('INVALID_INPUT', `events must be 1-${MAX_BATCH}`);
   await store.rateLimit(openid, 'track', list.length, EVENTS_PER_MIN);
 
+  // a batch carrying typed text is refused whole (BAD_EVENT, the same code the client's dev mock returns): nothing is stored
+  if (list.some((e) => isPlainObject(e) && (hasTextProp(e.props, 0) || hasTextProp(e, 1)))) fail('BAD_EVENT', 'typed text is not accepted in analytics');
+
   const ts = now();
   const docs = [];
   let rejected = 0;
   for (const e of list) {
     if (!isPlainObject(e) || !CLIENT_EVENTS.has(e.name)) { rejected++; continue; }
-    if (hasTextProp(e.props, 0) || hasTextProp(e, 1)) { rejected++; continue; }
     const props = clean(isPlainObject(e.props) ? e.props : {}, 0) || {};
     const rawSession = e.sessionId !== undefined ? e.sessionId : props.sessionId;
     delete props.sessionId;
