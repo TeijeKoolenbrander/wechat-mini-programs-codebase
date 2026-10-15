@@ -146,7 +146,7 @@ function draw(ctx, vm, L) {
   }
   const ad = vm.paletteAd;
   if (ad && ad.show && live && empty) {
-    const labels = { idle: '今日彩笔 +6色', loading: '加载中…', playing: '播放中…', error: '再试一次' };
+    const labels = { idle: '今日彩笔', loading: '加载中…', playing: '播放中…', error: '再试一次' };
     const bw2 = Math.min(rect.w - 28, L.u(196));
     const bhh = Math.max(T.MIN_TAP, W.btnH(L, true));
     W.button(ctx, L, hits, { id: 'draw:paletteAd', x: rect.x + rect.w / 2 - bw2 / 2, y: rect.y + rect.h - bhh - 14, w: bw2, h: bhh, label: labels[ad.state || 'idle'], kind: 'ad', size: T.FS.body, disabled: ad.state === 'loading' || ad.state === 'playing' });
