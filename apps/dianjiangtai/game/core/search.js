@@ -2,86 +2,100 @@
  * 复盘: the best lineup for a run's own final tokens (spec 7.4).
  *
  *   bestLineup(seed, contentVersion, finalTokens, opts?) ->
- *     { lineup:[{slot,generalId}], record:{w,l}, evaluated, sets } | null
+ *     { lineup:[{slot,generalId,faction}], record:{w,l}, evaluated, sets } | null
  *
  * `finalTokens` is 5 x {faction, era}: the tokens the player actually
  * drafted from (after re-spins). The search is exact: every set of 5
- * distinct generals with a round-to-general matching (one general from each
- * round's cell), times all 120 slot permutations, scored with the exact
- * simulator rules (events included). Tie-break: highest sum of win chances
- * (natural battle outcomes), then first found. Returns null when no five
- * distinct generals can be drafted from the tokens.
+ * distinct generals reachable by drafting one general per round from that
+ * round's POOL (the pool cap of spec 4 applies: the first `poolCap` undrafted
+ * generals of the cell in the round's seeded pool order, so a pool depends on
+ * who was drafted in earlier rounds), times all 120 slot permutations,
+ * scored with the exact simulator rules (events included; cohesion uses the
+ * faction of the cell each general was drafted from). Tie-break: highest sum
+ * of win chances (natural battle outcomes), then first found. Returns null
+ * when no five distinct generals can be drafted from the tokens.
  *
  * Speed (all exact, none changes the answer):
- *  - picks are deduplicated by general SET: slot assignment is free, so a set
- *    reachable through several round orders is scored once;
+ *  - picks are deduplicated by (general, drafted faction) SET: slot
+ *    assignment is free, so a set reachable through several round orders is
+ *    scored once;
  *  - per set, slots are filled depth-first and the 12 partial team-power
  *    sums are reused across permutations;
  *  - wins are decided by precomputed thresholds (no exp in the hot loop);
  *  - sets are visited best-upper-bound first, and a set is skipped when its
  *    per-battle upper bound cannot beat the best record (or the best
  *    tie-break) found so far. The bound never undercuts a reachable lineup,
- *    so the optimum is never skipped. This subsumes the spec's dominated-pick
- *    pruning without its exchange-argument caveats when the same general
- *    appears in several pools. (Per-node bounds inside a set were measured
- *    and cost more than they saved.)
+ *    so the optimum is never skipped;
  *  - a leaf is abandoned as soon as it has lost too many battles to tie the
  *    best record.
  *
  * `opts.stopAt12` returns at the first lineup that wins every battle (gate
  * check); the stored daily `best` uses the full search.
- * `opts.configVersion`, `opts.scenario` (a prebuilt makeScenario) optional.
+ * `opts.configVersion`, `opts.scenario` (a prebuilt makeScenario) and
+ * `opts.rounds` (the sheet, whose `pools` give the pool orders; default:
+ * derived from the seed) are optional.
  */
 
 const { SLOTS, cellKey } = require('./content');
 const { makeScenario, simulateScenario, applyEvents } = require('./sim');
+const { poolOrder } = require('./sheet');
 
 const NS = 5;
 const EPS = 1e-9;
 
-function enumerateSets(content, finalTokens) {
-  const pools = finalTokens.map((t) => content.cells[cellKey(t.faction, t.era)]);
+/** Per round: the cell's pool order (roster indexes). */
+function ordersFor(seed, content, finalTokens, cap, rounds) {
+  return finalTokens.map((t, r) => {
+    const key = cellKey(t.faction, t.era);
+    const cell = content.cells[key];
+    if (!cell || cell.length <= cap) return cell || [];
+    const given = rounds && rounds[r] && rounds[r].pools && rounds[r].pools[key];
+    return given || poolOrder(seed, content, r + 1, t.faction, t.era);
+  });
+}
+
+/**
+ * All distinct (general, faction) sets draftable from the tokens, honouring the pool cap.
+ * Returns [{g:[5 roster indexes ascending], f:[5 faction indexes aligned with g]}].
+ */
+function enumerateSets(content, finalTokens, cap, orders) {
+  // old two-argument form: cap 8, pool orders = roster order (a size estimate; pass orders for the exact sets)
+  if (cap === undefined) cap = 8;
+  if (!orders) orders = finalTokens.map((t) => content.cells[cellKey(t.faction, t.era)] || []);
+  const facIdx = {};
+  content.factions.forEach((f, i) => (facIdx[f.key] = i));
   const nR = content.generals.length;
-  const bigRoster = nR > 50;
   const seen = new Set();
   const sets = [];
-  const pick = [0, 0, 0, 0, 0];
+  const pickG = [0, 0, 0, 0, 0];
+  const pickF = [0, 0, 0, 0, 0];
   const taken = new Uint8Array(nR);
-  const POW = [];
-  for (let g = 0; g < nR; g++) POW.push(Math.pow(2, g));
-  (function rec(r, mask) {
+  const tokF = finalTokens.map((t) => facIdx[t.faction]);
+  (function rec(r) {
     if (r === NS) {
-      let k = mask;
-      if (bigRoster) {
-        k = pick.slice().sort((a, b) => a - b).join(',');
-      }
+      const idx = [0, 1, 2, 3, 4].sort((a, b) => pickG[a] - pickG[b]);
+      const g = idx.map((i) => pickG[i]);
+      const f = idx.map((i) => pickF[i]);
+      const k = g.map((x, i) => x * 8 + f[i]).join(',');
       if (!seen.has(k)) {
         seen.add(k);
-        // insertion sort of 5 ints
-        const set = pick.slice();
-        for (let i = 1; i < NS; i++) {
-          const v = set[i];
-          let j = i - 1;
-          while (j >= 0 && set[j] > v) {
-            set[j + 1] = set[j];
-            j--;
-          }
-          set[j + 1] = v;
-        }
-        sets.push(set);
+        sets.push({ g, f });
       }
       return;
     }
-    const pool = pools[r];
-    for (let i = 0; i < pool.length; i++) {
-      const g = pool[i];
+    const order = orders[r];
+    let n = 0;
+    for (let i = 0; i < order.length && n < cap; i++) {
+      const g = order[i];
       if (taken[g]) continue;
+      n++;
       taken[g] = 1;
-      pick[r] = g;
-      rec(r + 1, bigRoster ? 0 : mask + POW[g]);
+      pickG[r] = g;
+      pickF[r] = tokF[r];
+      rec(r + 1);
       taken[g] = 0;
     }
-  })(0, 0);
+  })(0);
   return sets;
 }
 
@@ -97,20 +111,19 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
   const D = scn.D;
   const tau = config.tau;
   const m = config.morale;
+  const cap = config.poolCap;
 
-  const rawSets = enumerateSets(content, finalTokens);
+  const orders = ordersFor(seed, content, finalTokens, cap, opts.rounds);
+  const rawSets = enumerateSets(content, finalTokens, cap, orders);
   if (rawSets.length === 0) return null;
 
   // --- per-set constants and upper bounds ------------------------------------
-  // per-general lookups, no allocation per set
   const nR = roster.length;
-  const facOf = new Int8Array(nR);
   const factionKeys = content.factions.map((f) => f.key);
   const waverG = new Uint8Array(nR);
   const stratG = new Uint8Array(nR);
   const unstG = new Uint8Array(nR);
   for (let g = 0; g < nR; g++) {
-    facOf[g] = factionKeys.indexOf(roster[g].faction);
     waverG[g] = roster[g].stats.xin <= ev.wavering.maxXin ? 1 : 0;
     stratG[g] = roster[g].stats.zhi >= ev.stratagem.minZhi ? 1 : 0;
     unstG[g] = roster[g].stats.yong >= ev.unstoppable.yong ? 1 : 0;
@@ -120,7 +133,8 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
 
   const infos = [];
   for (let si = 0; si < rawSets.length; si++) {
-    const set = rawSets[si];
+    const set = rawSets[si].g;
+    const setF = rawSets[si].f;
     let bondBonus = 0;
     for (let bi = 0; bi < bondIdx.length; bi++) {
       const mem = bondIdx[bi].members;
@@ -138,7 +152,7 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
     facCount.fill(0);
     let top = 0;
     for (let j = 0; j < NS; j++) {
-      const c = ++facCount[facOf[set[j]]];
+      const c = ++facCount[setF[j]];
       if (c > top) top = c;
     }
     const cohesion = top >= 5 ? m.cohesion5 : top >= 4 ? m.cohesion4 : 0;
@@ -165,7 +179,7 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
       ubMetric += 1 / (1 + Math.exp(-(p - D[i]) / tau));
     }
     const gain = canStrat + canUnst;
-    infos.push({ set, M0, canWaver, gain, plain: !canWaver && gain === 0, ubCount: ubCount + gain, ubMetric });
+    infos.push({ set, setF, M0, canWaver, gain, plain: !canWaver && gain === 0, ubCount: ubCount + gain, ubMetric });
   }
   infos.sort((a, b) => b.ubCount - a.ubCount || b.ubMetric - a.ubMetric);
 
@@ -180,10 +194,12 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
   const xin = [0, 0, 0, 0, 0];
   const used = [false, false, false, false, false];
   const assign = [0, 0, 0, 0, 0];
+  const assignA = [0, 0, 0, 0, 0];
 
   let bestCount = -1;
   let bestMetric = -Infinity;
   const bestAssign = [0, 0, 0, 0, 0];
+  const bestFac = [0, 0, 0, 0, 0];
   let evaluated = 0;
   let done = false;
   let info = null;
@@ -232,7 +248,10 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
       if (beats(count, metric)) {
         bestCount = count;
         bestMetric = metric;
-        for (let k = 0; k < NS; k++) bestAssign[k] = assign[k];
+        for (let k = 0; k < NS; k++) {
+          bestAssign[k] = assign[k];
+          bestFac[k] = info.setF[assignA[k]];
+        }
         if (opts.stopAt12 && count === nb) done = true;
       }
       return;
@@ -244,6 +263,7 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
       used[a] = true;
       const g = set[a];
       assign[s] = g;
+      assignA[s] = a;
       const sc = rs[g][s];
       S[s] = sc;
       const col = bwCol[s];
@@ -266,9 +286,9 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
     dfs(0);
   }
 
-  const lineup = SLOTS.map((slot, k) => ({ slot, generalId: roster[bestAssign[k]].id }));
+  const lineup = SLOTS.map((slot, k) => ({ slot, generalId: roster[bestAssign[k]].id, faction: factionKeys[bestFac[k]] }));
   const res = simulateScenario(scn, lineup);
   return { lineup, record: res.record, evaluated, sets: rawSets.length };
 }
 
-module.exports = { bestLineup, enumerateSets };
+module.exports = { bestLineup, enumerateSets, ordersFor };

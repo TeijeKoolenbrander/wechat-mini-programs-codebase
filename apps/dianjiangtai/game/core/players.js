@@ -3,7 +3,7 @@
  * a player can never do something a human could not. Used by the tuning
  * tool and by the daily seed gates (core/gates.js).
  *
- *   playRun(model, seed, contentVersion, mode, rng, scn?, opts?) ->
+ *   playRun(model, seed, contentVersion, mode, rng, scn?, opts?) ->   (opts.rounds: a prebuilt sheet, saves rebuilding it per player)
  *     { run, lineup, record:{w,l} }
  *   models: 'random' | 'naive' | 'greedy' | 'greedyNoisy' | 'sensible'
  *
@@ -142,7 +142,7 @@ function playRun(model, seed, contentVersion, mode, rng, scn, opts) {
   const sc = scn || makeScenario(seed, contentVersion, opts && opts.configVersion);
   let m = model;
   if (m === 'sensible') m = rng() < 0.5 ? 'naive' : 'greedy';
-  const run = draft.createRun({ seed, contentVersion, mode, configVersion: sc.config.configVersion });
+  const run = draft.createRun({ seed, contentVersion, mode, configVersion: sc.config.configVersion, rounds: opts && opts.rounds });
   const cfg = cfgFor(m, sc.config, opts);
   for (let r = 0; r < sc.config.rounds; r++) {
     if (r > 0) draft.nextRound(run);

@@ -97,6 +97,12 @@ const V1 = {
   /** 复盘 (spec 7.4): token sets with more distinct general sets than this are asked of the server first. */
   search: { heavySets: 2000 },
 
+  /** Pool cap per round (spec 4, PO-5): the first poolCap undrafted generals of the cell in the seeded pool order. Cells of 8 or fewer are unaffected. */
+  poolCap: 8,
+
+  /** 识人模式 (spec 8.11): the Sunday daily (Date weekday 0). Display only: never changes the sim. */
+  shiren: { weekday: 0 },
+
   /** Boards (spec 11.5). */
   boardListCap: 3000,
   showUnverified: true,
@@ -115,8 +121,24 @@ const V1 = {
   freeRarity: [1, 0.998, 0.9896, 0.9667, 0.9219, 0.8476, 0.7346, 0.5817, 0.3975, 0.2204, 0.0929, 0.0253, 0.0033],
 };
 
-const CONFIGS = { 1: V1 };
-const LATEST_CONFIG_VERSION = 1;
+/**
+ * configVersion 2 (contentVersion 2, the v1 release). Same formula, role weights and morale constants as configVersion 1;
+ * the retune for the 120-general roster (D15 targets, AC 74) lives in V2_TUNING. configVersion 1 stays intact for old seeds.
+ */
+const V2 = JSON.parse(JSON.stringify(V1));
+V2.configVersion = 2;
+V1.contentVersion = 1;
+V2.contentVersion = 2;
+const V2_TUNING = {};
+Object.assign(V2, V2_TUNING);
+
+const CONFIGS = { 1: V1, 2: V2 };
+const LATEST_CONFIG_VERSION = 2;
+
+/** The config a content version is tuned with: 1 -> 1, 2 -> 2. Callers that pass no configVersion get this. */
+function defaultConfigVersion(contentVersion) {
+  return Number(contentVersion) === 1 ? 1 : LATEST_CONFIG_VERSION;
+}
 
 /** getConfig(version) -> config | null */
 function getConfig(version) {
@@ -129,4 +151,4 @@ function bandFor(config, wins) {
   return config.bands[config.bands.length - 1];
 }
 
-module.exports = { getConfig, bandFor, LATEST_CONFIG_VERSION, CONFIGS };
+module.exports = { getConfig, bandFor, LATEST_CONFIG_VERSION, CONFIGS, defaultConfigVersion };

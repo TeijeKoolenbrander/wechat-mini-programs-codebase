@@ -22,7 +22,7 @@
 
 const { sub, int, shuffle } = require('./rng');
 const { getContent, SLOTS } = require('./content');
-const { getConfig, bandFor, LATEST_CONFIG_VERSION } = require('./config');
+const { getConfig, bandFor, defaultConfigVersion } = require('./config');
 
 const NS = 5;
 
@@ -34,7 +34,7 @@ function logit(p) {
 function makeScenario(seed, contentVersion, configVersion) {
   const content = getContent(contentVersion);
   if (!content) throw new Error('unknown contentVersion ' + contentVersion);
-  const config = getConfig(configVersion || LATEST_CONFIG_VERSION);
+  const config = getConfig(configVersion || defaultConfigVersion(contentVersion));
   if (!config) throw new Error('unknown configVersion ' + configVersion);
   const nb = config.battles;
   const types = config.battleTypes;
@@ -100,24 +100,33 @@ function makeScenario(seed, contentVersion, configVersion) {
   };
 }
 
-/** Lineup -> general ids in slot order. Returns null if incomplete/unknown. */
+/**
+ * Lineup -> general ids in slot order (null if incomplete/unknown). `ids.facs` holds the faction each general was
+ * drafted from (cohesion, spec 7.2); an entry without `faction` counts as its primary faction.
+ */
 function normLineup(content, lineup) {
   const ids = new Array(NS);
+  const facs = new Array(NS);
   if (Array.isArray(lineup)) {
     for (const e of lineup) {
       const si = SLOTS.indexOf(e && e.slot);
       if (si < 0) return null;
       ids[si] = e.generalId;
+      facs[si] = e.faction || null;
     }
   } else if (lineup && typeof lineup === 'object') {
     for (let s = 0; s < NS; s++) ids[s] = lineup[SLOTS[s]];
   } else return null;
-  for (let s = 0; s < NS; s++) if (content.indexOf[ids[s]] === undefined) return null;
+  for (let s = 0; s < NS; s++) {
+    if (content.indexOf[ids[s]] === undefined) return null;
+    if (!facs[s]) facs[s] = content.byId[ids[s]].faction;
+  }
+  ids.facs = facs;
   return ids;
 }
 
 /** Morale multiplier M and its parts for 5 general indexes in slot order. */
-function moraleOf(content, config, gIdx, lordScore) {
+function moraleOf(content, config, gIdx, lordScore, facs) {
   const m = config.morale;
   const ids = gIdx.map((i) => content.roster[i]);
   const bonds = [];
@@ -129,7 +138,7 @@ function moraleOf(content, config, gIdx, lordScore) {
   const counts = {};
   let top = 0;
   for (const i of gIdx) {
-    const f = content.generals[i].faction;
+    const f = facs ? facs[gIdx.indexOf(i)] : content.generals[i].faction;
     counts[f] = (counts[f] || 0) + 1;
     if (counts[f] > top) top = counts[f];
   }
@@ -141,8 +150,8 @@ function moraleOf(content, config, gIdx, lordScore) {
 }
 
 /** Fast morale for the search (no allocations beyond the loop). */
-function moraleTotal(content, config, gIdx, lordScore) {
-  return moraleOf(content, config, gIdx, lordScore).total;
+function moraleTotal(content, config, gIdx, lordScore, facs) {
+  return moraleOf(content, config, gIdx, lordScore, facs).total;
 }
 
 /**
@@ -232,7 +241,7 @@ function simulateScenario(scn, lineup, opts) {
   const useEvents = !(opts && opts.events === false);
   const gIdx = ids.map((id) => content.indexOf[id]);
   const S = gIdx.map((gi, s) => content.roleScores[gi][s]);
-  const morale = moraleOf(content, config, gIdx, S[0]);
+  const morale = moraleOf(content, config, gIdx, S[0], ids.facs);
   const P = new Array(nb);
   const win = new Array(nb);
   const final = new Array(nb);
@@ -312,7 +321,7 @@ function simulateScenario(scn, lineup, opts) {
     band: bandFor(config, w),
     morale,
     scores,
-    lineup: SLOTS.map((s, k) => ({ slot: s, generalId: ids[k] })),
+    lineup: SLOTS.map((s, k) => ({ slot: s, generalId: ids[k], faction: ids.facs[k] })),
   };
 }
 

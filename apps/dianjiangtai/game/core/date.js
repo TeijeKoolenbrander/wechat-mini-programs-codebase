@@ -50,7 +50,22 @@ function issueNo(dateKey, launchKey) {
   return daysBetween(launchKey, dateKey) + 1;
 }
 
+/** Day of week (0 = Sunday) of the Beijing date 'YYYYMMDD'. Pure calendar arithmetic, TZ independent. */
+function weekdayOf(key) {
+  return new Date(Date.UTC(+key.slice(0, 4), +key.slice(4, 6) - 1, +key.slice(6, 8))).getUTCDay();
+}
+
+/**
+ * The daily variant of a date key (spec 5.2/8.11, PO-1): 'shiren' on the config weekday (Sunday), else 'standard'.
+ * `weekday` is config.shiren.weekday. Display only: the seed, sheet, sim, gates and validation never look at it.
+ */
+function variantOf(key, weekday) {
+  return weekdayOf(key) === (weekday === undefined ? 0 : weekday) ? 'shiren' : 'standard';
+}
+
 module.exports = {
+  weekdayOf,
+  variantOf,
   BJT_OFFSET_MS,
   DAY_MS,
   beijingDateKey,

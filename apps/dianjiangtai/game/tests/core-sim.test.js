@@ -470,7 +470,7 @@ test('复盘 search equals brute force (record and tie-break), is drawable and >
     assert.strictEqual(new Set(ids).size, 5);
     const sets = enumerateSets(content, tokens);
     const key = ids.map((id) => content.indexOf[id]).sort((a, b) => a - b).join(',');
-    assert.ok(sets.some((s) => s.join(',') === key));
+    assert.ok(sets.some((s) => s.g.join(',') === key));
     // tie-break equals brute force
     const scn = makeScenario(seed, 1);
     const s = simulateScenario(scn, res.lineup);
