@@ -1,9 +1,12 @@
 /**
  * Shared drawing widgets. Pure canvas 2D calls (a WeChat-safe subset: no
  * roundRect, no letterSpacing, no filter). No wx, no state, no timers.
+ * Colours and type sizes come from the live tokens in theme.js, so every
+ * widget follows the large-text and high-contrast modes.
  */
 
 const T = require('./theme');
+const SealMod = require('./seal');
 const C = T.COLORS;
 
 // ---------------------------------------------------------------- basics
@@ -42,8 +45,8 @@ function strokeRR(ctx, x, y, w, h, r, stroke, lw) {
 
 /**
  * Draw one line of text. o: {size, weight, color, align, serif, baseline,
- * maxW (shrinks to fit, never below minSize), minSize, alpha}.
- * Returns the drawn width.
+ * maxW (shrinks to fit, never below minSize; truncates with an ellipsis if it
+ * still does not fit), minSize, alpha}. Returns the drawn width.
  */
 function text(ctx, str, x, y, o) {
   o = o || {};
@@ -56,6 +59,12 @@ function text(ctx, str, x, y, o) {
     size = Math.max(min, size * (o.maxW / w));
     ctx.font = font(size, o.weight, o.serif);
     w = ctx.measureText(str).width;
+    if (w > o.maxW) {
+      const chars = Array.from(str);
+      while (chars.length > 1 && ctx.measureText(chars.join('') + '…').width > o.maxW) chars.pop();
+      str = chars.join('') + '…';
+      w = ctx.measureText(str).width;
+    }
   }
   ctx.fillStyle = o.color || C.ink;
   ctx.textAlign = o.align || 'left';
@@ -106,8 +115,15 @@ function wrap(ctx, str, maxW, size, weight, serif) {
     }
     const test = line + ch;
     if (ctx.measureText(test).width > maxW && line) {
-      if (punctNoStart.indexOf(ch) >= 0) {
-        line = test; // let closing punctuation hang rather than start a line
+      if (punctNoStart.indexOf(ch) >= 0 && line.length > 1) {
+        // closing punctuation may not start a line: carry the last character down with it
+        const chars = Array.from(line);
+        let carry = '';
+        // carry trailing no-start punctuation plus one ordinary character down with it
+        while (chars.length > 1 && punctNoStart.indexOf(chars[chars.length - 1]) >= 0) carry = chars.pop() + carry;
+        carry = chars.pop() + carry;
+        lines.push(chars.join(''));
+        line = carry + ch;
         return;
       }
       lines.push(line);
@@ -118,6 +134,12 @@ function wrap(ctx, str, maxW, size, weight, serif) {
   });
   if (line) lines.push(line);
   return lines;
+}
+
+/** Number of lines a paragraph needs (capped at maxLines). */
+function lineCount(ctx, str, maxW, size, weight, serif, maxLines) {
+  const n = wrap(ctx, str, maxW, size, weight, serif).length;
+  return maxLines ? Math.min(n, maxLines) : n;
 }
 
 /** Wrapped paragraph; returns its height. maxLines truncates with an ellipsis. */
@@ -144,18 +166,26 @@ function paragraph(ctx, str, x, y, maxW, lineH, o) {
 
 // ------------------------------------------------------------ backgrounds
 
-/** Rice paper: gradient, faint fibre dots, thin inset frame. */
+/** Rice paper: gradient and thin inset frame. High contrast: plain white and one black rule. */
 function paper(ctx, L) {
+  if (T.isHC()) {
+    ctx.fillStyle = C.paper;
+    ctx.fillRect(0, 0, L.W, L.H);
+    ctx.strokeStyle = C.frame1;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(L.u(5), L.u(5), L.W - L.u(10), L.H - L.u(10));
+    return;
+  }
   const g = ctx.createLinearGradient(0, 0, 0, L.H);
   g.addColorStop(0, C.paperTop);
   g.addColorStop(1, C.paperBottom);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, L.W, L.H);
   // frame (like the share card's double rule), kept off the safe area content
-  ctx.strokeStyle = 'rgba(42,33,26,0.30)';
+  ctx.strokeStyle = C.frame1;
   ctx.lineWidth = 2;
   ctx.strokeRect(L.u(5), L.u(5), L.W - L.u(10), L.H - L.u(10));
-  ctx.strokeStyle = 'rgba(42,33,26,0.14)';
+  ctx.strokeStyle = C.frame2;
   ctx.lineWidth = 1;
   ctx.strokeRect(L.u(9), L.u(9), L.W - L.u(18), L.H - L.u(18));
 }
@@ -252,11 +282,13 @@ function iconCheck(ctx, cx, cy, size, color) {
 
 /**
  * Button. o: {id, x, y, w, h, label, kind: primary|secondary|ghost|ad|danger,
- * disabled, sub (second line), size, serif}. Registers a hit area (grown to
- * the 48pt minimum around its centre). Ad buttons always show a play icon.
+ * disabled, sub (second line), size, serif, icon: 'play'|'check'}. Registers a
+ * hit area (grown to the 48pt minimum around its centre). Ad buttons always
+ * show a play icon.
  */
 function button(ctx, L, hits, o) {
-  const { x, y, w, h } = o;
+  const { x, y, w } = o;
+  const h = Math.max(o.h, T.minBtn());
   const kind = o.kind || 'secondary';
   const r = Math.min(L.u(12), h / 2);
   ctx.save();
@@ -264,14 +296,16 @@ function button(ctx, L, hits, o) {
   let fg = C.ink;
   if (kind === 'primary') {
     // soft drop shadow, cinnabar face, paper-gold inner rule
-    ctx.shadowColor = 'rgba(80,16,10,0.35)';
-    ctx.shadowOffsetY = 3;
-    ctx.shadowBlur = 8;
+    if (!T.isHC()) {
+      ctx.shadowColor = C.btnShadow;
+      ctx.shadowOffsetY = 3;
+      ctx.shadowBlur = 8;
+    }
     fillRR(ctx, x, y, w, h, r, C.seal);
     ctx.shadowColor = 'rgba(0,0,0,0)';
     ctx.shadowBlur = 0;
     ctx.shadowOffsetY = 0;
-    strokeRR(ctx, x + 3, y + 3, w - 6, h - 6, Math.max(2, r - 3), 'rgba(246,233,208,0.45)', 1.5);
+    strokeRR(ctx, x + 3, y + 3, w - 6, h - 6, Math.max(2, r - 3), T.isHC() ? '#FFFFFF' : 'rgba(246,233,208,0.45)', T.isHC() ? 2 : 1.5);
     fg = C.sealInk;
   } else if (kind === 'danger') {
     fillRR(ctx, x, y, w, h, r, C.tile);
@@ -293,17 +327,18 @@ function button(ctx, L, hits, o) {
   const serif = o.serif != null ? o.serif : kind === 'primary';
   const weight = kind === 'primary' ? 700 : 600;
   let iconW = 0;
-  const icon = kind === 'ad' || o.icon === 'play' ? L.u(22) : 0;
+  const icon = kind === 'ad' || o.icon === 'play' ? L.u(T.isLarge() ? 26 : 22) : 0;
   if (icon) iconW = icon + L.u(8);
   const maxW = w - L.u(16) - iconW;
   let tw = measure(ctx, o.label, size, weight, serif);
   const fit = tw > maxW ? Math.max(T.FS.body, size * (maxW / tw)) : size;
   tw = measure(ctx, o.label, fit, weight, serif);
   const cx0 = x + w / 2 - (tw + iconW) / 2;
-  const cy = y + h / 2 - (o.sub ? L.u(9) : 0);
+  const cy = y + h / 2 - (o.sub ? L.u(9) * T.K() : 0);
   if (icon) iconPlay(ctx, cx0 + icon / 2, cy, icon, kind === 'ad' ? C.goldDeep : fg, true);
-  text(ctx, o.label, cx0 + iconW, cy, { size: fit, weight, serif, color: fg });
-  if (o.sub) text(ctx, o.sub, x + w / 2, y + h / 2 + L.u(13), { size: T.FS.body, color: kind === 'primary' ? C.sealInk : C.sub, align: 'center', maxW: w - L.u(12) });
+  if (o.icon === 'check') iconCheck(ctx, cx0 - L.u(12), cy, L.u(14), fg);
+  text(ctx, o.label, cx0 + iconW, cy, { size: fit, weight, serif, color: fg, maxW: w - L.u(10) - iconW });
+  if (o.sub) text(ctx, o.sub, x + w / 2, y + h / 2 + L.u(13) * T.K(), { size: T.FS.body, color: kind === 'primary' ? C.sealInk : C.sub, align: 'center', maxW: w - L.u(12) });
   ctx.restore();
   if (o.id && !o.disabled) addTap(hits, L, o.id, x, y, w, h);
   return { x, y, w, h };
@@ -341,66 +376,95 @@ function link(ctx, L, hits, o) {
   if (o.id) addTap(hits, L, o.id, x - L.u(8), o.y - T.MIN_TAP / 2, total + L.u(16), T.MIN_TAP);
 }
 
-// ----------------------------------------------------------------- tiles
-
-/** Monogram portrait: a seal-like tile in the faction colour. */
-function monogram(ctx, x, y, size, ch, color, o) {
+/** Small outlined pill label (e.g. the 识人 badge). Returns its width. align: left (default) | center | right. */
+function pill(ctx, L, x, y, label, o) {
   o = o || {};
-  ctx.save();
-  if (o.dim) ctx.globalAlpha = 0.45;
-  fillRR(ctx, x, y, size, size, size * 0.12, color || C.sub);
-  strokeRR(ctx, x + size * 0.06, y + size * 0.06, size * 0.88, size * 0.88, size * 0.07, 'rgba(255,255,255,0.35)', Math.max(1, size / 40));
-  text(ctx, ch, x + size / 2, y + size / 2 + size * 0.03, { size: size * T.FS.mono, weight: 800, serif: true, color: '#FFFFFF', align: 'center' });
-  ctx.restore();
+  const size = o.size || T.FS.body;
+  const color = o.color || C.seal;
+  const tw = measure(ctx, label, size, 800, true);
+  const w = tw + L.u(16);
+  const h = size + L.u(10);
+  const px = o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x;
+  fillRR(ctx, px, y - h / 2, w, h, h / 2, o.fill || C.tintSeal);
+  strokeRR(ctx, px, y - h / 2, w, h, h / 2, color, T.isHC() ? 2 : 1.5);
+  text(ctx, label, px + w / 2, y + 1, { size, weight: 800, serif: true, color, align: 'center' });
+  return w;
 }
 
-/** Small tier stamp: 甲 / 乙 / 丙 in an outlined square. */
+// ----------------------------------------------------------------- tiles
+
+/**
+ * Seal portrait (CTO-D1): see seal.js. spec = {name|text, monogram, factionKey,
+ * tier, frame, inkText}; opts = {dim, full, dpr}.
+ */
+function seal(ctx, x, y, size, spec, opts) {
+  SealMod.draw(ctx, x, y, size, spec, opts);
+}
+
+/** Box size of the tier stamp for a requested size (grows with the text size). */
+function tierBox(size) {
+  return Math.max(size, Math.round(T.FS.body * 1.4));
+}
+
+/** Small tier stamp: 甲 / 乙 / 丙 in an outlined square. Returns its size. */
 function tierBadge(ctx, x, y, size, tier) {
   const label = T.TIER_LABEL[tier] || '';
   if (!label) return 0;
-  strokeRR(ctx, x, y, size, size, size * 0.2, C.seal, 1.5);
-  text(ctx, label, x + size / 2, y + size / 2 + 1, { size: T.FS.body, weight: 700, serif: true, color: C.seal, align: 'center' });
-  return size;
+  const b = tierBox(size);
+  strokeRR(ctx, x, y - (b - size) / 2, b, b, b * 0.2, C.seal, T.isHC() ? 2.5 : 1.5);
+  text(ctx, label, x + b / 2, y - (b - size) / 2 + b / 2 + 1, { size: T.FS.body, weight: 700, serif: true, color: C.seal, align: 'center' });
+  return b;
 }
 
-/** Role-fit chip with text and an icon (never colour alone). Returns its width. */
+/** Chip box for a fit label. */
+function fitChipSize(ctx, fit, o) {
+  o = o || {};
+  const label = T.FIT_LABEL[fit] || '';
+  const k = T.K();
+  const h = o.h || Math.round(26 * k);
+  const tw = measure(ctx, label, T.FS.body, 700, false);
+  return { w: tw + Math.round(30 * k), h };
+}
+
+/** Role-fit chip with text and an icon (never colour alone; 2pt outline in high contrast). Returns its width. */
 function fitChip(ctx, x, y, fit, o) {
   o = o || {};
   const label = T.FIT_LABEL[fit] || '';
   const color = T.FIT_COLOR[fit] || C.ok;
-  const h = o.h || 26;
-  const tw = measure(ctx, label, T.FS.body, 700, false);
-  const w = tw + 30;
-  fillRR(ctx, x, y, w, h, h / 2, fit === 'good' ? 'rgba(47,125,79,0.14)' : fit === 'bad' ? 'rgba(154,90,18,0.16)' : 'rgba(90,80,70,0.10)');
-  strokeRR(ctx, x, y, w, h, h / 2, color, 1.5);
-  const ix = x + 12;
+  const k = T.K();
+  const { w, h } = fitChipSize(ctx, fit, o);
+  fillRR(ctx, x, y, w, h, h / 2, fit === 'good' ? C.tintGood : fit === 'bad' ? C.tintBad : C.tintOk);
+  strokeRR(ctx, x, y, w, h, h / 2, color, T.isHC() ? 2.5 : 1.5);
+  const ix = x + 12 * k;
   const iy = y + h / 2;
-  if (fit === 'good') iconCheck(ctx, ix, iy, 10, color);
+  if (fit === 'good') iconCheck(ctx, ix, iy, 10 * k, color);
   else if (fit === 'bad') {
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.moveTo(ix, iy - 5);
-    ctx.lineTo(ix + 5.5, iy + 4.5);
-    ctx.lineTo(ix - 5.5, iy + 4.5);
+    ctx.moveTo(ix, iy - 5 * k);
+    ctx.lineTo(ix + 5.5 * k, iy + 4.5 * k);
+    ctx.lineTo(ix - 5.5 * k, iy + 4.5 * k);
     ctx.closePath();
     ctx.fill();
   } else {
     ctx.fillStyle = color;
-    ctx.fillRect(ix - 4, iy - 1, 8, 2);
+    ctx.fillRect(ix - 4 * k, iy - 1, 8 * k, 2);
   }
-  text(ctx, label, x + 20, y + h / 2 + 1, { size: T.FS.body, weight: 700, color });
+  text(ctx, label, x + 20 * k, y + h / 2 + 1, { size: T.FS.body, weight: 700, color });
   return w;
 }
 
-/** Ten-segment pip bar for a 1-10 stat. */
-function pips(ctx, x, y, w, value, color) {
+/** Ten-segment pip bar for a 1-10 stat. hidden = all empty (识人). Returns its height. */
+function pips(ctx, x, y, w, value, color, hidden) {
   const n = 10;
   const gap = 2;
+  const ph = Math.round(6 * T.K());
   const pw = (w - gap * (n - 1)) / n;
   for (let i = 0; i < n; i++) {
-    ctx.fillStyle = i < value ? color || C.ink : 'rgba(42,33,26,0.15)';
-    ctx.fillRect(x + i * (pw + gap), y, pw, 6);
+    ctx.fillStyle = !hidden && i < value ? color || C.ink : C.pipOff;
+    ctx.fillRect(x + i * (pw + gap), y, pw, ph);
   }
+  return ph;
 }
 
 /** A cinnabar seal stamp (rotated square). progress 0..1 animates the slam. */
@@ -418,14 +482,24 @@ function sealStamp(ctx, cx, cy, size, big, small, o) {
   ctx.globalAlpha = Math.min(1, p / 0.35) * (o.alpha == null ? 1 : o.alpha);
   fillRR(ctx, -size / 2, -size / 2, size, size, size * 0.07, C.seal);
   strokeRR(ctx, -size / 2 + size * 0.075, -size / 2 + size * 0.075, size * 0.85, size * 0.85, 0, C.sealInk, Math.max(1.5, size / 36));
+  // carved-seal glyphs are drawn one character at a time (decoration, like the seal portraits)
   const chars = Array.from(big);
+  const glyph = (ch, gx, gy, fs) => text(ctx, ch, gx, gy, { size: fs, weight: 900, serif: true, color: C.sealInk, align: 'center', minSize: 8 });
   if (chars.length <= 2) {
-    text(ctx, big, 0, small ? -size * 0.08 : 0, { size: Math.max(16, size * 0.36), weight: 900, serif: true, color: C.sealInk, align: 'center' });
+    const fs = Math.max(16, size * 0.36);
+    const gy = small ? -size * 0.08 : 0;
+    if (chars.length === 1) glyph(chars[0], 0, gy, fs);
+    else {
+      glyph(chars[0], -fs * 0.52, gy, fs);
+      glyph(chars[1], fs * 0.52, gy, fs);
+    }
   } else {
-    // four characters: two columns of two (一统 / 天下), like a carved seal
+    // four characters: two rows of two (一统 / 天下), like a carved seal
     const fs = Math.max(16, size * 0.27);
-    text(ctx, chars[0] + chars[1], 0, -size * 0.16, { size: fs, weight: 900, serif: true, color: C.sealInk, align: 'center' });
-    text(ctx, chars[2] + chars[3], 0, size * 0.14, { size: fs, weight: 900, serif: true, color: C.sealInk, align: 'center' });
+    glyph(chars[0], -fs * 0.52, -size * 0.16, fs);
+    glyph(chars[1], fs * 0.52, -size * 0.16, fs);
+    glyph(chars[2], -fs * 0.52, size * 0.14, fs);
+    glyph(chars[3], fs * 0.52, size * 0.14, fs);
   }
   if (small) text(ctx, small, 0, size * 0.28, { size: Math.max(T.FS.body, size * 0.18), weight: 700, serif: true, color: C.sealInk, align: 'center' });
   ctx.restore();
@@ -440,7 +514,7 @@ function skeleton(ctx, x, y, w, h, t, r) {
   ctx.restore();
 }
 
-/** Lacquered command token. face: {label, color} or null for the back. flip 0..1 = how far it has flipped. */
+/** Lacquered command token. face: {label, color, textColor?} or null for the back. flip 0..1 = how far it has flipped. */
 function token(ctx, x, y, w, h, face, flip, o) {
   o = o || {};
   const f = flip == null ? 1 : Math.max(0, Math.min(1, flip));
@@ -449,9 +523,11 @@ function token(ctx, x, y, w, h, face, flip, o) {
   ctx.save();
   ctx.translate(x + w / 2, y + h / 2);
   ctx.scale(sx, 1);
-  ctx.shadowColor = 'rgba(30,20,10,0.30)';
-  ctx.shadowOffsetY = 3;
-  ctx.shadowBlur = 6;
+  if (!T.isHC()) {
+    ctx.shadowColor = 'rgba(30,20,10,0.30)';
+    ctx.shadowOffsetY = 3;
+    ctx.shadowBlur = 6;
+  }
   fillRR(ctx, -w / 2, -h / 2, w, h, 10, showFace ? face.color || C.lacquer : C.lacquer);
   ctx.shadowColor = 'rgba(0,0,0,0)';
   ctx.shadowBlur = 0;
@@ -470,7 +546,7 @@ function token(ctx, x, y, w, h, face, flip, o) {
 function card(ctx, x, y, w, h, o) {
   o = o || {};
   const r = o.r != null ? o.r : 12;
-  if (o.shadow) {
+  if (o.shadow && !T.isHC()) {
     ctx.save();
     ctx.shadowColor = 'rgba(60,40,20,0.18)';
     ctx.shadowOffsetY = 2;
@@ -478,7 +554,42 @@ function card(ctx, x, y, w, h, o) {
     fillRR(ctx, x, y, w, h, r, o.fill || C.tile);
     ctx.restore();
   } else fillRR(ctx, x, y, w, h, r, o.fill || C.tile);
-  strokeRR(ctx, x, y, w, h, r, o.stroke || C.line, o.lw || 1.5);
+  strokeRR(ctx, x, y, w, h, r, o.stroke || C.line, o.lw || (T.isHC() ? 2 : 1.5));
+}
+
+// ---------------------------------------------------------------- scrolling
+
+function clampN(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+/**
+ * Vertical scroll region. area {x,y,w,h}, contentH in px, scroll = current
+ * offset, id = scroll hit id (also the scrollMax key). drawFn(scrollOffset)
+ * draws in content coordinates starting at area.y. Registers the drag area
+ * first (so later areas win), clips drawing and tap areas, draws a scrollbar.
+ * Returns {scroll, maxScroll}.
+ */
+function scrollBody(ctx, hits, area, contentH, scroll, id, drawFn) {
+  const maxScroll = Math.max(0, contentH - area.h);
+  hits.scrollMax[id] = maxScroll;
+  const sc = clampN(scroll || 0, 0, maxScroll);
+  hits.add(id, area.x, area.y, area.w, area.h);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(area.x - 4, area.y, area.w + 8, area.h);
+  ctx.clip();
+  hits.beginScroll(area, -sc);
+  ctx.translate(0, -sc);
+  drawFn(sc);
+  hits.endScroll();
+  ctx.restore();
+  if (maxScroll > 0) {
+    const bh = Math.max(24, area.h * (area.h / contentH));
+    const by = area.y + (area.h - bh) * (sc / maxScroll);
+    fillRR(ctx, area.x + area.w + 2, by, 3, bh, 1.5, T.isHC() ? C.ink : 'rgba(42,33,26,0.35)');
+  }
+  return { scroll: sc, maxScroll };
 }
 
 // ---------------------------------------------------------------- sheets
@@ -498,25 +609,27 @@ function sheet(ctx, L, hits, o) {
   const h = Math.min(o.h, L.H - L.navBottom);
   const y = L.H - h;
   ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.25)';
-  ctx.shadowBlur = 16;
-  ctx.shadowOffsetY = -2;
+  if (!T.isHC()) {
+    ctx.shadowColor = 'rgba(0,0,0,0.25)';
+    ctx.shadowBlur = 16;
+    ctx.shadowOffsetY = -2;
+  }
   rr(ctx, x, y, w, h + 20, L.u(20));
   ctx.fillStyle = C.sheet;
   ctx.fill();
   ctx.restore();
-  strokeRR(ctx, x, y, w, h + 20, L.u(20), C.line, 1.5);
+  strokeRR(ctx, x, y, w, h + 20, L.u(20), T.isHC() ? C.ink : C.line, T.isHC() ? 2.5 : 1.5);
   // swallow taps on the sheet body so they do not close it
   hits.add('sheet:body', x, y, w, h);
   // grabber
-  fillRR(ctx, L.cx - L.u(20), y + L.u(8), L.u(40), 4, 2, 'rgba(42,33,26,0.25)');
+  fillRR(ctx, L.cx - L.u(20), y + L.u(8), L.u(40), 4, 2, T.isHC() ? C.ink : 'rgba(42,33,26,0.25)');
   const inner = { x: x + L.pad, y: y + L.u(20), w: w - 2 * L.pad, h: h - L.u(20), sheetX: x, sheetY: y, sheetW: w, sheetH: h };
   if (o.title) {
-    text(ctx, o.title, inner.x, y + L.u(36), { size: T.FS.title, weight: 800, serif: true });
+    text(ctx, o.title, inner.x, y + L.u(36), { size: T.FS.title, weight: 800, serif: true, maxW: w - 2 * L.pad - L.u(56) });
   }
   iconClose(ctx, x + w - L.pad - L.u(12), y + L.u(36), L.u(16), C.sub);
   hits.add(closeId, x + w - L.u(60), y + L.u(10), L.u(60), T.MIN_TAP);
-  inner.top = y + L.u(60);
+  inner.top = y + L.u(T.isLarge() ? 68 : 60);
   inner.bottom = L.bottomEdge - L.bottomPad;
   return inner;
 }
@@ -529,6 +642,18 @@ function backButton(ctx, L, hits, label, id) {
   hits.add(id || 'back', L.back.x, L.back.y, L.back.w, L.back.h);
 }
 
+/**
+ * Banner slot (spec 12). The real banner is a native view placed by logic at
+ * L.bannerRect(); this only draws the grey QA bar when the ad module runs in
+ * stub mode (vm.banner.stub). Draws nothing otherwise.
+ */
+function bannerSlot(ctx, L, rect, stub) {
+  if (!stub || !rect) return;
+  fillRR(ctx, rect.x, rect.y, rect.w, rect.h, L.u(6), 'rgba(120,120,120,0.35)');
+  strokeRR(ctx, rect.x, rect.y, rect.w, rect.h, L.u(6), C.lineStrong, 1);
+  text(ctx, '广告位（测试）', rect.x + rect.w / 2, rect.y + rect.h / 2, { size: T.FS.body, color: C.ink, align: 'center' });
+}
+
 module.exports = {
   font,
   rr,
@@ -538,6 +663,7 @@ module.exports = {
   measure,
   spaced,
   wrap,
+  lineCount,
   paragraph,
   paper,
   iconBack,
@@ -548,14 +674,19 @@ module.exports = {
   button,
   addTap,
   link,
-  monogram,
+  pill,
+  seal,
+  tierBox,
   tierBadge,
+  fitChipSize,
   fitChip,
   pips,
   sealStamp,
   skeleton,
   token,
   card,
+  scrollBody,
   sheet,
   backButton,
+  bannerSlot,
 };

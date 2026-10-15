@@ -123,6 +123,27 @@ class Hits {
   }
 }
 
+/**
+ * Board rect (open data canvas) when a banner may be shown (spec 12): the
+ * canvas is shortened by the banner height plus a 24pt gap. banner =
+ * vm.banner ({show, reservedHeight}) or null. Logic sizes the open data canvas
+ * and the postMessage width/height from this, not from L.board.
+ */
+function boardRect(L, banner) {
+  const shift = banner && banner.show && banner.reservedHeight > 0 ? banner.reservedHeight + L.u(24) : 0;
+  const b = L.board;
+  return { x: b.x, y: b.y, w: b.w, h: Math.max(L.u(120), b.h - shift) };
+}
+
+/**
+ * Where the native banner goes: screen width - 32pt, centred, pinned above the
+ * bottom safe area. null when not shown.
+ */
+function bannerRect(L, banner) {
+  if (!banner || !banner.show || !(banner.reservedHeight > 0)) return null;
+  return { x: 16, y: L.bottomEdge - banner.reservedHeight, w: L.W - 32, h: banner.reservedHeight };
+}
+
 function hitTest(hitAreas, x, y) {
   for (let i = hitAreas.length - 1; i >= 0; i--) {
     const a = hitAreas[i];
@@ -131,4 +152,4 @@ function hitTest(hitAreas, x, y) {
   return null;
 }
 
-module.exports = { makeLayout, Hits, hitTest, clamp };
+module.exports = { makeLayout, boardRect, bannerRect, Hits, hitTest, clamp };

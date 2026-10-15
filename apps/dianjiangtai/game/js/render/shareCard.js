@@ -1,24 +1,30 @@
 /**
- * Result share card (spec 8.4, D4). 500 x 400 (5:4), drawn on an offscreen
- * canvas; look from docs/dianjiangtai/mockups/share-card/sanguo.png.
+ * Result share card (spec 8.4, 8.12, D4). 500 x 400 (5:4), drawn on an
+ * offscreen canvas; look from docs/dianjiangtai/mockups/share-card/sanguo.png.
  *
- *   render(canvas, vm)  sets canvas.width/height to 500x400 (x opts.pixelScale)
- *                       and draws; then logic calls wx.canvasToTempFilePath /
- *                       canvas.toTempFilePath for shareAppMessage imageUrl.
- *   draw(ctx, vm)       draws into a 500x400 logical area at the origin.
+ *   render(canvas, vm, opts) sets canvas.width/height to 500x400 (x opts.pixelScale)
+ *                       and draws; then logic calls canvas.toTempFilePath for
+ *                       shareAppMessage imageUrl. opts.saved = true adds the
+ *                       "微信小游戏 · 点将台" line (album card, use pixelScale 2).
+ *   draw(ctx, vm, opts) draws into a 500x400 logical area at the origin.
  *
  * vm: {
  *   mode: 'daily'|'free',            daily = NO general names (D4), free = names
  *   issueNo?: number,                daily only
+ *   variantLabel?: '识人'|null,       adds a small tag next to the issue number (daily)
  *   record: {w,l}, bandLabel: string,
- *   lineup: [{slotLabel, name, monogram, faction:'wei'|'shu'|'wu'|'qun',
- *             factionLabel, sub}],   5 entries; `sub` e.g. "蜀 · 赤壁" (free only)
+ *   lineup: [{slotLabel, name, monogram, faction:'wei'|'shu'|'wu'|'qun'|'jin',
+ *             factionLabel, sub, tier?}],   5 entries; `sub` e.g. "蜀 · 赤壁" (free only)
+ *                                          faction = the cell the general was DRAFTED from
  *   battles: boolean[12]             true = win
  * }
+ * The card always uses the standard look: large-text and high-contrast never
+ * apply (the mode is saved, forced to standard, and restored).
  * The corner tag on the mockup is not part of the shipped card.
  */
 
 const T = require('./theme');
+const SealMod = require('./seal');
 const { recordCn } = require('./fmt');
 
 const INK = '#2a211a';
@@ -59,10 +65,11 @@ function stampText(w) {
   return null;
 }
 
-function draw(ctx, vm) {
+function drawCard(ctx, vm, opts) {
   ctx.save();
   ctx.scale(500 / DW, 400 / DH);
   const daily = vm.mode === 'daily';
+  const saved = !!(opts && opts.saved);
 
   const g = ctx.createLinearGradient(0, 0, 0, DH);
   g.addColorStop(0, '#f1e6cc');
@@ -76,9 +83,21 @@ function draw(ctx, vm) {
   ctx.lineWidth = 1.5;
   ctx.strokeRect(34, 34, 932, 732);
 
-  t(ctx, daily ? '点将台 · 今日军令' + (vm.issueNo != null ? ' 第' + vm.issueNo + '期' : '') : '点将台 · 点将出征', 60, 124, 48, 700, INK);
+  const titleText = daily ? '点将台 · 今日军令' + (vm.issueNo != null ? ' 第' + vm.issueNo + '期' : '') : '点将台 · 点将出征';
+  t(ctx, titleText, 60, 124, 48, 700, INK);
+  if (daily && vm.variantLabel) {
+    ctx.font = f(48, 700);
+    const tw = ctx.measureText(titleText).width;
+    const px = 60 + tw + 20;
+    rr(ctx, px, 84, 112, 54, 27);
+    ctx.fillStyle = 'rgba(179,38,30,0.10)';
+    ctx.fill();
+    ctx.strokeStyle = ACCENT;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    t(ctx, vm.variantLabel, px + 56, 124, 34, 700, ACCENT, 'center');
+  }
   t(ctx, recordCn(vm.record), 500, 262, 116, 900, INK, 'center');
-  ctx.font = f(54, 700);
   t(ctx, '〔' + vm.bandLabel + '〕', 500, 332, 54, 700, ACCENT, 'center');
 
   const st = stampText(vm.record.w);
@@ -112,15 +131,12 @@ function draw(ctx, vm) {
     ctx.lineWidth = 2;
     ctx.stroke();
     t(ctx, e.slotLabel, cx, ty + 36, 26, 700, SUB, 'center');
-    rr(ctx, cx - 52, ty + 52, 104, 104, 10);
-    ctx.fillStyle = T.factionColor(e.faction);
-    ctx.fill();
     if (daily) {
-      // spoiler protection: faction tile only, no general name or monogram
-      t(ctx, e.factionLabel || T.FACTION_LABEL[e.faction] || '', cx, ty + 128, 66, 900, '#fff', 'center');
+      // spoiler protection: faction tile only (the cell it was drafted from), no general name or monogram
+      SealMod.draw(ctx, cx - 56, ty + 50, 112, { text: e.factionLabel || T.FACTION_LABEL[e.faction] || '', name: e.factionLabel || T.FACTION_LABEL[e.faction] || '', monogram: e.factionLabel || T.FACTION_LABEL[e.faction] || '', factionKey: e.faction, frame: 'plain' }, { full: true, noCache: true });
       t(ctx, '？', cx, ty + 208, 40, 700, SUB, 'center');
     } else {
-      t(ctx, e.monogram, cx, ty + 128, 66, 900, '#fff', 'center');
+      SealMod.draw(ctx, cx - 56, ty + 50, 112, { text: e.name, name: e.name, monogram: e.monogram, factionKey: e.faction, frame: e.tier || 'yi' }, { full: true, noCache: true });
       ctx.font = f(34, 700);
       const nameW = ctx.measureText(e.name).width;
       t(ctx, e.name, cx, ty + 196, nameW > tw - 12 ? Math.floor((34 * (tw - 12)) / nameW) : 34, 700, INK, 'center');
@@ -129,12 +145,13 @@ function draw(ctx, vm) {
   });
 
   // 12 battle dots
+  const dotsY = saved ? 646 : 650;
   const bs = vm.battles || [];
   const step = 880 / 12;
   bs.slice(0, 12).forEach((win, i) => {
     const cx = 60 + step * (i + 0.5);
     ctx.beginPath();
-    ctx.arc(cx, 650, 14, 0, Math.PI * 2);
+    ctx.arc(cx, dotsY, 14, 0, Math.PI * 2);
     if (win) {
       ctx.fillStyle = INK;
       ctx.fill();
@@ -144,9 +161,20 @@ function draw(ctx, vm) {
       ctx.stroke();
     }
   });
-  t(ctx, '12 战 · ● 胜  ○ 负', 500, 702, 22, 500, SUB, 'center');
-  t(ctx, daily ? '同一手令，你能一统天下吗？' : '你能点出一统天下的阵容吗？', 500, 748, 34, 700, INK, 'center');
+  t(ctx, '12 战 · ● 胜  ○ 负', 500, saved ? 692 : 702, 22, 500, SUB, 'center');
+  t(ctx, daily ? '同一手令，你能一统天下吗？' : '你能点出一统天下的阵容吗？', 500, saved ? 732 : 748, 34, 700, INK, 'center');
+  if (saved) t(ctx, '微信小游戏 · 点将台', 500, 762, 22, 500, SUB, 'center');
   ctx.restore();
+}
+
+function draw(ctx, vm, opts) {
+  const prev = T.getMode();
+  T.setMode(null); // the card is always the standard look
+  try {
+    drawCard(ctx, vm, opts);
+  } finally {
+    T.setMode(prev);
+  }
 }
 
 function render(canvas, vm, opts) {
@@ -156,7 +184,7 @@ function render(canvas, vm, opts) {
   const ctx = canvas.getContext('2d');
   ctx.save();
   ctx.scale(k, k);
-  draw(ctx, vm);
+  draw(ctx, vm, opts);
   ctx.restore();
   return canvas;
 }
