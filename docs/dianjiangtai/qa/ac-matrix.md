@@ -1,94 +1,154 @@
-# 点将台 Phase 1: AC matrix (QA)
+# 点将台 v1: AC matrix (QA)
 
-Build under test: `dianjiangtai/phase1` @ 8171302. Spec: `docs/dianjiangtai/spec.md` section 20. Tuning verdicts use the founder override (12-0 really hard), not the old 7.5 numbers.
-Paths: G = `apps/dianjiangtai/game/tests/`, C = `apps/dianjiangtai/cloudfunctions/tests/`. Short names: core-basic, core-sim, modules, smoke, render, render.opendata (G); submit, board, challenge, daily, group, security, cleanup, track, bank (C). New QA files: G `qa-content`, `qa-tuning`; C `qa-trust`, `qa-analytics`.
-Todo-flagged QA tests (`{todo}`) assert the correct behaviour and report as TODO, not failure, while the bug exists.
+Build under test: `dianjiangtai/v1` @ f2a7d66. Spec: `docs/dianjiangtai/spec.md` section 20 (AC 1-95), decisions D1-D16, C1-C5.
+Paths: G = `apps/dianjiangtai/game/tests/`, C = `apps/dianjiangtai/cloudfunctions/tests/`. New QA files this pass: G `qa-v1`, C `qa-v1` (earlier: G `qa-content`, `qa-tuning`; C `qa-trust`, `qa-analytics`).
+Verdicts: PASS / FAIL / PARTIAL / DEVICE-deferred (needs a real device or the console; node-side part passes where noted).
+
+## Commands run (all at f2a7d66 + QA additions)
+
+| Command | Result |
+|---|---|
+| `cd game && node --test tests/*.test.js` | 251 pass, 0 fail (before the new qa-v1 file; qa-v1 adds 7, all pass) |
+| `cd cloudfunctions && npm test` (runs sync-core first) | 148 pass, 0 fail (qa-v1 adds 3 pass + 1 todo: AC 95) |
+| `npm run simstats -- --check` (100k seeds, content 2 / config 2) | exit 0, "all targets met" (random 0.00%, naive 0.17%, greedy 0.56%, sensible 0.33%, median 7, 10-11 band 8.90%, 0-1 band 0.55%, events 24.1%) |
+| `QA_SEEDS=100000 node --test --test-name-pattern="content 2" tests/qa-tuning.test.js` (own seed namespace) | 5 pass. sensible 12-0 0.378%, median 7, greedy 0.553%, naive 0.186%, random 0%, 10-11 8.77%, 0-1 0.52% |
+| `tools/preview`: `SIZES=320x568,430x932 MODES=default,large,hc node render.js` | 834 PNGs; contact sheets viewed (see UI notes) |
+| Main package size (qa-v1 G, packOptions.ignore applied) | 582,392 bytes (limit 4 MB); tests, tools, node_modules ignored; no image/font files in the app |
+
+Note: the cloud-function tests need `core/` copied into each function (`npm test` does it; plain `node --test` fails the drift check with "missing directory .../core"). That is by design but easy to trip over.
+
+## Matrix
 
 | AC | Short text | Verdict | Evidence | Notes |
 |---|---|---|---|---|
-| 1 | Free run completable, 出征 after round 5 | PASS | smoke "a full free run plays headlessly"; core-sim "a legal run replays" | |
-| 2 | Pool = undrafted, faction + era | PASS | core-sim "pools list only undrafted generals" | |
-| 3 | No duplicate general / slot | PASS | core-sim "replay rejects: ... duplicate general, duplicate slot" | |
-| 4 | 撤回 restores pool and slot | PASS | core-sim "undo restores the pool and the slot" | |
-| 5 | Sheet shows 5 stats, chips with S_r | PASS | core-basic "role scores match", "fit chips"; PNG draft__selecting (320x568) | |
-| 6 | Tier never changes odds | PASS | core-basic "sheet cells are uniform ... (AC 6)"; sheet.js reads no tier; simstats max deviation 1.12% | |
-| 7 | Content valid, equals Appendix B | PASS | qa-content "Appendix B (parsed from spec.md) equals generals.v1.json exactly" (32 generals, every stat/era/tier/role/bond, 77 entries) | |
-| 8 | Free re-spin once per dimension | PASS | core-sim "free re-spin is once per dimension per run" | |
-| 9 | Ad re-spin free only, max 2 | PASS | core-sim "ad re-spins: free play only"; smoke "daily and challenge never offer ad re-spins" | |
-| 10 | 此令无可换 when no alternative | PARTIAL | PNG draft__respin_none shows disabled button | Hint text "此令无可换" not asserted in any test |
-| 11 | Determinism, 1000 replays, client = cloud | PASS | core-sim "same seed, same actions ... 1000 replays"; cloud tests run the real core | |
-| 12 | Record sums to 12, bands correct | PASS | core-sim "records sum to 12 and the band matches"; qa-tuning band-uniqueness check | |
-| 13 | Monotonicity (events off) | PASS | core-sim "monotonicity", "a stronger lineup never does worse" | |
-| 14 | Events: conditions, once, named | accepted by CTO (pMin 0.672, spec being amended) | core-sim "events: fire only under their conditions" | Passes against config pMin 0.672; spec 7.2 says p>=0.35 (qa-tuning todo). Owner: spec |
-| 15 | simstats within bands; CI gate | PARTIAL | `npm run simstats -- --check` exit 0 "all targets met"; qa-tuning re-measures on own seeds | Passes under the founder override. Original text (random mean 4.5-5.5, greedy mean 8-9, optimal 12-0 on 95% of free seeds) not met: random 1.91, naive 5.47, greedy 7.30, optimal 1.4% (soft NOTEs by design). Owner: spec (update AC text) |
-| 16 | 复盘 drawable, >= player, < 300 ms | PASS | core-sim "复盘 search equals brute force"; simstats client max 245.8 ms node; 7.07% heavy sets go to getReplay | Real Android timing: DEVICE: deferred to spike |
-| 17 | Reveal 12 rows <= 10 s; skip same verdict | PASS | smoke "reveal plays itself out in about 9 s ... same verdict as skipping" | |
-| 18 | No per-player adjustment | PASS | core-sim "same seed ... mode does not matter", "battle and event randomness never depend on the lineup"; no ad/run-count input in core | |
-| 19 | getDaily identical, no seed/best/battle | PASS | daily "getDaily: identical rounds/issueNo ... no seed/best/battle"; modules "api mock" | Residual risk: rounds is a pure function of a 32-bit seed, so a determined client could brute-force the seed from rounds (design limit; spec 21 progressive delivery) |
-| 20 | Date key from server UTC+8 | PASS | daily "date key comes from core date.js even when runtime TZ is UTC"; modules "Beijing day roll" | |
-| 21 | Daily gates satisfied | accepted by CTO (gate window, spec being amended) | qa-tuning "accepted daily seeds: optimal 12-0 ..." passes; todo "daily gate window" | Gate window greedy is [0.25%, 20%] (spec 0.5-5%). Scan of 12 accepted seeds: noisy-greedy 12-0 rate 0.75%-14.3%. Deterministic greedy/sensible/naive score 0% 12-0 on them, random 0.02%. Also no `relaxed` seed is ever published (live failure throws DAILY_UNAVAILABLE), differing from spec 5.2. Owner: spec + minigame-dev |
-| 22 | One ranked daily per openid | PASS | submit "second distinct ranked run -> ALREADY_PLAYED", "same clientRunId returns the stored result"; qa-trust "ONE ranked daily ... through a challenge" | |
-| 23 | Grace window 23:59 -> 00:10 ok, 00:31 late | PASS | submit "started 23:59 ... 00:31 -> LATE_SUBMIT"; qa-trust exact boundary (00:29:59.999 ranked, 00:30:00.000 LATE) | |
-| 24 | Foreground after midnight refreshes card | PASS | modules "Beijing day roll: dateKey follows the server offset" | |
-| 25 | In-progress daily survives relaunch | PASS | smoke "in-progress run survives relaunch at the same round" | |
-| 26 | submitRun INVALID_ACTIONS cases | PASS | submit "rejects with INVALID_ACTIONS and persists nothing"; challenge "answers are validated like any run" | |
-| 27 | Server record authoritative; mismatch flag | PASS | submit "tampered clientRecord sets mismatch=true" | |
-| 28 | All collections deny client access | PASS | security "security rules deny all ..."; qa-trust deny-all check | Applying the rules in the console: DEVICE: deferred to spike |
-| 29 | Sharing grants nothing | PASS | qa-content "every shareAppMessage call is in share.js, no callback"; smoke "sharing: ... grants nothing"; ads.js has no share path | |
-| 30 | Share only on explicit tap / capsule | PASS | qa-content share code search (3 tap handlers + capsule menu) | |
-| 31 | Daily card hides names, free shows | PASS | render "daily share card shows no general names; free card shows them"; PNGs shareCard/daily_12_0.png vs free_10_2.png; qa-content titles | Static-image fallback on render failure: code path in share.js, not exercised by a test |
-| 32 | Challenge query only c=; lineup hidden until answered | PASS | challenge "challenge lineup is withheld until the recipient has answered"; modules "share: titles, queries" | |
-| 33 | Daily-seed challenge counts as daily / friendly | PASS | challenge tests "today's daily seed ...", "already played", "past date", "without startRun" | See BUG-1: the friendly path leaks the daily optimum |
-| 34 | Expired / missing / own states | PASS | challenge "own challenge", "expired, missing and malformed" | |
-| 35 | Group entry: getGroupEnterInfo + joinGroup; no getShareInfo | PASS | smoke "group card: ticket present ...", "code search" | joinGroup trusts `event.groupData.data`; platform CloudID decryption: DEVICE: deferred to spike (a hand-made plain object is accepted server-side; low impact, needs the victim's openGId) |
-| 36 | KV {w,l} after privacy; free never; old keys removed | PASS | smoke "daily run through the mock server ... marker written", "marker write refused"; privacy.js writes `JSON.stringify({w,l})`, removes keys older than 7 days | |
-| 37 | Group board ranking, explainer without group | PASS | smoke "boards: no group context shows the explainer"; render.opendata "rank order depends on server rows only" | |
-| 38 | Lineups hidden until ranked result | PASS | board "lineups (x) only for a caller with a ranked result"; qa-trust friendly-run caller gets no x | |
-| 39 | Board states render and don't block | PASS | render "every screen x state x size draws"; PNG _contact_board (all states, 320x568) | |
-| 40 | Reward only on isEnded === true | PASS | modules "reward only on isEnded === true"; smoke "closing the stub early grants nothing" | |
-| 41 | D6 no-fill rule | PASS | modules "error 1004 and onLoad useFallbackSharePage follow the D6 rule"; smoke "no-fill grants once per run per placement" | |
-| 42 | Interstitial caps | PASS | modules "interstitial: caps ..." | |
-| 43 | Stub ads logged stub=true; production stub off | PARTIAL | modules "stub ads"; qa-content flag test | `build-config.js` ships `stubAds: true` (correct for the prototype, D5). The release step must flip it. Owner: release |
-| 44 | Capsule not overlapped; primaries bottom 40% | PASS | render "AC 44" (2 tests); PNGs at 320x568 and 430x932 | |
-| 45 | Targets >= 48, text >= 16, record >= 40, no clipping | PASS | render "AC 45" tests; re-inspected (fab330a) 320x568 and 375x667 `_contact_home.png`, 320x568 `_contact_challenge.png`, `_contact_result.png` | BUG-2 fixed: home sub-line no longer overlaps the button. 玩法 sheet token now shows "时" inside its tile, no overflow. Result screen at 320x568 still shows the share row partly behind 再来一局 until scrolled (scrollable, minor) |
-| 46 | No prompt at launch / free run | PASS | smoke "boots to home ... no authorization prompts", "complete game is playable with every authorization refused" | |
-| 47 | Offline: free play works; others show 重试 | PASS | smoke "daily: offline at the end saves the lineup"; PNG home__offline | Real network loss: DEVICE: deferred to spike |
-| 48 | Main package <= 4 MB, total <= 30 MB | PASS | qa-content "main package ... <= 4 MB" (under 1 MB) | No CI wiring exists; this test is the check |
-| 49 | Mute persists, silences audio | PASS | smoke "mute persists and is applied" | Real audio: DEVICE: deferred to spike |
-| 50 | Forbidden terms on all user-visible strings | PASS | qa-content forbidden scan (all game files except the provenance field), share titles, content texts | Content `source` fields contain 三国志 (internal provenance, never rendered, as in spec 3.5 example); exempted deliberately |
-| 51 | Every 15 event fires once with props | PARTIAL | modules "analytics: whitelist, common props, batches"; all 17 client events have emit sites (grep) | No single scripted session capturing every payload |
-| 52 | 4 go/kill metrics computable | PASS | qa-analytics "AC 52" (one query function per metric, scripted data) | See BUG-3 |
-| 53 | genDaily within timeout, both paths | PARTIAL | daily "live loop honours the 70% budget", "every function sets TZ and a timeout"; simstats p99 x 50 = 13.2 s vs 10 s timeout | Live path almost never succeeds (0.5% acceptance, 22% in 50 tries): bank is mandatory. Worst case throws instead of storing a relaxed seed. Timeout value needs the spike |
-| 54 | Bank use, re-verify, low-bank warn, no bank in repo | accepted by CTO (warn at 10) | daily "bank is the primary path", bank "prepare-bank"; qa-trust no bank file | Low-bank warning threshold is 10 in code (spec < 7; config.daily.bankLowWarn=7 is unused). Owner: backend |
-| 55 | gateCheck identical in tool and function | PASS | core-sim "gateCheck is deterministic"; qa-tuning reproducibility; security drift check | |
-| 56 | Tampered KV never changes rank | PASS | render.opendata AC 56a/b/c; board "rank order equals server order" | |
-| 57 | 180-day retention | PASS | cleanup tests | Privacy guide text is not in the repo (release) |
-| 58 | No portrait assets | PASS | core-basic "no portrait image files"; qa-content package test | |
-| 59 | 临阵生变 neutral; release review recorded | accepted by CTO (release writes the checklist before submission) | core-basic "texts contain no insulting wavering lines"; qa-content extended wordlist | `docs/dianjiangtai/release-checklist.md` does not exist, so the recorded review is missing. Owner: release |
-| 60 | Raw openids never reach client | PASS | board "never returns raw openids"; qa-trust "AC 60 sweep" (getDaily, joinGroup, submitRun, challenge, replay, board, track); h differs per date; events hold no groupRef | odc.js posts only the server board message |
-| 61 | getBoard cap, groupRef membership, x | PASS | board tests; qa-trust "non-member, made-up groupRef, member of another group" | |
-| 62 | joinGroup idempotent, opaque ref, errors | PASS | group tests | |
-| 63 | Authorization optional, never blocks | PASS | smoke "privacy refused", "scope refused", "marker write refused" | Real prompts: DEVICE: deferred to spike |
-| 64 | disableFallbackSharePage; 1004 path | PASS | modules ads tests; smoke code search and wxad_fallback_share | |
-| 65 | Interstitial 2001-2003 silent | PASS | modules "interstitial: ... 2001-2003 skipped silently" | |
-| 66 | TZ=UTC / unset date key; config TZ + timeout | PASS | core-basic TZ tests; daily "every function sets TZ=Asia/Shanghai and a timeout"; qa-trust | |
-| 67 | Idempotency by deterministic _id | PASS | daily "double-fire", "races the lazy getDaily path"; submit "two concurrent distinct runs" | Fake DB models duplicate _id; real transactions: DEVICE: deferred to spike |
-| 68 | wx.reportEvent never used | PASS | smoke "code search" | |
+| 1 | Free run completable, 出征 after round 5 | PASS | G smoke "a full free run plays headlessly"; PNG draft readyToMarch | |
+| 2 | Pool = undrafted, faction + era, cap 8 | PASS | G core-rules-v2 "pool cap", "pool = first 8 undrafted" | |
+| 3 | No duplicate general / slot | PASS | G core-sim replay rejects; core-rules-v2 "person drafted at most once" | |
+| 4 | 撤回 restores pool and slot | PASS | G core-sim "undo restores"; core-rules-v2 "undo restores it exactly" | |
+| 5 | Sheet shows 5 stats, fit chips with S_r | PASS | G core-basic; PNG draft__flipped, placed (chip text 适任/可用/错位) | |
+| 6 | Tier never changes odds | PASS | G core-rules-v2 "cells uniform ... independent of tier"; simstats max deviation 1.12% | |
+| 7 | v1 content intact; v2 valid; forbidden terms | PASS | G qa-content, core-content-v2, qa-v1 (own list incl. 传说/稀有) | The dev qa-content scan omitted 传说/稀有; qa-v1 closes that |
+| 8 | Free re-spin once per dimension | PASS | G core-sim "free re-spin is once per dimension" | |
+| 9 | Ad re-spin only in free play, max 2 | PASS | G core-sim "ad re-spins: free play only"; smoke | |
+| 10 | 此令无可换 when no alternative | PARTIAL | PNG draft__respin_none (button disabled); controller.js shows toast "此令无可换" | The text is a toast on tap, not on the disabled button itself; no test asserts the string. Owner: minigame-dev (add a test) |
+| 11 | Determinism, 1000 replays, client = cloud | PASS | G core-rules-v2 "determinism over 1000 replays"; C core-consistency | |
+| 12 | Record sums to 12, band table | PASS | G core-rules-v2; qa-tuning band uniqueness | |
+| 13 | Monotonicity | PASS | G core-rules-v2 "stronger lineup never does worse" (v2) and core-sim (v1) | |
+| 14 | Events conditions, once, named | PASS | G core-sim events; spec 7.2 now amended to pMin 0.672 | Earlier deviation resolved in the spec |
+| 15 | Tuning targets (D15) + CI gate | PASS | simstats --check exit 0; QA own 100k sample (above) | Soft NOTEs (random mean 1.50, naive 6.05, greedy 7.66, optimal 1.97%) are non-gating by design. Margins thin: naive 0.17-0.19% vs < 0.2%, sensible 12-0 0.33-0.38% vs <= 0.5% |
+| 16 | 复盘 drawable, >= player, < 300 ms | PASS | G core-rules-v2 "复盘 equals brute force"; simstats client max 94 ms | |
+| 17 | Reveal 12 rows <= 10 s, skip identical | PASS | controller REVEAL_MS 700 x 12 = 8.4 s (+0.3 s); `result:revealSkip` routes to completeReveal; record comes from the server | No dedicated timing test (code reading + smoke) |
+| 18 | Outcome independent of ads / mode / user | PASS | G core-sim "battle and event randomness never depend on the lineup"; core-rules-v2 "mode does not matter" | |
+| 19 | Same issue and rounds for all users, no battle stream / best | PASS | C progressive "captured payload test"; C qa-v1 AC 86 | |
+| 20 | Date key from server UTC+8 | PASS | G core-basic TZ tests; C qa-trust | |
+| 21 | Daily gates; relaxed always false | PASS | G qa-tuning "accepted daily seeds ... 12-0 on 100%"; daily.js forces `relaxed:false` | The cloud harness patches the gate (accept-all) for speed, so cloud tests do not exercise real gates; the real gate is exercised in G |
+| 22 | One ranked daily per openid | PASS | C submit, qa-trust "ONE ranked daily per openid" | |
+| 23 | Grace window to 00:30 BJT, LATE_SUBMIT | PASS | C qa-trust "midnight grace boundary is exact" | |
+| 24 | Foreground after midnight refreshes home card | PARTIAL | controller.js onShow refreshes when the dateKey changed and screen is home | No test exercises it. Owner: minigame-dev (add a smoke test) |
+| 25 | In-progress daily survives relaunch | PASS | G smoke, client-v1 "kill and relaunch mid-run" | |
+| 26 | submitRun INVALID_ACTIONS cases | PASS | C submit, progressive | |
+| 27 | Server record authoritative, mismatch flag | PASS | C submit, features "mismatch" | |
+| 28 | All collections deny-all | PASS | C security, features "rules: every new collection is deny-all", qa-v1 (own check of every rules.json entry) | Applying the rules in the console: DEVICE-deferred |
+| 29 | Sharing grants nothing | PASS | G qa-content share code search; smoke | |
+| 30 | Share only on tap or capsule | PASS | G qa-content | |
+| 31 | Daily card hides names, free shows | PASS | G render share card tests; client-v1 album "daily card carries no general names" | |
+| 32 | Challenge: c= only, lineup hidden, daily lock | PASS | C challenge, spoiler, qa-trust "regression BUG-1 chain" | |
+| 33 | Challenge on today's daily counts / friendly | PASS | C challenge, progressive "counts as the daily" | |
+| 34 | Expired / missing / own states | PASS | C challenge | |
+| 35 | Group entry via getGroupEnterInfo + joinGroup | PASS | G smoke, qa-v1 (no getShareInfo anywhere) | CloudID decryption: DEVICE-deferred |
+| 36 | KV {w,l} after privacy; old keys removed | PASS | G smoke daily/marker tests | |
+| 37 | Group board ranking, explainer | PASS | C board; G render.opendata | |
+| 38 | Lineups hidden until ranked result | PASS | C board, qa-trust | |
+| 39 | Board states render, never block | PASS | G render; PNG _contact_board (320x568 and 430x932, default/large/hc) | |
+| 40 | Reward only on isEnded === true | PASS | G modules, smoke | |
+| 41 | D6 no-fill rule | PASS | G modules | |
+| 42 | Interstitial caps | PASS | G modules; client-units "never-in rules stay" | |
+| 43 | Stub ads logged; production stub off | PARTIAL | G modules, qa-content flag | `build-config.js` ships `stubAds: true`. Release step must flip it. Owner: release |
+| 44 | Capsule not overlapped; primaries bottom 40% | PASS | G render "AC 44"; PNGs | |
+| 45 | Targets >= 48, text >= 16, no clipping | PASS | G render AC 45; contact sheets at 320x568 and 430x932 viewed | Large mode at 320x568 scrolls (draft awaitFlip pushes 我的阵容 below the fold; the draft is scrollable, acceptable) |
+| 46 | No prompt at launch / free run | PASS | G smoke | |
+| 47 | Offline: free works, others 重试 | PASS | G smoke, client-v1 offline tests | Real network loss: DEVICE-deferred |
+| 48 | Main package <= 4 MB incl. odc | PASS | G qa-v1: 582,392 bytes, dev folders ignored | Display-font subpackages: none exist in the repo (system fonts only); no CI wiring beyond the test |
+| 49 | Mute persists, silences audio | PASS | G smoke | Real audio: DEVICE-deferred |
+| 50 | Forbidden terms on all user-visible strings | PASS | G qa-v1 (full AC 7+50 list over roster, statNotes, appearance notes, all shipped files), qa-content | `source` fields (三国志 provenance) exempt and never rendered. Checker word lists in core/content.js, core/validate.js, js/render/widgets.js contain the words by design |
+| 51 | Every event fires once, sessionId top-level | PARTIAL | G modules analytics; client-v1 "analytics: v1 events"; C qa-analytics sessionId | No single scripted session captures every payload of the spec's scenario |
+| 52 | KPIs computable from events | PASS | C qa-analytics | |
+| 53 | genDaily timeout, both paths, DAILY_UNAVAILABLE | PARTIAL | C daily tests (live loop budget, TZ + timeout config, worst case) | Timeout value comes from the device spike: DEVICE-deferred. Live path accepts ~0.5% (24% in 50 tries): bank is mandatory |
+| 54 | Bank use, re-verify, low-bank warn < 10, no bank in repo | PASS | C daily, bank, qa-trust | |
+| 55 | gateCheck identical in tool and function | PASS | G core-rules-v2 "gate ... reproducible"; qa-tuning | |
+| 56 | Tampered KV never changes rank | PASS | G render.opendata AC 56a/b/c; C board "rank order equals server order" | |
+| 57 | 180-day retention | PARTIAL | C cleanup, features "180-day retention covers the v1 collections" | "Privacy guide states 180 days": no such text in the repo. Owner: release |
+| 58 | No portrait assets | PASS | G qa-v1 (no image or font file anywhere in apps/dianjiangtai) | |
+| 59 | 临阵生变 neutral; review recorded | PARTIAL | G core-content-v2 wavering test, qa-content | `docs/dianjiangtai/release-checklist.md` still missing. Owner: release |
+| 60 | No openids to client | PASS | C qa-trust "AC 60 sweep" (getDaily, joinGroup, getRound, submitRun, getHistory, challenge, replay, board, track); features "responses never contain openids"; G integration | |
+| 61 | getBoard cap, groupRef membership, x | PASS | C board, qa-trust | |
+| 62 | joinGroup idempotent, opaque ref | PASS | C group | |
+| 63 | Authorization optional | PASS | G smoke | Real prompts: DEVICE-deferred |
+| 64 | disableFallbackSharePage; 1004 path | PASS | G modules; qa-v1 code search | |
+| 65 | Interstitial 2001-2003 silent | PASS | G modules | |
+| 66 | TZ=UTC / unset; config TZ + timeout | PASS | G core-basic; C daily, qa-trust, features (new functions) | |
+| 67 | Idempotency by deterministic _id | PASS | C daily, submit | Real transactions: DEVICE-deferred |
+| 68 | wx.reportEvent never used | PASS | G qa-v1 code search | |
+| 69 | contentVersion 2 validation (120 generals) | PASS | G core-content-v2 (parses Appendix C, 21 cells, 273 entries); qa-v1 independent counts | |
+| 70 | Person drafted once | PASS | G core-rules-v2 "赵云 ... 已点将"; C submit/progressive (duplicate via different cells rejected) | |
+| 71 | Cohesion from drafted cell faction | PASS | G core-rules-v2; C cv2 `lineupFac` | |
+| 72 | Pool cap, client = server, v1 regression | PASS | G core-rules-v2 "v1 regression"; C core-consistency, cv2 | |
+| 73 | 16 bonds, +0.04, M <= 1.25 | PASS | G core-rules-v2 | Rates per simstats: 11 of 16 bonds fire < 0.05% in sensible play (龙凤, 西凉, 下邳, 河北, 二士, 平吴, 河内, 父子同袍 关, 承业 at 0.00%). Reported, not a failure; consider whether bonds feel invisible. Owner: product-ux |
+| 74 | Re-tuning keeps D15; bank >= 60 seeds | PARTIAL | simstats exit 0 incl. arguability (刘备 34.5% of optimal lineups, <= 60%); 32 originals diff in G core-content-v2 and qa-v1 | The prepared contentVersion 2 bank (>= 60 accepted seeds) is not in the repo by AC 54, so it cannot be verified here. Owner: backend/release (run prepare-bank, confirm count) |
+| 75 | 复盘 p99 < 300 ms below heavySets; server above | PASS | simstats: client p99 80 ms; heavy (83.5% of searches) go to getReplay p99 408 ms, worst case 555 ms << 10 s | Most 复盘 are served by the cloud (getReplay first). Fine functionally; costs a cloud call per replay |
+| 76 | Seal portraits everywhere, offline, font fallback | PARTIAL | G render.v1 seal tests (all factions x tiers x lengths, 晋 ink on 月白, plain frame hidden); seal gallery PNG viewed | Display-font subpackage failure fallback and no-network check: DEVICE-deferred (no font subpackage exists; system font only). Readability: see UI notes |
+| 77 | variant shiren exactly on Sundays, 4 functions | PASS | G core-rules-v2 (3 years, TZ); C qa-v1 (getDaily, getBoard, getChallenge, getHistory on Sunday vs Tuesday) | |
+| 78 | 识人 hides all stats before the verdict | PASS | G render.v1 AC 78 (3 tests), client-v1 Sunday flow, core-rules-v2 "识人 never changes the sim" | |
+| 79 | Challenge on 识人 played hidden, label | PASS | G client-v1 "shiren challenge ..."; PNG home available_shiren | |
+| 80 | Streak rules | PASS | C streak-history (all listed cases) | |
+| 81 | Streak shown from 2, no grants, no pressure copy, no notifications | PASS | G client-units "streak text only from 2, no reward words"; C streak-history "no streak-linked grants"; copy grep: no urgency wording | |
+| 82 | 往期 list, best only after D+1 00:30 | PASS | C streak-history (00:29:59 hidden, 00:30:00 shown); G client-v1; PNG history | |
+| 83 | Save to album at point of use | PASS | G client-v1 (nothing before tap, success, denied sheet with 去设置, no re-prompt, privacy 104) | Privacy-guide entry 相册（仅写入）: release check, DEVICE-deferred |
+| 84 | Subscribe hidden when unconfigured | PASS | G client-v1 (3 tests), client-units; C features | |
+| 85 | One subscribe send to owner | PASS | C features (single, parallel, failure, 2 s cap) | Real send: DEVICE-deferred |
+| 86 | Progressive tokens | PASS | C progressive; qa-v1 (own captured-payload test, daily-as-challenge, skip-ahead refused, no seed/optimum/battle keys); core-consistency | |
+| 87 | Offline mid-daily: 令牌传递中断 + 重试 | PASS | G client-v1 "progressive daily offline" | |
+| 88 | Anomaly flags observe-only | PASS | C features (one per run+kind, suspect >= 5, roll-up, ALERT) | |
+| 89 | 大字模式 sizes, every screen | PASS | G render AC 89 (buttons >= 56 tall), client-v1 display modes; PNGs at 320x568 and 430x932 viewed (home, draft, result, history, board) | Board row in large mode at 430x932: band label and seal chips nearly touch (tight, not clipped). Owner: frontend-ui (cosmetic) |
+| 90 | 高对比度 contrast tests | PASS | G render.v1 AC 90 (4.5:1 default, 7:1 hc, 3:1 non-text) | |
+| 91 | Banner off by default, board-only | PASS | G client-units, client-v1, render.v1 AC 91 | |
+| 92 | Interstitial config, clamping | PASS | G client-units, client-v1 | |
+| 93 | v1 events fire with props | PASS | G client-v1 "analytics: v1 events" | |
+| 94 | app_config missing: fully playable | PASS | G client-v1; C features | |
+| 95 | Release pack + TZ/timeout + deny-all for new collections | FAIL | C qa-v1 AC 95 (todo): no Founder Handoff or device-pass checklist in docs/dianjiangtai; C features confirms TZ + timeout + deny-all for the new functions/collections | Missing deliverable. Owner: release (§19 H1-H9 handoff, §17.1 device checklist with empty result column) |
 
-## Re-verification at fab330a
+## Decisions and corrections
 
-Counts: PASS 59, FAIL 0, PARTIAL 5 (ACs 10, 15, 43, 51, 53), accepted by CTO 4 (ACs 14, 21, 54, 59), DEVICE-only parts noted in rows. (The first pass miscounted PASS as 51; correct first-pass figures were 58 PASS, 1 FAIL, 9 PARTIAL.)
-- BUG-1 FIXED: getReplay returns REPLAY_LOCKED, challenge lineup sealed (getChallenge and submitRun). Regression: C `qa-trust` "regression BUG-1 chain" and the formerly-todo test, both pass. Client: locked 复盘 shows text and plays no ad (smoke "locked 复盘 ... no ad"; controller returns before ads.rewarded). No PNG of the locked replay state exists in the preview set; covered by the smoke test only.
-- BUG-3 FIXED: `qa-analytics` sessionId test passes.
-- BUG-2 FIXED (see AC 45).
-- Tuning re-sample on QA's own 30k seeds: sensible 12-0 0.317% (target 0.2-0.5), greedy 0.5% (<=1), naive 0.093% (<0.2), random 0.007% (<0.01, thin margin), median 7, 10-11 band 8.77% (6-10), 0-1 band 1.07% (<=2). All pass.
-- Known flaky backend test "live is the last resort..." (daily.test.js): did not fail in this run; recorded, not blocking.
+| Item | Verdict | Evidence |
+|---|---|---|
+| D1 (superseded by D16) / D3 roster | PASS | 120 generals, 32 originals unchanged (qa-v1 own diff) |
+| D2 五德 stats | PASS | integers 1-10, qa-v1 |
+| D4 daily cards hide names | PASS | AC 31 |
+| D5 stub ads | PASS (flag must flip, AC 43) | |
+| D6 ad no-fill | PASS | AC 41 |
+| D7 180 days | PARTIAL | code yes; privacy-guide text missing (AC 57) |
+| D8 临阵生变 | PARTIAL | review record missing (AC 59) |
+| D9-D14 operational / compliance | not code-testable | forbidden terms and share rules verified (AC 29, 30, 50) |
+| D15 12-0 really hard | PASS | simstats + own sample |
+| D16 merged phases | PASS | v1 features verified above |
+| C1 / C3 leaderboard trust | PASS | AC 56, 60, 61 |
+| C2 daily generation | PARTIAL | AC 53 timeout from spike |
+| C4 Phase 0 findings | PASS | getGroupEnterInfo, disableFallbackSharePage, privacy flow (AC 35, 63, 64) |
+| C5 daily spoiler lock | PASS | AC 32 plus C spoiler, cv2 "daily spoiler lock holds on the live content version", qa-trust BUG-1 chain regression; getHistory best only after 00:30 |
 
-## Bugs (first pass, now fixed unless noted)
+## Summary counts
 
-- BUG-1 (security, owner backend): daily optimum leak. A user who has not played today's daily answers a challenge on today's daily seed WITHOUT calling startRun. submitRun stores a friendly run on the daily seed, then `getReplay` returns `bestLineup(run.seed, ...)`, the stored 12-0 optimum, before the user's own daily. The user then starts the daily and plays it for a ranked 12-0. The submitRun response also exposes per-battle p and luck, so unlimited probe lineups are possible. Test: C `qa-trust` "daily best lineup is never obtainable before ..." (todo; remove the flag to see it fail). Fix: refuse getReplay and friendly challenge runs on today's/grace-window daily seed until a ranked daily result exists, or always count such runs as the daily.
-- BUG-2 (UI, owner frontend-ui): home daily-card sub-line overlaps the primary button at 320x568 (AC 45).
-- BUG-3 (backend + minigame-dev): the client sends `sessionId` inside props and `ts` as clientTs; `track` reads `e.sessionId`, so `events.sessionId` is always null (queries must use props.sessionId). Test: C `qa-analytics` todo.
-- DEV-1 (spec/minigame-dev): daily gate greedy window 0.25-20% vs spec 0.5-5%; no relaxed fallback.
-- DEV-2 (spec): event threshold pMin 0.672 vs spec 0.35; low-bank warn 10 vs 7.
-- NOTE tuning margins: sensible 12-0 is 0.25% in the report and 0.197% on QA's own 30k seeds (within sampling noise of the 0.2% floor); 0-1 band 1.86-1.91% vs cap 2%; 10-11 band 6.8-7.0% vs floor 6%. Everything sits at a band edge; consider centring.
+AC 1-95: PASS 85, FAIL 1 (AC 95), PARTIAL 9 (AC 10, 24, 43, 51, 53, 57, 59, 74, 76), DEVICE-deferred rows 0 (device-only parts are noted inside PASS/PARTIAL rows: console rules, CloudID, real network, audio, prompts, transactions, subscribe send, fonts).
+
+## UI notes (preview sheets viewed: 320x568 and 430x932, default / large / hc)
+
+- Seal readability: good at 24-48 pt and above. Tier frames (甲 double, 乙 single, 丙 dashed corners) are distinguishable; 晋 ink-on-月白 is legible. Below 48 pt the monogram is used and is legible.
+- Seal character order: names are drawn in traditional right-to-left order (关羽 shows 羽关, 司马懿 shows 马懿 under 司). In the draft pool and board the seal tile sits directly next to the plain-text name (seal 羽关 beside text 关羽), so the same name is visibly shown in both orders. Recommend: switch the seal to modern left-to-right (2 chars: 关羽; 3 chars: left column 诸葛, right column 亮 is not natural either, so use 2 rows: top 诸葛, bottom 亮 or just 诸 + 葛亮 reading left to right), or use the monogram at all sizes in lists where the name is printed beside it. Owner: frontend-ui, product-ux to decide.
+- No clipping found; scrollable screens (draft, result at 320x568 in large mode) push lower content below the fold, which is expected.
+
+## Bugs and recommendations
+
+- FAIL AC 95 (release): release pack not delivered.
+- PARTIAL items above: owners listed per row. None are security or fairness issues.
+- Earlier first-pass bugs (daily optimum leak, sessionId, home overlap) remain fixed; regressions in C qa-trust and qa-analytics pass.
+- No Trust or Fairness defects found in this pass: progressive delivery, spoiler lock, one ranked daily, tampered KV, openid sweep and deny-all rules all pass, with independent tests added.
