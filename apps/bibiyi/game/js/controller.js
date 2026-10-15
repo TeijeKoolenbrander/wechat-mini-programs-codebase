@@ -1358,7 +1358,7 @@ function createController(deps) {
     if (st) res = strip(st);
     else if (S.dailyCache.myResult) {
       const m = S.dailyCache.myResult;
-      res = { mode: 'daily', ranked: true, friendly: false, status: 'done', headerText: '今日一比 · 第' + S.dailyCache.issueNo + '期 · ' + S.dailyCache.themeLabel, issueNo: S.dailyCache.issueNo, themeLabel: S.dailyCache.themeLabel, dateKey: key, streak: m.n, lifeUsed: false, cleared: m.endReason === 'cleared', endReason: m.endReason, deckLength: config.deckLen.daily, rarityShare: m.rarity ? m.rarity.share : null, dayStreak: S.dailyCache.myDays ? S.dailyCache.myDays.current : 0, questions: [], miss: null, challengeCompare: null, finalizedByWindow: m.endReason === 'window', deckKind: 'daily' };
+      res = { mode: 'daily', ranked: true, friendly: false, status: 'done', headerText: '今日一比 · 第' + S.dailyCache.issueNo + '期' + V.themeSuffix(S.dailyCache.themeLabel), issueNo: S.dailyCache.issueNo, themeLabel: S.dailyCache.themeLabel, dateKey: key, streak: m.n, lifeUsed: false, cleared: m.endReason === 'cleared', endReason: m.endReason, deckLength: config.deckLen.daily, rarityShare: m.rarity ? m.rarity.share : null, dayStreak: S.dailyCache.myDays ? S.dailyCache.myDays.current : 0, questions: [], miss: null, challengeCompare: null, finalizedByWindow: m.endReason === 'window', deckKind: 'daily' };
     } else return;
     res.status = 'done';
     res.tracked = true;

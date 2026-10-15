@@ -3,7 +3,7 @@
 // day streaks, rarity. Used by getDaily, startRun, answer, getHistory, cleanup.
 //
 // TRUST RULES enforced here:
-//  - questionPayload() NEVER contains the bottom card's value, raw number, note or source.
+//  - questionPayload() NEVER contains the bottom card's value, raw number, note or source (core/question.js hiddenFace).
 //  - nothing beyond the current question is ever returned; answered pairs are returned only for k < current.
 //  - finalization is one transaction: run status + daily_results + daily_stats.hist + player_stats.
 const core = require('./coreapi');
@@ -30,38 +30,22 @@ async function pairOf(deck, k) {
   if (!q) fail('INTERNAL', 'bad question index');
   return { a: await factOf(deck, q.a), b: await factOf(deck, q.b) };
 }
-function cardBase(f) {
-  const c = { factId: f.id, label: f.label, unitText: core.unitOf(f.measure) };
-  if (f.sub) c.sub = f.sub;
-  return c;
-}
-/** a card whose value is public (a top card, or an answered bottom card) */
+/** a card whose value is public (an answered pair, history): the core's known face plus the note */
 function fullCard(f) {
-  const v = core.valueFields(f);
-  const c = { ...cardBase(f), valueText: v.valueText, approx: v.approx, sourceText: v.sourceText };
+  const c = core.knownFace(f);
   if (f.note) c.note = f.note;
   return c;
 }
-/** the current question: top WITH its value and source, bottom WITHOUT any value */
+/** the current question: top WITH its value and source, bottom WITHOUT any value (core/question.js builds both) */
 async function questionPayload(deck, k) {
   const { a, b } = await pairOf(deck, k);
-  const top = fullCard(a);
-  delete top.note; // notes are shown after a reveal only
   const prev = k > 1 ? deck.questions[k - 2] : null;
-  return {
-    k, segmentStart: !prev || prev.b !== deck.questions[k - 1].a,
-    measure: a.measure, subLabel: core.subLabel(a), verbs: core.verbs(a.measure),
-    top,
-    bottom: cardBase(b),
-  };
+  return core.questionOf(k, a, b, !prev || prev.b !== deck.questions[k - 1].a);
 }
 /** the reveal of question k's bottom card (only after k is answered) */
 async function revealPayload(deck, k) {
   const { b } = await pairOf(deck, k);
-  const v = core.valueFields(b);
-  const r = { factId: b.id, value: b.value, valueText: v.valueText, unitText: v.unitText, approx: v.approx, sourceText: v.sourceText };
-  if (b.note) r.note = b.note;
-  return r;
+  return core.revealOf(b);
 }
 /** answered pairs for k < current (resume and 本局题目) */
 async function answeredPairs(deck, run) {
@@ -207,7 +191,7 @@ async function finalizeExpiredFor(openid, nowMs) {
 }
 
 module.exports = {
-  rankedId, friendlyId, factOf, pairOf, fullCard, cardBase, questionPayload, revealPayload, answeredPairs,
+  rankedId, friendlyId, factOf, pairOf, fullCard, questionPayload, revealPayload, answeredPairs,
   findRun, defaultStats, prevPublished, nextDayStreak, shownDayStreak, ensureStats, rarityFor,
   applyEnd, finalizeRun, windowClosed, finalizeExpiredFor, AppError,
 };

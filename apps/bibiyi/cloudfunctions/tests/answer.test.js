@@ -23,7 +23,7 @@ test('startRun returns question 1: top WITH value and source, bottom WITHOUT any
   assert.equal(q.k, 1);
   assert.equal(q.segmentStart, true);
   assert.ok(q.top.valueText && q.top.sourceText && q.top.unitText);
-  assert.deepEqual(Object.keys(q.bottom).sort(), ['factId', 'label', 'unitText']);
+  assert.deepEqual(Object.keys(q.bottom).sort(), ['factId', 'label', 'measure', 'unitText']);
   assert.ok(q.verbs.hi && q.verbs.lo);
   assert.deepEqual(s.answered, []);
 });
@@ -44,13 +44,15 @@ test('NO LOOKAHEAD: over a full scripted run no payload holds a question beyond 
         const earlier = o.deck.questions.slice(0, exposed).some((e) => e.a === id || e.b === id);
         if (!earlier) {
           assert.equal(json.includes(`"${id}"`), false, `payload ${i} leaks fact id of question ${k}`);
-          assert.equal(json.includes(`"${o.facts[id].label}"`), false, `payload ${i} leaks label of question ${k}`);
+          // the same name can belong to an already exposed fact of another measure (亚洲象 weight vs lifespan): that is no leak
+          const sameNameExposed = o.deck.questions.slice(0, exposed).some((e) => [e.a, e.b].some((x) => o.facts[x].label === o.facts[id].label));
+          if (!sameNameExposed) assert.equal(json.includes(`"${o.facts[id].label}"`), false, `payload ${i} leaks label of question ${k}`);
         }
       }
     }
     if (resp.question || resp.next) {
       const cur = resp.question || resp.next;
-      assert.deepEqual(Object.keys(cur.bottom).sort().filter((k2) => k2 !== 'sub'), ['factId', 'label', 'unitText']);
+      assert.deepEqual(Object.keys(cur.bottom).sort().filter((k2) => k2 !== 'sub'), ['factId', 'label', 'measure', 'unitText']);
       assert.equal('value' in cur.bottom || 'valueText' in cur.bottom || 'sourceText' in cur.bottom || 'note' in cur.bottom, false);
       assert.equal(JSON.stringify(cur.bottom).includes(String(o.facts[cur.bottom.factId].value)), false);
     }

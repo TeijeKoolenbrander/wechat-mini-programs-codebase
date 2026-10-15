@@ -106,15 +106,23 @@ test('every error code of spec 11.3 is produced by the code and exercised by a t
 test('the game package holds no daily-pool fact and no deck data (AC 22)', () => {
   const game = path.resolve(CF, '..', 'game');
   if (!fs.existsSync(game)) return; // game package not present in this branch yet
-  const labels = [];
-  const dailyFile = process.env.BIBIYI_DAILY_EXPORT;
-  if (dailyFile && fs.existsSync(dailyFile)) for (const f of importer.loadExport(dailyFile)) labels.push(f.id, f.label);
+  // the real server-only export (game/tools/out is not packaged: project.config.json ignores tools/ and tests/)
+  const dailyFile = process.env.BIBIYI_DAILY_EXPORT || path.join(game, 'tools', 'out', 'daily-facts.json');
+  const daily = importer.loadExport(dailyFile);
+  assert.ok(daily.length > 100, 'the real daily export is present');
+  const ignore = JSON.parse(read(path.join(game, 'project.config.json'))).packOptions.ignore.map((x) => x.value);
+  assert.ok(ignore.includes('tools') && ignore.includes('tests'), 'tools/ and tests/ are not packaged');
   const files = [];
-  (function walk(d) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) { if (e.name !== 'node_modules') walk(path.join(d, e.name)); } else if (/\.(js|json)$/.test(e.name)) files.push(path.join(d, e.name)); } }(game));
+  (function walk(d, top) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) { if (!(top && ignore.includes(e.name))) walk(path.join(d, e.name), false); } else if (/\.(js|json)$/.test(e.name)) files.push(path.join(d, e.name)); } }(game, true));
+  assert.ok(files.length > 20);
   for (const f of files) {
     const s = read(f);
-    assert.doesNotMatch(s, /pool:\s*['"]daily['"]/, `${f} contains a daily-pool fact`);
-    for (const l of labels) assert.equal(s.includes(`'${l}'`) || s.includes(`"${l}"`), false, `${f} contains daily fact ${l}`);
+    // fact data as JSON (the synthetic mock pool in js/mock-server.js is invented code, not this)
+    assert.doesNotMatch(s, /"pool"\s*:\s*"daily"/, `${f} contains a daily-pool fact`);
+    for (const d of daily) {
+      assert.equal(s.includes(`"${d.id}"`) || s.includes(`'${d.id}'`), false, `${f} contains daily fact id ${d.id}`);
+      assert.equal(s.includes(`"measure":"${d.measure}"`) && s.includes(`"label":"${d.label}"`) && s.split('\n').some((l) => l.includes(`"measure":"${d.measure}"`) && l.includes(`"label":"${d.label}"`)), false, `${f} contains daily fact ${d.label}`);
+    }
   }
 });
 
@@ -132,8 +140,8 @@ test('drift detector catches missing, changed and stale files; sync makes a tree
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bbyi-drift-'));
   const a = path.join(tmp, 'a');
   const b = path.join(tmp, 'b');
-  sync.copyDir(sync.FAKE_CORE, a);
-  sync.copyDir(sync.FAKE_CORE, b);
+  sync.copyDir(sync.REAL_CORE, a);
+  sync.copyDir(sync.REAL_CORE, b);
   assert.deepEqual(sync.diffDirs(a, b), []);
   fs.appendFileSync(path.join(b, 'deck.js'), '\n// edited copy');
   fs.rmSync(path.join(b, 'rng.js'));
@@ -143,9 +151,9 @@ test('drift detector catches missing, changed and stale files; sync makes a tree
   fs.mkdirSync(path.join(root, 'common'), { recursive: true });
   fs.writeFileSync(path.join(root, 'common', 'x.js'), 'module.exports = 1;');
   for (const fn of ['f1', 'f2']) { fs.mkdirSync(path.join(root, fn)); fs.writeFileSync(path.join(root, fn, 'index.js'), ''); }
-  assert.ok(sync.checkDrift({ root, coreSrc: sync.FAKE_CORE }).length > 0);
-  sync.syncAll({ root, coreSrc: sync.FAKE_CORE });
-  assert.deepEqual(sync.checkDrift({ root, coreSrc: sync.FAKE_CORE }), []);
+  assert.ok(sync.checkDrift({ root, coreSrc: sync.REAL_CORE }).length > 0);
+  sync.syncAll({ root, coreSrc: sync.REAL_CORE });
+  assert.deepEqual(sync.checkDrift({ root, coreSrc: sync.REAL_CORE }), []);
   assert.throws(() => sync.syncAll({ root, coreSrc: path.join(tmp, 'missing') }), /core source not found/);
 });
 
@@ -153,9 +161,9 @@ test('core contract: the active core exposes every call the adapter makes', () =
   const core = sync.DEFAULT_CORE;
   const need = {
     'date.js': ['beijingDateKey'], 'config.js': ['LATEST_CONFIG_VERSION', 'getConfig'],
-    'content.js': ['LATEST_CONTENT_VERSION', 'getMeasures', 'getFreeFact', 'getContent'],
-    'deck.js': ['themeForWeekday', 'buildFreeDeck', 'buildDailyDeck'], 'gates.js': ['evaluateDeck'],
-    'judge.js': ['correctChoice'], 'format.js': ['formatValue', 'sourceLine'], 'rng.js': ['mulberry32', 'hash32', 'sub'],
+    'content.js': ['LATEST_CONTENT_VERSION', 'getContent', 'indexFacts'], 'measures.js': ['BY_KEY', 'CATEGORIES'],
+    'deck.js': ['themeOf', 'buildFreeDeck', 'buildDailyDeck'], 'gates.js': ['deckStats', 'passesGates'],
+    'judge.js': ['correctChoice', 'replayRun'], 'question.js': ['questionPayload', 'knownFace', 'revealOf'], 'rng.js': ['mulberry32', 'hash32', 'sub'],
   };
   for (const [file, names] of Object.entries(need)) {
     const m = require(path.join(core, file));

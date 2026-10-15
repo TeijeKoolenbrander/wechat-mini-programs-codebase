@@ -109,14 +109,13 @@ test('submitRun is idempotent per clientRunId and rate limited', async () => {
   assert.equal(limited && limited.code, 'RATE_LIMITED');
 });
 
-test('free decks: only the chosen category\'s measures, deterministic, no fact within 10 questions', () => {
-  const core = h.core('deck');
-  const content = h.core('content');
-  const measures = content.getMeasures();
-  for (const group of ['all', 'city', 'geo', 'era', 'animal', 'space', 'build', 'food', 'dist']) {
+test('free decks on the server: the same deck as the client builds, only the chosen category, no fact within 10 questions', () => {
+  const api = h.mod('submitRun', 'common/coreapi');
+  const measures = api.measures();
+  for (const group of ['all', 'city', 'animal', 'dist']) {
     for (let seed = 1; seed <= 40; seed++) {
-      const a = core.buildFreeDeck(seed * 7919, 1, 1, group);
-      const b = core.buildFreeDeck(seed * 7919, 1, 1, group);
+      const a = api.buildFreeDeck(seed * 7919, 1, 1, group);
+      const b = api.buildFreeDeck(seed * 7919, 1, 1, group);
       assert.equal(JSON.stringify(a), JSON.stringify(b));
       assert.equal(a.length, 60);
       for (const q of a) if (group !== 'all') assert.equal(measures[q.a.measure].category, group);
@@ -125,6 +124,9 @@ test('free decks: only the chosen category\'s measures, deterministic, no fact w
       }
     }
   }
+  // a category with no facts cannot make a deck: null, so submitRun answers INVALID_ACTIONS
+  assert.equal(api.buildFreeDeck(1, 1, 1, 'era'), null);
+  assert.equal(api.buildFreeDeck(1, 9, 1, 'all'), null, 'unknown content version');
 });
 
 test('submitRun requires an authenticated caller and never trusts an openid in the body', async () => {

@@ -23,6 +23,9 @@ const V1 = {
   minDailyFactsPerMeasure: 6,
   /** Daily segments: at most this many per measure. */
   mixedSegmentsPerMeasure: 2,
+  /** After this many candidates failed, a measure may take a third segment (a thin pool right after two busy days must still make a deck). */
+  relaxSegmentCapAfter: 40,
+  mixedSegmentsRelaxed: 3,
 
   /**
    * Difficulty bands by question position (spec 4.2). ratio = max/min, year =

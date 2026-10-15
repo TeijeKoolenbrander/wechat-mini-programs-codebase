@@ -263,7 +263,8 @@ function buildDailyDeck(opts) {
   let prev = null;
   let k = 1;
   for (let si = 0; si < lens.length; si++) {
-    const pool = allKeys.filter((key) => (mixedCount[key] || 0) < config.mixedSegmentsPerMeasure);
+    const cap = opts.attempt > config.relaxSegmentCapAfter ? config.mixedSegmentsRelaxed : config.mixedSegmentsPerMeasure;
+    const pool = allKeys.filter((key) => (mixedCount[key] || 0) < cap);
     let order = shuffle(rng, pool.slice());
     if (order.length > 1 && prev) order = order.filter((x) => x !== prev).concat(order.filter((x) => x === prev));
     let seg = null;

@@ -1,14 +1,18 @@
 'use strict';
-// Test harness: stages the cloud functions (+ synced common + the FAKE core) in a temp dir, mocks
+// Test harness: stages the cloud functions (+ synced common + the REAL game core) in a temp dir, mocks
 // wx-server-sdk with an in-memory db, and lets tests call functions as a given openid.
-// The fake core (tests/fake-core) stands in for minigame-dev's real core until it lands.
+// The daily pool is the real server-only export of the content build (game/tools/out/daily-facts.json).
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const Module = require('module');
 const sync = require('../../scripts/sync-core');
 const { FakeDb } = require('./fake-db');
-const fakeContent = require('../fake-core/content');
+const REAL_DAILY = path.join(__dirname, '..', '..', '..', 'game', 'tools', 'out', 'daily-facts.json');
+
+/** the real server-only daily pool and the bundled free pool, as the test oracle */
+const DAILY_FACTS = JSON.parse(fs.readFileSync(REAL_DAILY, 'utf8')).facts;
+const FREE_FACTS = require('../../../game/core/content').getContent(1).facts;
 
 let stageRoot = null;
 function stage() {
@@ -24,7 +28,7 @@ function stage() {
     }
   }
   sync.copyDir(path.join(sync.CF_ROOT, 'common'), path.join(stageRoot, 'common'));
-  sync.syncAll({ root: stageRoot, coreSrc: sync.FAKE_CORE });
+  sync.syncAll({ root: stageRoot, coreSrc: sync.REAL_CORE });
   return stageRoot;
 }
 
@@ -79,9 +83,9 @@ function createHarness({ now = NOON } = {}) {
     },
     /** point the mocked SDK at this harness (for tests that call common/ modules directly) */
     bind(openid) { current = { db, openid, sent: h.sent, sendFails: current.sendFails }; return h; },
-    /** load n synthetic daily facts per measure into daily_facts (content version 1) */
-    loadDailyFacts(perMeasure = 36) {
-      const facts = fakeContent.synth('daily', perMeasure, 'D');
+    /** load the real daily pool (what scripts/import-daily-facts.js loads) into daily_facts, content version 1 */
+    loadDailyFacts() {
+      const facts = JSON.parse(fs.readFileSync(REAL_DAILY, 'utf8')).facts;
       for (const f of facts) db.put('daily_facts', { ...f, _id: `v1_${f.id}`, contentVersion: 1 });
       return facts;
     },
@@ -149,4 +153,4 @@ function allKeys(v, out = []) {
   return out;
 }
 
-module.exports = { createHarness, oracle, playDaily, runId, allStrings, allKeys, NOON, HOUR };
+module.exports = { DAILY_FACTS, FREE_FACTS, createHarness, oracle, playDaily, runId, allStrings, allKeys, NOON, HOUR };

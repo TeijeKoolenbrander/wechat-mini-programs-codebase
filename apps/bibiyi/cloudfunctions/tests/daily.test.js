@@ -3,6 +3,8 @@
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { createHarness, oracle, NOON, HOUR } = require('./helpers/harness');
+const realDeck = require('../../game/core/deck');
+const { BY_KEY } = require('../../game/core/measures');
 
 let h;
 beforeEach(() => { h = createHarness(); h.loadDailyFacts(); });
@@ -16,14 +18,15 @@ test('getDaily lazily creates today\'s deck and returns status only (no question
   assert.equal(d.dateKey, '20261015');
   assert.equal(d.myStatus, 'none');
   assert.equal(d.issueNo, 1);
-  assert.equal(d.theme, 'animal'); // Thursday
+  assert.equal(d.theme, 'mix', 'v1 has no weekday themes');
+  assert.equal(d.themeLabel, '');
   assert.deepEqual(d.myDays, { current: 0, best: 0 });
   assert.ok(d.features && d.features.interstitial.everyNRuns >= 2);
   for (const bad of ['questions', 'deck', 'question', 'rounds']) assert.equal(bad in d, false, bad);
   assert.equal(h.db.all('daily_decks').length, 1);
 });
 
-test('the deck: 40 questions, daily facts only, gates passed, segments chain, theme drives questions 1-20', async () => {
+test('the deck: 40 questions, daily facts only, gates passed, every measure mixed, legal pairs', async () => {
   await h.call('getDaily', {}, { openid: P1 });
   const { deck, facts } = oracle(h, '20261015');
   assert.equal(deck.questions.length, 40);
@@ -33,14 +36,17 @@ test('the deck: 40 questions, daily facts only, gates passed, segments chain, th
   const used = deck.questions.flatMap((q) => [q.a, q.b]);
   for (const id of used) assert.equal(facts[id].pool, 'daily');
   // within a segment the next top card is the previous bottom card; each fact is a top at most once
-  const cats = deck.questions.slice(0, 20).map((q) => h.core('content').getMeasures()[facts[q.a].measure].category);
-  assert.ok(cats.every((c) => c === 'animal'));
   const tops = deck.questions.map((q) => q.a);
   assert.equal(new Set(tops).size, tops.length);
   // pair rules: same measure, legal gap
+  const cfg = h.core('config').getConfig(1);
   const deckmod = h.core('deck');
-  const measures = h.core('content').getMeasures();
-  for (const q of deck.questions) assert.ok(deckmod.legalPair(measures[facts[q.a].measure], facts[q.a], facts[q.b]));
+  for (const q of deck.questions) assert.ok(deckmod.pairLegal(cfg, facts[q.a], facts[q.b]), q.a + ' / ' + q.b);
+  assert.ok(realDeck.pairLegal, 'the staged core is the game core');
+  const perMeasure = {};
+  deck.questions.forEach((q, i) => { if (i === 0 || deck.questions[i - 1].b !== q.a) perMeasure[facts[q.a].measure] = (perMeasure[facts[q.a].measure] || 0) + 1; });
+  assert.ok(Object.keys(perMeasure).length >= 4, 'a mix of measures: ' + Object.keys(perMeasure).join());
+  Object.keys(perMeasure).forEach((m) => assert.ok(perMeasure[m] <= 2 && BY_KEY[m], m));
 });
 
 test('genDaily (timer) builds TOMORROW and is idempotent under a double-fired trigger', async () => {
@@ -71,7 +77,7 @@ test('genDaily and cleanup reject calls from the mini game (server-only)', async
 });
 
 test('impossible gates: DAILY_UNAVAILABLE, no deck, ALERT, daily_gen failed event; nothing relaxed', async () => {
-  h.patchConfig((c) => { c.gates = { median: [100, 200], p20: [0.99, 1], p40Max: 0 }; c.daily = { ...c.daily, maxCandidates: 20 }; });
+  h.patchConfig((c) => { c.gates = { median: [100, 200], p20: [0.99, 1], pFull: 0 }; c.maxAttempts = 20; });
   const errs = [];
   const orig = console.error;
   console.error = (...a) => errs.push(a.join(' '));
@@ -93,7 +99,7 @@ test('too few daily facts: DAILY_UNAVAILABLE', async () => {
   h2.teardown();
 });
 
-test('weekday themes follow the Beijing date at 15:59:59 and 16:00:00 UTC, with TZ=UTC and unset', async () => {
+test('the issue date follows Beijing time at 15:59:59 and 16:00:00 UTC, with TZ=UTC and unset (no weekday themes)', async () => {
   const saved = process.env.TZ;
   for (const tz of ['UTC', undefined]) {
     if (tz === undefined) delete process.env.TZ; else process.env.TZ = tz;
@@ -101,11 +107,11 @@ test('weekday themes follow the Beijing date at 15:59:59 and 16:00:00 UTC, with 
     hh.loadDailyFacts();
     const before = await hh.call('getDaily', {}, { openid: P1 });
     assert.equal(before.dateKey, '20261015');
-    assert.equal(before.theme, 'animal');
+    assert.equal(before.theme, 'mix');
     hh.setNow(Date.UTC(2026, 9, 15, 16, 0, 0)); // Fri 00:00:00 BJT
     const after = await hh.call('getDaily', {}, { openid: P1 });
     assert.equal(after.dateKey, '20261016');
-    assert.equal(after.theme, 'space_build');
+    assert.equal(after.theme, 'mix');
     assert.equal(after.issueNo, 2);
     hh.teardown();
   }

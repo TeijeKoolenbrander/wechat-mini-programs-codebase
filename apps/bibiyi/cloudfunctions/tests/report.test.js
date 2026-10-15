@@ -2,14 +2,14 @@
 // reportFact: fixed reasons, one report per (fact, player), rate limit, auto-suspend at 5 distinct reporters.
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { createHarness, oracle, playDaily } = require('./helpers/harness');
+const { createHarness, oracle, playDaily, DAILY_FACTS, FREE_FACTS } = require('./helpers/harness');
 
 let h;
 beforeEach(() => { h = createHarness(); h.loadDailyFacts(); });
 afterEach(() => h.teardown());
 
-const FACT = 'f_river_D5';
-const FREE_FACT = 'f_river_F3';
+const FACT = DAILY_FACTS[5].id; // a real daily-pool fact
+const FREE_FACT = FREE_FACTS[3].id; // a real free-pool fact
 const who = (i) => `openid-reporter-${String(i).padStart(3, '0')}`;
 const report = (i, extra = {}) => h.call('reportFact', { factId: FACT, reasons: ['value'], where: 'reveal', ...extra }, { openid: who(i) });
 const overrides = () => h.db.all('fact_overrides')[0];
@@ -33,7 +33,7 @@ test('free-pool facts can be reported too', async () => {
 
 test('validation: UNKNOWN_FACT, only the six fixed reasons, fixed places, no free text', async () => {
   assert.equal((await report(1, { factId: 'f_nope_1' })).code, 'UNKNOWN_FACT');
-  assert.equal((await report(1, { factId: 'v1_f_river_D5' })).code, 'UNKNOWN_FACT', 'doc ids are not fact ids');
+  assert.equal((await report(1, { factId: 'v1_' + FACT })).code, 'UNKNOWN_FACT', 'doc ids are not fact ids');
   for (const bad of [[], ['bogus'], ['value', 'free text here'], 'value', null, ['value', 'unit', 'name', 'source', 'wording', 'other', 'value']]) {
     assert.equal((await report(1, { reasons: bad })).code, 'INVALID_ACTIONS', JSON.stringify(bad));
   }
@@ -48,10 +48,10 @@ test('validation: UNKNOWN_FACT, only the six fixed reasons, fixed places, no fre
 });
 
 test('rate limit: 20 reports per player per day, the 21st stores nothing; resets the next Beijing day', async () => {
-  const ids = Array.from({ length: 22 }, (_, i) => `f_river_D${i % 20}`).slice(0, 22);
+  const ids = DAILY_FACTS.slice(10, 32).map((f) => f.id);
   const codes = [];
   for (let i = 0; i < 22; i++) {
-    const r = await h.call('reportFact', { factId: `f_mountain_D${i % 20}`, reasons: ['value'], where: 'reveal' }, { openid: who(1) });
+    const r = await h.call('reportFact', { factId: ids[i], reasons: ['value'], where: 'reveal' }, { openid: who(1) });
     codes.push(r.ok ? 'ok' : r.code);
   }
   assert.equal(codes.filter((c) => c === 'ok').length, 20);

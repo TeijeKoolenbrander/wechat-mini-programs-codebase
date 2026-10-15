@@ -6,16 +6,15 @@
 // Usage:
 //   node scripts/sync-core.js                 copy (both)
 //   node scripts/sync-core.js --check         exit 1 if any copy is missing or differs (drift check)
-//   node scripts/sync-core.js --src <dir>     use another core source (tests use tests/fake-core)
+//   node scripts/sync-core.js --src <dir>     use another core source
 //   node scripts/sync-core.js --common-only   skip core
 const fs = require('fs');
 const path = require('path');
 
 const CF_ROOT = path.resolve(__dirname, '..');
 const REAL_CORE = path.resolve(CF_ROOT, '..', 'game', 'core');
-// tests/fake-core is a contract-faithful stand-in used until minigame-dev's real core lands (see README "Core contract").
-const FAKE_CORE = path.resolve(CF_ROOT, 'tests', 'fake-core');
-const DEFAULT_CORE = process.env.BIBIYI_CORE === 'fake' || !fs.existsSync(path.join(REAL_CORE, 'deck.js')) ? FAKE_CORE : REAL_CORE;
+// The core is the game's own (apps/bibiyi/game/core): the same code runs on the client and here.
+const DEFAULT_CORE = REAL_CORE;
 const NOT_FUNCTIONS = new Set(['common', 'scripts', 'tests', 'database', 'node_modules']);
 
 function listFunctions(root = CF_ROOT) {
@@ -79,7 +78,7 @@ function checkDrift({ root = CF_ROOT, coreSrc = DEFAULT_CORE, commonOnly = false
   return problems;
 }
 
-module.exports = { REAL_CORE, FAKE_CORE, listFunctions, syncAll, checkDrift, diffDirs, walk, copyDir, CF_ROOT, DEFAULT_CORE };
+module.exports = { REAL_CORE, listFunctions, syncAll, checkDrift, diffDirs, walk, copyDir, CF_ROOT, DEFAULT_CORE };
 
 if (require.main === module) {
   const args = process.argv.slice(2);

@@ -26,6 +26,11 @@ const SOURCES_FOOT = '每条数据均标注来源与年份；如发现错误，�
 const REPORT_TITLE = '这条数据有问题？';
 const REPORT_THANKS = '已收到，谢谢！我们会核对';
 
+/** " · 山河"; empty when the day has no theme (v1 has none), so no header ends in a dangling dot. */
+function themeSuffix(label) {
+  return label ? ' · ' + label : '';
+}
+
 function displayVm(S) {
   const large = !!S.largeText;
   const hc = !!S.highContrast;
@@ -113,8 +118,8 @@ function categoryVm(selected, counts, minFacts) {
 // ---------------------------------------------------------------- play
 
 function headerOf(r, categoryLabel) {
-  if (r.mode === 'daily') return '今日一比 · 第' + r.issueNo + '期 · ' + r.themeLabel;
-  if (r.mode === 'challenge') return r.deckKind === 'daily' ? '挑战 · 第' + r.issueNo + '期 · ' + r.themeLabel : '挑战 · 随便比比 · ' + categoryLabel;
+  if (r.mode === 'daily') return '今日一比 · 第' + r.issueNo + '期' + themeSuffix(r.themeLabel);
+  if (r.mode === 'challenge') return r.deckKind === 'daily' ? '挑战 · 第' + r.issueNo + '期' + themeSuffix(r.themeLabel) : '挑战 · 随便比比 · ' + categoryLabel;
   return '随便比比 · ' + categoryLabel;
 }
 
@@ -282,7 +287,7 @@ function challengeVm(c, ui) {
     t: u.t || 0,
   };
   if (c.kind === 'daily') {
-    out.issueText = '今日一比 · 第' + c.issueNo + '期 · ' + c.themeLabel;
+    out.issueText = '今日一比 · 第' + c.issueNo + '期' + themeSuffix(c.themeLabel);
     if (c.status === 'ready') {
       if (c.countsAsDaily) out.rulesText = '本局将作为你的今日一比，计入群榜';
       else if (c.pastDeck) out.rulesText = '往期题目 · 友谊赛';
@@ -309,7 +314,7 @@ function boardVm(b) {
     dateKey: b.dateKey,
     issueNo: b.issueNo,
     themeLabel: b.themeLabel || '',
-    titleText: (b.kind === 'group' ? '本群 · 今日一比 第' : '好友 · 今日一比 第') + b.issueNo + '期' + (b.themeLabel ? ' · ' + b.themeLabel : ''),
+    titleText: (b.kind === 'group' ? '本群 · 今日一比 第' : '好友 · 今日一比 第') + b.issueNo + '期' + themeSuffix(b.themeLabel),
     state: b.state,
     mode: b.mode || null,
     self: { streak: b.selfStreak === undefined ? null : b.selfStreak },
@@ -392,7 +397,7 @@ function issueVm(d, display) {
   out.issueNo = data.issue.issueNo;
   out.themeLabel = data.issue.themeLabel;
   out.dateText = dateText(d.dateKey);
-  out.titleText = '第' + data.issue.issueNo + '期 · ' + dateText(d.dateKey) + ' · ' + data.issue.themeLabel;
+  out.titleText = '第' + data.issue.issueNo + '期 · ' + dateText(d.dateKey) + themeSuffix(data.issue.themeLabel);
   if (data.mine) {
     out.mine = { streak: data.mine.streak, missK: data.mine.missK };
     out.mineText = '连对 ' + data.mine.streak + (data.mine.missK ? '（倒在第 ' + data.mine.missK + ' 题）' : '');
@@ -431,7 +436,7 @@ function cardVm(res) {
   const marks = (res.questions || []).map((x) => !!x.correct);
   const base = { mode: res.mode === 'daily' ? 'daily' : 'free', streak: res.streak, marks, cleared: !!res.cleared, rarityText: res.rarityShare !== null && res.rarityShare !== undefined ? rarityLine(res.rarityShare) : null };
   if (res.mode === 'daily') {
-    return Object.assign(base, { issueNo: res.issueNo, themeLabel: res.themeLabel, titleText: '比一比 · 今日一比 第' + res.issueNo + '期 · ' + res.themeLabel, taglineText: '同一套题，你能比我多吗？' });
+    return Object.assign(base, { issueNo: res.issueNo, themeLabel: res.themeLabel, titleText: '比一比 · 今日一比 第' + res.issueNo + '期' + themeSuffix(res.themeLabel), taglineText: '同一套题，你能比我多吗？' });
   }
   const miss = res.miss;
   return Object.assign(base, {
@@ -442,7 +447,7 @@ function cardVm(res) {
 }
 
 module.exports = {
-  HOWTO_LINES, SOURCES, REPORT_THANKS, REPORT_TITLE, BUCKETS,
+  themeSuffix, HOWTO_LINES, SOURCES, REPORT_THANKS, REPORT_TITLE, BUCKETS,
   displayVm, faceVm, revealedFace, homeVm, howtoVm, sourcesVm, settingsVm, categoryVm, playVm, continueSheetVm, sourceSheetVm, reportVm, resultVm,
   challengeVm, boardVm, boardMessage, historyVm, issueVm, cardVm, headerOf, dateText,
 };

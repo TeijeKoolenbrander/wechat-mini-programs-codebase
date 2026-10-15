@@ -1,5 +1,5 @@
 'use strict';
-// Builds valid (or deliberately broken) free-run submissions from the staged core's own deck builder.
+// Builds valid (or deliberately broken) free-run submissions from the staged (real) core's own deck builder.
 
 /**
  * @param right number of correct answers before the first miss (or the whole deck if >= 60)
@@ -7,7 +7,9 @@
  */
 function makeRun(h, { seed, group = 'all', right = 5, life = false, afterLife = 0, contentVersion = 1, configVersion = 1 }) {
   const core = h.core('deck');
-  const deck = core.buildFreeDeck(seed, contentVersion, configVersion, group);
+  const byId = h.core('content').getContent(contentVersion).byId;
+  // the real core returns ids; the oracle works with fact objects
+  const deck = core.buildFreeDeck(seed, contentVersion, configVersion, group).questions.map((q) => ({ a: byId[q.a], b: byId[q.b] }));
   const correct = (k) => (deck[k - 1].b.value > deck[k - 1].a.value ? 'hi' : 'lo');
   const wrong = (k) => (correct(k) === 'hi' ? 'lo' : 'hi');
   const answers = [];
