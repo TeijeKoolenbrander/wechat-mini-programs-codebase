@@ -4,6 +4,10 @@ const core = require('./common/coreapi');
 const store = require('./common/store');
 const input = require('./common/input');
 const rules = require('./common/rules');
+const progress = require('./common/progress');
+const anomaly = require('./common/anomaly');
+const streak = require('./common/streak');
+const notify = require('./common/notify');
 const { now, fail } = require('./common/util');
 
 const SUBMITS_PER_MIN = 30;
@@ -15,6 +19,7 @@ async function respond(run) {
     events: run.result.events, band: run.result.band, morale: run.result.morale,
     ranked: run.ranked, rarity: null,
   };
+  if (run.ranked && run.streak) out.streak = { current: run.streak.current, best: run.streak.best };
   if (run.ranked && run.dateKey) {
     const st = await store.getDoc('daily_stats', run.dateKey);
     if (st && st.total >= 30) {
@@ -107,14 +112,29 @@ exports.main = store.handler(async (event, { openid }) => {
     contentVersion = cv || v.contentVersion;
     configVersion = v.configVersion;
     core.roster(contentVersion); // unknown version -> INVALID_ACTIONS
-    rounds = core.buildSheet(seed, contentVersion);
+    rounds = core.buildSheet(seed, contentVersion, configVersion);
+  }
+
+  // ---- 3b. (v1) ranked: progressive prefix. All 5 rounds must have been released and the actions must
+  //          extend the frozen prefix exactly; otherwise INVALID_ACTIONS plus observe-only flags. ----
+  const invalid = async (msg, kind) => {
+    if (ranked) {
+      if (kind) await anomaly.flag(openid, clientRunId, dateKey, kind, { where: 'submitRun' });
+      await anomaly.flag(openid, clientRunId, dateKey, 'invalid_ranked', { reason: String(msg).slice(0, 60) });
+    }
+    return fail('INVALID_ACTIONS', String(msg).slice(0, 120));
+  };
+  if (ranked) {
+    const prog = await store.getDoc('daily_progress', progress.progressId(dateKey, openid));
+    if (!prog || prog.released !== 5) await invalid('rounds not fully released', 'prefix');
+    else if (!progress.isPrefix(prog.actions || [], actions)) await invalid('actions do not extend the frozen prefix', 'prefix');
   }
 
   // ---- 4. replay actions against the rebuilt sheet ----
-  const rp = core.replay(seed, contentVersion, actions, replayMode);
-  if (!rp.ok) fail('INVALID_ACTIONS', String(rp.error || 'invalid actions').slice(0, 120));
+  const rp = core.replay(seed, contentVersion, actions, replayMode, configVersion);
+  if (!rp.ok) await invalid(rp.error || 'invalid actions');
   const lineup = core.normaliseLineup(rp.lineup);
-  if (!lineup) fail('INVALID_ACTIONS', 'lineup must be 5 distinct generals in 5 slots');
+  if (!lineup) await invalid('lineup must be 5 distinct generals in 5 slots');
 
   // ---- 5. simulate: the server record is authoritative ----
   const sim = core.simulate(lineup, seed, contentVersion, configVersion);
@@ -123,17 +143,19 @@ exports.main = store.handler(async (event, { openid }) => {
   if (mismatch) {
     console.warn('[submitRun] record mismatch', JSON.stringify({ client: clientRecord, server: record, mode, dateKey }));
     await store.writeEvent(openid, 'error', { where: 'submitRun', code: 'MISMATCH', client: clientRecord, server: record });
+    await anomaly.flag(openid, clientRunId, dateKey, 'mismatch', { client: clientRecord, server: record });
   }
 
   let priorAnswer = null;
   if (challengeId) priorAnswer = await rules.priorAnswer(openid, challengeId);
 
   const start = ranked ? await store.getDoc('daily_starts', `${dateKey}_${openid}`) : null;
+  const finalTokens = core.finalTokens(rounds, actions, rp);
   const run = {
     _id: runDocId, openid, clientRunId, mode, dateKey, seed, challengeId, actions,
     serverRecord: record, clientRecord, mismatch, ranked, contentVersion, configVersion,
     lineupIdx: core.lineupToIdx(lineup, contentVersion), lineup,
-    finalTokens: core.finalTokens(rounds, actions, rp),
+    finalTokens,
     result: { record, battles: sim.battles, events: sim.events, band: sim.band, morale: sim.morale },
     startedAt: start ? start.startedAt : null, submittedAt: nowMs,
   };
@@ -143,12 +165,16 @@ exports.main = store.handler(async (event, { openid }) => {
     if (ranked) {
       await ensureStats(dateKey);
       const _ = store._();
+      const sctx = { prev: (await streak.prevPublished(dateKey))[0] || null, next: await streak.nextPublished(dateKey) };
       await store.db().runTransaction(async (t) => {
+        const st = await streak.applyRanked(t, openid, dateKey, sctx, nowMs);
+        run.streak = { current: st.current, best: st.best, thisResult: st.streak };
         await t.collection('runs').add({ data: run });
         await t.collection('daily_results').add({
           data: {
             _id: `${dateKey}_${openid}`, dateKey, openid, runId: clientRunId, w: record.w, l: record.l,
-            submittedAt: nowMs, lineupIdx: run.lineupIdx, contentVersion,
+            submittedAt: nowMs, lineupIdx: run.lineupIdx, lineupFac: finalTokens.map((x) => x.faction),
+            streak: st.streak, contentVersion,
           },
         });
         await t.collection('daily_stats').doc(dateKey).update({ data: { total: _.inc(1), [`hist.${record.w}`]: _.inc(1) } });
@@ -177,5 +203,11 @@ exports.main = store.handler(async (event, { openid }) => {
       console.warn('challenge bookkeeping failed', store.errText(e));
     }
   }
-  return respond(run);
+  if (ranked && start && nowMs - start.startedAt < core.anomalyMinMs()) {
+    await anomaly.flag(openid, clientRunId, dateKey, 'fast', { ms: nowMs - start.startedAt });
+  }
+  const response = await respond(run);
+  // ---- 8. (v1) opt-in answer notice: best effort, <= 2 s, never changes the response ----
+  if (challenge && !priorAnswer) await notify.sendOnce(challenge, record);
+  return response;
 });

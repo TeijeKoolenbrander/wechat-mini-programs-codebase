@@ -9,7 +9,8 @@ const validate = require('../core/validate');
 const sim = require('../core/sim');
 const search = require('../core/search');
 const gates = require('../core/gates');
-const { fail, SLOTS } = require('./util');
+const draft = require('../core/draft');
+const { fail, SLOTS, utcMidnight } = require('./util');
 
 /** Beijing date key for a ms timestamp (core date.js; explicit UTC+8 arithmetic). */
 function dateKeyAt(ms) {
@@ -57,9 +58,9 @@ function primaryTokens(rounds) {
 }
 
 /** Replay actions. Never throws: returns {ok:false, error:'<reason>[@index]'}. */
-function replay(seed, contentVersion, actions, mode) {
+function replay(seed, contentVersion, actions, mode, configVersion) {
   try {
-    const r = validate.replay(seed, contentVersion, actions, mode);
+    const r = validate.replay(seed, contentVersion, actions, mode, configVersion);
     if (!r) return { ok: false, error: 'replay returned nothing' };
     if (r.ok === false) return { ok: false, error: [r.reason || r.error, r.index].filter((x) => x !== undefined).join('@') };
     return r;
@@ -77,6 +78,64 @@ function bestLineup(seed, contentVersion, finalTokens) {
 /** -> {accepted, gates, best?, rounds?} */
 function acceptDailySeed(seed) {
   return gates.acceptDailySeed(seed);
+}
+
+
+/**
+ * Partial replay for progressive delivery (getRound): the actions must end exactly after the pick of some
+ * round n (1..4), valid under the same rules as a full replay. Uses the shared draft state machine, so the
+ * pool cap, multi-appearance and the drafted-person rule of whichever content version applies are honoured.
+ * -> {ok:true, picks:n} | {ok:false, error}. Never throws.
+ */
+function replayPartial(seed, contentVersion, actions, mode, rounds, configVersion) {
+  try {
+    if (!content.getContent(contentVersion)) return { ok: false, error: 'UNKNOWN_CONTENT_VERSION' };
+    const run = draft.createRun({ seed, contentVersion, mode, rounds, configVersion });
+    if (!run) return { ok: false, error: 'UNKNOWN_MODE' };
+    for (let i = 0; i < actions.length; i++) {
+      const r = draft.apply(run, actions[i]);
+      if (!r.ok) return { ok: false, error: `${r.reason}@${i}` };
+    }
+    const n = run.picks.length;
+    if (n < 1 || n > 4) return { ok: false, error: 'WRONG_PICK_COUNT' };
+    if (run.phase !== 'placed' || run.round !== n) return { ok: false, error: 'NOT_AT_PICK' };
+    return { ok: true, picks: n };
+  } catch (e) {
+    return { ok: false, error: 'replay threw: ' + String(e && e.message).slice(0, 80) };
+  }
+}
+
+/** 'shiren' on the configured weekday (core config.shiren.weekday, default Sunday) of the Beijing date key, else 'standard'. */
+function variantFor(dateKey) {
+  const c = getConfig(currentVersions().configVersion) || {};
+  const wd = c.shiren && Number.isInteger(c.shiren.weekday) ? c.shiren.weekday : 0;
+  return new Date(utcMidnight(dateKey)).getUTCDay() === wd ? 'shiren' : 'standard';
+}
+/** observe-only anomaly threshold: ranked daily submitted faster than this after its start (ms) */
+function anomalyMinMs() {
+  const c = getConfig(currentVersions().configVersion) || {};
+  return c.anomaly && c.anomaly.minDailyMs > 0 ? c.anomaly.minDailyMs : 8000;
+}
+/** interstitial defaults in the spec's remote-config names (core names: everyNthRun, minGapMs) */
+function interstitialDefaults() {
+  const c = getConfig(currentVersions().configVersion) || {};
+  const i = (c.ads && c.ads.interstitial) || {};
+  return {
+    enabled: i.enabled !== false,
+    everyNRuns: i.everyNRuns || i.everyNthRun || 3,
+    minLifetimeRuns: i.minLifetimeRuns || 4,
+    minGapSec: i.minGapSec || (i.minGapMs ? Math.round(i.minGapMs / 1000) : 120),
+    maxPerDay: Number.isInteger(i.maxPerDay) ? i.maxPerDay : 5,
+  };
+}
+/** {key,label} of the band for a win count under a config version */
+function bandOf(configVersion, wins) {
+  try {
+    const b = config.bandFor(config.getConfig(configVersion), wins);
+    return b ? { key: b.key, label: b.label } : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 /** lineup (any order, [{slot, generalId}]) -> normalised slot order, or null if malformed */
@@ -119,4 +178,5 @@ module.exports = {
   dateKeyAt, currentVersions, getConfig, boardListCap, bankLowWarn, roster,
   buildSheet, primaryTokens, replay, simulate, bestLineup, acceptDailySeed,
   normaliseLineup, lineupToIdx, finalTokens,
+  replayPartial, variantFor, anomalyMinMs, interstitialDefaults, bandOf,
 };

@@ -55,6 +55,7 @@ function createHarness({ now = Date.UTC(2026, 10, 3, 4, 0, 0) } = {}) {
   const h = {
     db,
     root,
+    sdk: fakeSdk,
     setNow(ms) { t = ms; },
     advance(ms) { t += ms; },
     now() { return t; },

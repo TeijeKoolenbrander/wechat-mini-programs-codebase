@@ -19,19 +19,21 @@ const bankEntry = (id, i = 0, over = {}) => {
   };
 };
 
-test('getDaily: identical rounds/issueNo for two users, no seed/best/battle data leaked (AC 19)', async () => {
+test('getDaily: identical issueNo/variant for two users, NO rounds, no seed/best/battle data leaked (AC 19, 86)', async () => {
   const a = await h.call('getDaily', {}, { openid: 'userA' });
   const b = await h.call('getDaily', {}, { openid: 'userB' });
   assert.equal(a.ok, true);
-  assert.deepEqual(a.rounds, b.rounds);
+  assert.equal(a.rounds, undefined);
   assert.equal(a.issueNo, b.issueNo);
+  assert.equal(a.variant, b.variant);
+  assert.equal(a.variant, 'standard'); // 2026-11-03 is a Tuesday
   assert.equal(a.dateKey, '20261103');
   assert.equal(a.myStatus, 'none');
-  assert.equal(a.rounds.length, 5);
   assert.equal(a.serverNow, T0);
+  assert.deepEqual(a.myStreak, { current: 0, best: 0 });
   const keys = Object.keys(a).sort();
-  assert.deepEqual(keys, ['dateKey', 'issueNo', 'ok', 'rounds', 'serverNow', 'myStatus'].sort());
-  assert.doesNotMatch(JSON.stringify(a), /"seed"|"best"|battle|boardSalt|lineup/);
+  assert.deepEqual(keys, ['dateKey', 'features', 'issueNo', 'myStatus', 'myStreak', 'ok', 'serverNow', 'variant']);
+  assert.doesNotMatch(JSON.stringify(a), /"seed"|"best":{|battle|boardSalt|lineup|faction|fallback/);
   assert.equal(h.db.all('daily_seeds').length, 1, 'lazy creation happens once');
 });
 

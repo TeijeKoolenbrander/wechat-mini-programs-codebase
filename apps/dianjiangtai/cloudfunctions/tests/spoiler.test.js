@@ -4,7 +4,7 @@
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { createHarness, bestActions } = require('./helpers/harness');
-const { runId, playDaily } = require('./helpers/fixtures');
+const { runId, playDaily, releaseAll, sheetOf } = require('./helpers/fixtures');
 
 const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT
 let h;
@@ -15,8 +15,7 @@ beforeEach(() => {
 afterEach(() => h.teardown());
 
 async function friendlyDailyRun(openid, challengeId, id) {
-  const view = await h.call('getChallenge', { challengeId }, { openid });
-  const res = await h.call('submitRun', { mode: 'challenge', clientRunId: id, challengeId, actions: bestActions(view.rounds) }, { openid });
+  const res = await h.call('submitRun', { mode: 'challenge', clientRunId: id, challengeId, actions: bestActions(h.db.all('challenges')[0].rounds) }, { openid });
   assert.equal(res.ranked, false, 'no startRun -> friendly');
   return res;
 }
@@ -52,7 +51,7 @@ test('getReplay is open once the date is over (after the D+1 00:30 grace) even w
 });
 
 test('a free run whose seed equals a daily seed is locked too (seed match, not just dateKey)', async () => {
-  const d = await h.call('getDaily', {}, { openid: 'sneak' });
+  const d = { rounds: sheetOf(h, (await h.call('getDaily', {}, { openid: 'sneak' })).dateKey) };
   const seed = h.db.all('daily_seeds')[0].seed;
   const id = runId();
   const res = await h.call('submitRun', { mode: 'free', clientRunId: id, seed, actions: bestActions(d.rounds, { mode: 'free' }) }, { openid: 'sneak' });
@@ -89,9 +88,10 @@ test('challenge compare on a playable daily seed withholds the sharer\'s lineup 
 
 test('ranked challenge answer (daily started) reveals the sharer\'s lineup right away: the caller\'s daily is now done', async () => {
   const challengeId = await dailyChallenge();
-  const view = await h.call('getChallenge', { challengeId }, { openid: 'friend' });
   await h.call('startRun', { mode: 'challenge', clientRunId: runId(), challengeId }, { openid: 'friend' });
-  const res = await h.call('submitRun', { mode: 'challenge', clientRunId: runId(), challengeId, actions: bestActions(view.rounds, { rank: 2 }) }, { openid: 'friend' });
+  const acts = bestActions(h.db.all('challenges')[0].rounds, { rank: 2 });
+  await releaseAll(h, 'friend', h.db.all('challenges')[0].dateKey, acts);
+  const res = await h.call('submitRun', { mode: 'challenge', clientRunId: runId(), challengeId, actions: acts }, { openid: 'friend' });
   assert.equal(res.ranked, true);
   assert.equal(res.challengeCompare.lineupLocked, false);
   assert.equal(res.challengeCompare.theirLineup.length, 5);

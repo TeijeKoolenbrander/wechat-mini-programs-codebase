@@ -5,7 +5,10 @@
 // Idempotent: a re-run finds nothing new. Server-only (rejects calls that carry an OPENID).
 const core = require('./common/coreapi');
 const store = require('./common/store');
-const { now, addDaysKey, DAY_MS, RETENTION_DAYS, configuredTimeoutMs } = require('./common/util');
+const { now, addDaysKey, DAY_MS, RETENTION_DAYS, configuredTimeoutMs, bjtDayStartMs } = require('./common/util');
+const { KINDS } = require('./common/anomaly');
+
+const MISMATCH_ALERT = 0.005;
 
 const TARGETS = [
   { col: 'runs', field: 'submittedAt' },
@@ -13,6 +16,10 @@ const TARGETS = [
   { col: 'daily_results', field: 'submittedAt' },
   { col: 'challenges', field: 'createdAt' },
   { col: 'events', field: 'ts' },
+  { col: 'daily_progress', field: 'updatedAt' },
+  { col: 'sub_grants', field: 'grantedAt' },
+  { col: 'anomalies', field: 'ts' },
+  { col: 'player_stats', field: 'updatedAt' },
 ];
 
 async function purge(col, cond, deadline) {
@@ -26,6 +33,28 @@ async function purge(col, cond, deadline) {
   return total;
 }
 
+/**
+ * Daily anomaly roll-up (spec 14.5): for yesterday, count submitted runs and flags by kind, write one server
+ * `anomaly_daily` event (idempotent per date), and log [ALERT] when mismatch > 0.5% of runs (client/server drift).
+ */
+async function rollUp(todayKey) {
+  const _ = store._();
+  const dateKey = addDaysKey(todayKey, -1);
+  const from = bjtDayStartMs(dateKey);
+  const to = bjtDayStartMs(todayKey);
+  const col = (n) => store.db().collection(n);
+  const done = await col('events').where({ openid: 'server', name: 'anomaly_daily', 'props.dateKey': dateKey }).limit(1).get();
+  if (done.data.length) return { dateKey, skipped: true };
+  const runs = (await col('runs').where({ submittedAt: _.gte(from).and(_.lt(to)) }).count()).total;
+  const flags = {};
+  for (const k of KINDS) flags[k] = (await col('anomalies').where({ kind: k, ts: _.gte(from).and(_.lt(to)) }).count()).total;
+  const mismatchRate = runs > 0 ? flags.mismatch / runs : 0;
+  const alert = runs > 0 && mismatchRate > MISMATCH_ALERT;
+  if (alert) console.error(`[ALERT] mismatch rate ${(mismatchRate * 100).toFixed(2)}% on ${dateKey} (${flags.mismatch}/${runs}): likely client/server content or config version skew`);
+  await store.writeEvent('server', 'anomaly_daily', { dateKey, runs, ...flags, mismatchRate: Math.round(mismatchRate * 10000) / 10000, alert });
+  return { dateKey, runs, flags, alert };
+}
+
 exports.main = store.handler(async (event, { startedAt }) => {
   const _ = store._();
   const nowMs = now();
@@ -37,5 +66,7 @@ exports.main = store.handler(async (event, { startedAt }) => {
   for (const t of TARGETS) removed[t.col] = await purge(t.col, { [t.field]: _.lt(cutoffMs) }, deadline);
   removed.group_members = await purge('group_members', { lastSeen: _.lt(cutoffKey) }, deadline);
   removed.rate_limits = await purge('rate_limits', { expireAt: _.lt(nowMs) }, deadline);
-  return { ok: true, cutoffKey, removed };
+  let anomalyDaily = null;
+  try { anomalyDaily = await rollUp(core.dateKeyAt(nowMs)); } catch (e) { console.warn('[cleanup] roll-up failed', store.errText(e)); }
+  return { ok: true, cutoffKey, removed, anomalyDaily };
 }, { auth: false, serverOnly: true });

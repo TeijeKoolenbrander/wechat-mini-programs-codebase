@@ -53,6 +53,8 @@ npm test         # runs everything, incl. the common drift test
 | `GROUP_REF_PEPPER` | yes | secret pepper: `groupRef = sha256(openGId + pepper)[0..16)`; also keys the challenge-id hash. Without it `joinGroup` and `createChallenge` return `SERVER_CONFIG` |
 | `TZ` | set to `Asia/Shanghai` | in each `function.config.json`. The code does not depend on it (date keys use core `date.js`), it is belt and braces |
 | `LAUNCH_DATE_KEY` | optional | `YYYYMMDD` of issue 1. If unset, the date of the first seed ever created is stored once in `meta/launch` |
+| `SUBSCRIBE_TEMPLATE_ID` | optional | the one-time subscribe-message template id ("好友接下了你的战书"), used when `app_config.subscribe.tmplId` is absent. Without either, `subscribeChallenge` returns `NO_TEMPLATE`, `getDaily.features.subscribe` is absent and nothing is ever sent. Set on `subscribeChallenge` and `getDaily` (and `submitRun` for the send) |
+| `SUBSCRIBE_MP_STATE` | optional | `developer` / `trial` / `formal` (default formal): `miniprogramState` of the send, for testing a trial build |
 | `JOINGROUP_RETURN_OPENGID` | optional, `1` | only if the device spike forces the `groupid` route (spec §9.2 step 6): `joinGroup` then also returns the openGId |
 
 No AppSecret, no `session_key`, no `code2Session` anywhere (cloudID decryption needs none). A test fails if any of those strings appear in the function code.
