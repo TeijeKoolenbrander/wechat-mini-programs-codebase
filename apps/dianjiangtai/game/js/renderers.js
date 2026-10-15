@@ -15,6 +15,9 @@ function hitTestLocal(hits, x, y) {
   return null;
 }
 
+/** Renderer exceptions swallowed by the stub fallback (QA can read them). */
+const fallbackErrors = [];
+
 function loadRenderers() {
   let real = null;
   try {
@@ -26,7 +29,19 @@ function loadRenderers() {
     return {
       kind: 'real',
       makeLayout: real.makeLayout,
-      draw: (screen, ctx, vm, layout) => real.screens[screen].draw(ctx, vm, layout),
+      // A screen the real renderer does not know yet (v1 history), or one that throws on a newer view model
+      // (for example a 识人 draft with null stats), falls back to the stub drawer instead of a black screen.
+      draw: (screen, ctx, vm, layout) => {
+        const s = real.screens[screen];
+        if (s) {
+          try {
+            return s.draw(ctx, vm, layout);
+          } catch (e) {
+            fallbackErrors.push(screen + ': ' + (e && e.message));
+          }
+        }
+        return stub.draw(screen, ctx, vm, layout);
+      },
       drawOverlay: (ctx, ov, layout) => (real.overlay ? real.overlay.draw(ctx, ov, layout) : []),
       hitTest: real.hitTest || hitTestLocal,
       shareCard: real.shareCard || null,
@@ -35,4 +50,4 @@ function loadRenderers() {
   return { kind: 'stub', makeLayout: stub.stubLayout, draw: stub.draw, drawOverlay: stub.drawOverlay, hitTest: hitTestLocal, shareCard: null };
 }
 
-module.exports = { loadRenderers, hitTestLocal };
+module.exports = { loadRenderers, hitTestLocal, fallbackErrors };

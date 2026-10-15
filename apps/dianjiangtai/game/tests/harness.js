@@ -188,20 +188,51 @@ function boot(t, opts) {
   return g;
 }
 
+/**
+ * Play a ranked daily (or a challenge that counts as the daily) against an api object the way the client does:
+ * startRun returns round 1, getRound the next ones, the first pool general goes into the next open slot.
+ * Resolves { actions, rounds, last } (last = the last getRound/startRun response).
+ */
+async function driveProgressive(api, o) {
+  const draft = require('../core/draft');
+  const rounds = [];
+  const first = await api.startRun({ mode: o.mode || 'daily', clientRunId: o.clientRunId, dateKey: o.dateKey, challengeId: o.challengeId });
+  if (!first.ok) return { error: first };
+  rounds.push(...first.rounds);
+  const run = draft.createRun({ seed: 0, contentVersion: require('../core/content').LATEST_CONTENT_VERSION, mode: o.mode === 'challenge' ? 'challenge' : 'daily', rounds });
+  const content = run.content;
+  for (let r = 1; r <= 5; r++) {
+    if (r > 1) {
+      const resp = await api.getRound({ clientRunId: o.clientRunId, dateKey: o.dateKey, actions: run.actions.slice() });
+      if (!resp.ok) return { error: resp, actions: run.actions, rounds };
+      rounds[resp.round - 1] = resp.data;
+      draft.nextRound(run);
+    }
+    draft.apply(run, { round: r, type: 'flip' });
+    const pool = draft.currentPool(run);
+    draft.apply(run, { round: r, type: 'pick', generalId: content.roster[pool[0]], slot: content.slots[r - 1] });
+  }
+  return { actions: run.actions, rounds };
+}
+
 /** Play one full run from the draft screen: 5 rounds, first pool general into the first open slot. */
-async function playDraft(g) {
+async function playDraft(g, opts) {
+  opts = opts || {};
   for (let round = 1; round <= 5; round++) {
+    if (opts.beforeRound) opts.beforeRound(round);
     g.tapId('primary'); // 翻令 (ends coach mark if shown)
+    await g.settle(); // a progressive daily fetches the round first
     g.wait(1300);
     await g.settle();
     const pool = g.tapId((h) => h.id.indexOf('pool:') === 0 && h.id !== 'pool:list');
     void pool;
     g.tapId((h) => h.id.indexOf('slot:') === 0);
     g.wait(400); // clear the primary-button debounce
+    if (round === 5 && opts.beforeMarch) opts.beforeMarch();
     g.tapId('primary'); // 下一轮 / 出征
     g.wait(400);
     await g.settle();
   }
 }
 
-module.exports = { boot, playDraft, SCREEN, CAPSULE };
+module.exports = { boot, playDraft, driveProgressive, SCREEN, CAPSULE };

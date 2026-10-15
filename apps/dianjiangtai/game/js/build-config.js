@@ -12,5 +12,7 @@ module.exports = {
   cloudEnv: '',
   adUnits: { rewarded: '', interstitial: '' },
   stubAds: true,
-  appVersion: '0.1.0',
+  /** One-time subscribe message template id (H3). Empty -> the 提醒我 offer is hidden everywhere. The remote app_config value wins when present. */
+  subscribeTmplId: '',
+  appVersion: '1.0.0',
 };

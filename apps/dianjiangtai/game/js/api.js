@@ -14,8 +14,8 @@
 
 const { createMockServer } = require('./mock-server');
 
-const NAMES = ['getDaily', 'startRun', 'submitRun', 'joinGroup', 'getBoard', 'getReplay', 'createChallenge', 'getChallenge', 'track'];
-const TIMEOUT_MS = { submitRun: 5000, getDaily: 8000, getBoard: 8000, track: 6000 };
+const NAMES = ['getDaily', 'startRun', 'submitRun', 'joinGroup', 'getBoard', 'getReplay', 'createChallenge', 'getChallenge', 'track', 'getRound', 'getHistory', 'subscribeChallenge'];
+const TIMEOUT_MS = { submitRun: 5000, getDaily: 8000, getBoard: 8000, track: 6000, startRun: 5000, getRound: 5000, getHistory: 5000, subscribeChallenge: 5000 };
 
 function createApi(opts) {
   opts = opts || {};

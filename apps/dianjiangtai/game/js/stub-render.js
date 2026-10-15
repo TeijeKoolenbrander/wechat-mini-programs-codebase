@@ -73,7 +73,8 @@ const HOME_LABEL = { available: '出征', inProgress: '继续出征', done: '查
 const drawers = {
   home(p, vm) {
     p.text('点将台', 28);
-    p.text('今日军令 · 第 ' + vm.daily.issueNo + ' 期  [' + vm.daily.state + ']' + (vm.daily.record ? ' ' + vm.daily.record.w + '-' + vm.daily.record.l + ' ' + vm.daily.bandLabel : ''));
+    p.text('今日军令 · 第 ' + vm.daily.issueNo + ' 期' + (vm.daily.variantLabel ? ' · ' + vm.daily.variantLabel : '') + '  [' + vm.daily.state + ']' + (vm.daily.record ? ' ' + vm.daily.record.w + '-' + vm.daily.record.l + ' ' + vm.daily.bandLabel : ''));
+    if (vm.daily.streak && vm.daily.streak.text) p.text(vm.daily.streak.text);
     if (vm.hasGroupContext) p.button('home:groupBanner', '来自群聊 · 查看本群今日排行');
     const s = vm.daily.state;
     p.button('home:daily', HOME_LABEL[s] || '出征', { disabled: s === 'loading' || s === 'pendingSubmit' || s === 'offline' || s === 'error' });
@@ -81,6 +82,7 @@ const drawers = {
     p.button('home:free', '自由点将 · 不限次');
     p.button('home:groupBoard', '群榜');
     p.button('home:friendBoard', '好友榜');
+    p.button('home:history', '往期');
     p.button('home:howto', '玩法');
     p.button('home:sound', vm.muted ? '声音：关' : '声音：开');
     p.button('home:settings', '隐私与设置');
@@ -92,6 +94,8 @@ const drawers = {
       p.text(vm.sheet === 'howto' ? '玩法：翻令、选将、放入位置，五轮后出征' : '隐私与设置');
       if (vm.sheet === 'settings') {
         p.button('settings:sound', vm.muted ? '声音：关' : '声音：开');
+        p.button('settings:largeText', vm.settings.largeText ? '大字模式：开' : '大字模式：关');
+        p.button('settings:highContrast', vm.settings.highContrast ? '高对比度：开' : '高对比度：关');
         if (!vm.settings.friendBoardEnabled) p.button('settings:openSetting', '好友排行：未开启 [去设置]');
         p.button('settings:privacy', '用户隐私保护指引');
         p.button('settings:feedback', '联系我们/反馈');
@@ -101,7 +105,12 @@ const drawers = {
   },
   draft(p, vm) {
     p.button('back', '‹ 返回', { w: 88, inline: false });
-    p.text(vm.mode + '  第 ' + vm.round + ' / 5 轮  [' + vm.phase + ']');
+    p.text(vm.mode + '  第 ' + vm.round + ' / 5 轮  [' + vm.phase + ']' + (vm.headerTag ? '  ' + vm.headerTag : ''));
+    if (vm.shirenCoach) p.text(vm.shirenCoach, 14);
+    if (vm.roundFetchText) {
+      p.text(vm.roundFetchText);
+      p.button('round:retry', '重试');
+    }
     if (vm.tokens) p.text('令牌：' + vm.tokens.faction.label + ' · ' + vm.tokens.era.label);
     if (vm.notice) p.text(vm.notice);
     const hw = (p.L.contentW - 8) / 2;
@@ -115,16 +124,16 @@ const drawers = {
       p.y = saved;
     }
     p.y += 56;
-    for (const g of vm.pool.slice(0, 6)) p.button('pool:' + g.id, g.name + ' ' + g.tier + ' ' + ['zhi', 'xin', 'ren', 'yong', 'yan'].map((k) => g.stats[k]).join('/'));
+    for (const g of vm.pool.slice(0, 6)) p.button('pool:' + g.id, g.name + (g.stats ? ' ' + g.tier + ' ' + ['zhi', 'xin', 'ren', 'yong', 'yan'].map((k) => g.stats[k]).join('/') : ' ' + g.blurb), { disabled: g.drafted });
     if (vm.selected) {
       p.text(vm.selected.name + '：' + vm.selected.blurb);
-      for (const o of vm.selected.slotOptions) p.button('slot:' + o.slot, o.label + ' ' + o.score + ' ' + o.fit);
+      for (const o of vm.selected.slotOptions) p.button('slot:' + o.slot, o.label + (o.score === null ? '' : ' ' + o.score + ' ' + o.fit));
       p.button('sheet:close', '取消');
     }
     p.text(vm.lineup.map((e) => e.label + (e.name ? e.name : '—')).join(' '));
     if (vm.canUndo) p.button('undo', '撤回');
     p.y = Math.max(p.y, p.L.thumbTop);
-    p.button('primary', vm.primaryLabel, { disabled: vm.phase === 'flipped' || vm.phase === 'selecting' });
+    p.button('primary', vm.primaryLabel, { disabled: vm.phase === 'flipped' || vm.phase === 'selecting' || vm.primaryDisabled });
     if (vm.coach) p.button('coach:next', '下一步 (' + vm.coach + '/3)');
   },
   result(p, vm) {
@@ -140,13 +149,20 @@ const drawers = {
       p.text(vm.status === 'pendingSubmit' ? '战报待发送' : '出错了');
       return p.button('result:retry', '重试');
     }
-    p.text(vm.record.w + ' 胜 ' + vm.record.l + ' 负  ' + vm.band.label, 24);
+    if (vm.reveal && vm.reveal.pending) {
+      p.text('五德揭晓 ' + vm.reveal.step + '/5');
+      p.hits.push({ id: 'result:skip', x: 0, y: 0, w: p.L.W, h: p.L.H });
+    }
+    p.text(vm.record.w + ' 胜 ' + vm.record.l + ' 负  ' + vm.band.label + (vm.variantLabel ? ' · ' + vm.variantLabel : ''), 24);
+    if (vm.streak && vm.streak.text) p.text(vm.streak.text);
     p.text(vm.comment);
     if (vm.rarityText) p.text(vm.rarityText);
     if (vm.challenge) p.text('好友 ' + vm.challenge.theirRecord.w + '-' + vm.challenge.theirRecord.l);
     p.button('result:breakdown', '战报明细');
     p.button('result:share', '分享战报');
     p.button('result:challenge', '发起挑战');
+    p.button('result:save', '保存图片');
+    if (vm.subscribe.state === 'offer') p.button('result:subscribe', '好友应战时提醒我');
     p.button('result:replay', vm.replay.unlocked ? '查看复盘' : '▶ 复盘·最佳阵容');
     p.button('result:board', vm.boardLabel);
     p.button('result:again', '再来一局');
@@ -167,7 +183,23 @@ const drawers = {
       p.button('challenge:retry', '重试');
       p.button('challenge:free', '自由点将');
     } else if (vm.status === 'answered') p.button('challenge:compare', '查看对比');
-    else p.button('challenge:home', '返回首页');
+    else {
+      if (vm.subscribe && vm.subscribe.state === 'offer') p.button('challenge:subscribe', '好友应战时提醒我');
+      p.button('challenge:home', '返回首页');
+    }
+  },
+  history(p, vm) {
+    p.button('history:back', '‹ 返回', { w: 88 });
+    p.text('往期军令  ' + (vm.bestStreakText || '') + '  [' + vm.state + ']');
+    if (vm.state === 'offline' || vm.state === 'error') p.button('history:retry', '重试');
+    for (const it of vm.items.slice(0, 8)) p.button('history:item:' + it.dateKey, '第' + it.issueNo + '期 ' + it.dateText + (it.variantLabel ? ' ' + it.variantLabel : '') + ' ' + (it.mine ? it.mine.record.w + '胜' + it.mine.record.l + '负' : '未出征') + (it.statusText ? ' ' + it.statusText : ''));
+  },
+  historyIssue(p, vm) {
+    p.button('issue:back', '‹ 往期', { w: 88 });
+    p.text('第' + vm.issueNo + '期  ' + (vm.mine ? vm.mine.record.w + '胜' + vm.mine.record.l + '负' : '未出征'));
+    if (vm.stats) p.text(vm.stats.totalText);
+    if (vm.best) p.text('本期最佳 ' + vm.best.record.w + '胜' + vm.best.record.l + '负');
+    if (vm.bestLockedText) p.text(vm.bestLockedText);
   },
   board(p, vm) {
     p.button('board:back', '‹ 返回', { w: 88 });
