@@ -339,7 +339,7 @@ function createMockServer(opts) {
         isParticipant: C.isParticipant(chain, openid),
         isStarter: chain.starter === openid,
         canRevealNow: can.ok,
-        canSameAgain: !!chain.promptId && !chain.custom,
+        canSameAgain: !!chain.promptId && !chain.custom && (chain.state === 'revealed' || (chain.state === 'expired' && chain.starter === openid)),
         expiresAt: chain.expiresAt,
         claimEtaMs: chain.claim && C.claimActive(chain, now()) ? chain.claim.expiresAt - now() : null,
         serverNow: now(),
@@ -414,6 +414,7 @@ function createMockServer(opts) {
         ok: true,
         chainId: chain._id,
         promptText: db.ugc.viewEnabled ? chain.promptText : '',
+        promptId: chain.promptId && !chain.custom ? chain.promptId : null,
         custom: chain.custom,
         passed: chain.passed,
         early: chain.revealReason !== 'complete',
@@ -521,6 +522,7 @@ function createMockServer(opts) {
             mySteps: rows.filter((s) => s.state === 'passed' || s.state === 'pending').map((s) => s.n),
             blockedStep: blocked ? blocked.n : null,
             promptText: ch.state === 'revealed' || ch.starter === openid ? ch.promptText : undefined,
+            promptId: (ch.state === 'revealed' || ch.starter === openid) && ch.promptId && !ch.custom ? ch.promptId : undefined,
             at: ch.lastActivityAt,
             unseen: ch.state === 'revealed' && C.isParticipant(ch, openid) && !p.seen[id],
           };
@@ -629,7 +631,7 @@ function createMockServer(opts) {
   }
 
   function teaserOf(chain) {
-    return { promptText: chain.promptText, finalText: finalTextOf(chain), passed: chain.passed, canSameAgain: !!chain.promptId && !chain.custom };
+    return { promptId: chain.promptId && !chain.custom ? chain.promptId : null, promptText: chain.promptText, finalText: finalTextOf(chain), passed: chain.passed, canSameAgain: !!chain.promptId && !chain.custom };
   }
 
   function submitStepInner(d, openid) {

@@ -136,7 +136,7 @@ test('two players complete a 6-棒 chain, reveal for participants only, teaser f
   // outsider: teaser only, no drawings
   const o = outsider.call('getReveal', { chainId: x.chainId });
   assert.deepEqual([o.ok, o.code], [false, 'NOT_PARTICIPANT']);
-  assert.deepEqual(o.teaser, { promptText: '小猫吃面条', finalText: '外星人在吃披萨', passed: 6, canSameAgain: true });
+  assert.deepEqual(o.teaser, { promptId: 'A01', promptText: '小猫吃面条', finalText: '外星人在吃披萨', passed: 6, canSameAgain: true });
   assert.ok(!/strokes/.test(JSON.stringify(o)));
   assert.equal(outsider.call('getChain', { chainId: x.chainId, groupRef: x.ref }).state, 'revealedTeaser');
   // laugh toggles
