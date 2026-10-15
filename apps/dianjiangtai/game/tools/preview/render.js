@@ -9,6 +9,9 @@
  * Output: out/<WxH>/<mode>/<screen>__<state>.png and
  *   out/<WxH>/<mode>/_contact_<screen>_<page>.png (4-5 states per page),
  *   out/seals/<mode>.png (seal gallery: factions x tiers x name lengths).
+ * REAL_DIR=<dir>: render the REAL view models the controller produced instead of the hand-written fixtures.
+ *   DUMP_VIEWS=<dir> node --test tests/integration.test.js   (writes <dir>/real_<mode>.json)
+ *   REAL_DIR=<dir> node render.js                            (output goes to out/real/<WxH>/<mode>/...)
  * Fonts: registers Noto Serif SC from the system fonts folder (FONT_DIR) as
  * a stand-in for the device serif; falls back to whatever the OS has.
  */
@@ -59,6 +62,7 @@ function sysFor(sz) {
   };
 }
 
+const REAL_DIR = process.env.REAL_DIR || null;
 const DPR = Number(process.env.DPR || 2);
 const SHOW_HITS = process.env.HITS === '1';
 const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
@@ -146,7 +150,7 @@ function sealGallery(out, modeName, display) {
 }
 
 function main() {
-  const out = path.join(__dirname, 'out');
+  const out = path.join(__dirname, 'out', REAL_DIR ? 'real' : '');
   let count = 0;
   for (const modeName of modesOnly) {
     const display = MODES[modeName];
@@ -158,7 +162,13 @@ function main() {
       const dir = path.join(out, key, modeName);
       fs.mkdirSync(dir, { recursive: true });
       const L = makeLayout(sysFor(sz));
-      const fx = buildFixtures({ createCanvas, L, display });
+      let fx;
+      if (REAL_DIR) {
+        const f = path.join(REAL_DIR, 'real_' + modeName + '.json');
+        if (!fs.existsSync(f)) continue;
+        fx = JSON.parse(fs.readFileSync(f, 'utf8'));
+        delete fx.shareCard;
+      } else fx = buildFixtures({ createCanvas, L, display });
       for (const screen of Object.keys(fx)) {
         if (only && !only.includes(screen)) continue;
         if (screen === 'shareCard') {

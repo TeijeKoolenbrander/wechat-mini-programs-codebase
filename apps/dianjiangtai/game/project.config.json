@@ -50,6 +50,10 @@
       {
         "value": "core/README.md",
         "type": "file"
+      },
+      {
+        "value": "js/render/CONTRACT.md",
+        "type": "file"
       }
     ],
     "include": []

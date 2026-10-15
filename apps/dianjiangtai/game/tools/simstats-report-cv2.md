@@ -3,7 +3,7 @@
 contentVersion 2, configVersion 2, gateVersion 1, node v24.15.0, 8 worker(s)
 seeds 100000 (offset 0); tau 0.7; jitter 0.35; poolCap 8; pMin 0.672; curve [7.36, 7.624, 7.887, 8.151, 8.415, 8.678, 8.942, 9.205, 9.469, 9.733, 9.996, 10.26]
 
-models simulated in 21.2 s
+models simulated in 15.5 s
 
 ## Player models (free play, 1 free re-spin per dimension)
 
@@ -85,19 +85,19 @@ Bonds in optimal lineups: taoyuan 3.23%, jiangdong 2.23%, longfeng 0.57%, suwei 
 
 ## 复盘 search timing
 
-1200 searches (node v24.15.0, this machine, one thread): p50 41.5 ms, p90 118.3 ms, p99 340.8 ms, max 1597.1 ms; distinct sets p50 14080, max 32768; lineup evaluations p50 1552, p99 138779.
-Client-side 复盘 (<= 5000 distinct sets, 16.50% of searches): p50 9.5 ms, p99 90.5 ms, max 111.8 ms.
-Heavy (server getReplay first, 83.50% of searches): p50 48.3 ms, p99 354.0 ms, max 1597.1 ms (cloud function timeout 10 s).
-Constructed worst case (five biggest distinct cells): 32256 distinct sets, 211211 lineup evaluations, 473.9 ms.
+1200 searches (node v24.15.0, this machine, one thread): p50 49.3 ms, p90 144.2 ms, p99 449.7 ms, max 1224.5 ms; distinct sets p50 14080, max 32768; lineup evaluations p50 1552, p99 138779.
+Client-side 复盘 (<= 5000 distinct sets, 16.50% of searches): p50 10.4 ms, p99 92.2 ms, max 93.8 ms.
+Heavy (server getReplay first, 83.50% of searches): p50 57.2 ms, p99 488.8 ms, max 1224.5 ms (cloud function timeout 10 s).
+Constructed worst case (five biggest distinct cells): 32256 distinct sets, 211211 lineup evaluations, 547.5 ms.
 - NOTE largest heavySets keeping this sample's client max under 250 ms: 13000
-- PASS client-side 复盘 max 111.8 ms < 300 ms in node (p99 90.5 ms; heavy token sets go to getReplay)
-- PASS heavy / worst-case search 474 ms is far inside the 10 s getReplay timeout
+- PASS client-side 复盘 max 93.8 ms < 300 ms in node (p99 92.2 ms; heavy token sets go to getReplay)
+- PASS heavy / worst-case search 548 ms is far inside the 10 s getReplay timeout
 
 ## Daily gates
 
 Seeds where perfect play reaches 12-0: 1.68%.
 gateCheck over 4000 candidate seeds: accepted 0.55%; optimal failed 98.32%; mean greedy 12-0 rate 15.97%; mean random 12-0 rate 0.00%.
-gateCheck time per seed (under 8-way parallel load): median 44.6 ms, p99 396.0 ms.
+gateCheck time per seed (under 8-way parallel load): median 65.2 ms, p99 565.5 ms.
 Probability that at least one of 50 candidates is accepted: 24.10%.
 - NOTE strict daily gate acceptance 0.55%: about 182 candidates per accepted seed, so the offline seed bank (--bank) is mandatory
 - PASS the gate accepts some seeds (the offline bank can be filled)

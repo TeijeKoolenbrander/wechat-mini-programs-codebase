@@ -159,6 +159,20 @@ node apps/dianjiangtai/cloudfunctions/scripts/prepare-bank.js apps/dianjiangtai/
 
 `prepare-bank.js` uses `game/core` (or `DJ_CORE_SRC=<other core dir>` to verify against another checkout). Bank lineups keep the per-entry `faction` the core writes (cohesion needs it); `genDaily` re-checks each entry (rebuilds the sheet for the entry's own versions, simulates the stored lineup, requires 12-0) before using it. Re-importing the same file cannot duplicate (`_id = bank_<seed>`). A day with no matching entry falls back to the live loop, which succeeds on about 1 day in 5: refill when `genDaily` logs the low-bank warning.
 
+## Client contract (what the game reads; pinned by `tests/client-contract.test.js`)
+
+The game develops against an in-memory mock (`game/js/mock-server.js`). `tests/client-contract.test.js` plays the same flows on these functions and on the mock and requires the same fields and types from both, so the backend shape is the authority:
+
+- `getDaily`: `{dateKey, issueNo, variant, serverNow, myStatus: none|started|done, myRecord?, myStreak {current,best}, features {ads {banner, interstitial}, subscribe?}}`, never `rounds`.
+- `startRun` (daily, or a challenge that counts as the daily): `{resumed, released, rounds: [round 1], actions?, clientRunId?}`; a resume returns every released round, the frozen `actions` and the attempt's original `clientRunId`. Free runs: `{ok, resumed:false}`.
+- `getRound`: `{round: n+1, data: <sheet round>, released}`.
+- `submitRun`: `{record, battles, events, band, morale, ranked, rarity: {pct,total}|null, streak?: {current,best}, challengeCompare?}`; `ALREADY_PLAYED` carries the stored response as `result`.
+- `getHistory`: items `{dateKey, issueNo, variant, status, mine? {w,l,lineupIdx,lineupFac,band?,rarity?}, total?, hist?, best? {lineupIdx, lineupFac?, record}}`, `bestStreak`.
+- `getChallenge` (own): `answerCount`, `bestAnswer` = `{w,l}` or null, `subscribe: {granted}`.
+- Errors: `{ok:false, code, message, ...extra}`.
+
+Progressive delivery uses the core's own rules where the core has them: `validate.extendsPrefix` (via `progress.isPrefix`) for "extends the frozen prefix". Round tokens are served from the stored sheet after `replayPartial` (same draft state machine as `validate.roundToken`); `tests/core-consistency.test.js` pins that `getRound` returns exactly what `validate.roundToken` gives at every step, and rejects what it rejects.
+
 ## Behaviour notes
 
 - **Progressive delivery (v1, spec 5.2).** `getDaily` has no `rounds`. `startRun` (first 翻令) creates `daily_progress` (`_id <dateKey>_<openid>`, `released: 1`, `actions: []`) and returns round 1 only. `getRound({clientRunId, dateKey, actions})`: the actions must be a valid partial run (same draft state machine and rules as `submitRun`: pool cap, drafted-person rule, re-spin allowance, no ad re-spin) that ends exactly at the pick of round n (1..4), `released >= n` (so a round can never be skipped), and extend the stored prefix. Then, in a transaction, the prefix is stored (frozen) and `released = n + 1`, and `rounds[n]` is returned whole (`fallback` and, for content 2, `pools` included). Same input again returns the same round; a shorter stale prefix of the stored one returns an already released round and never lowers `released`. A diverging prefix returns `INVALID_ACTIONS` and writes a `prefix` anomaly. Nothing else ever returns a sheet round of an open ranked attempt: `getChallenge` omits `rounds` when the challenge counts as the caller's daily (rounds then come through `startRun`/`getRound`, progress `mode: challenge`); friendly challenges, past/free seeds still get the full sheet. `submitRun` for a ranked run requires `released == 5` and an exact prefix match, else `INVALID_ACTIONS` plus `prefix` and `invalid_ranked` flags.

@@ -391,7 +391,8 @@ async function runMisc(t, mode) {
   await g.settle();
   S('board_ready');
   hit(g, 'board:back');
-  g.app.ctl.state.group = { status: 'ok', groupRef: 'G1', shareTicket: 'T', groupid: null };
+  const joined = mock.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } });
+  g.app.ctl.state.group = { status: 'ok', groupRef: joined.groupRef, shareTicket: 'T', groupid: null };
   hit(g, 'home:groupBoard');
   await g.settle();
   S('board_group_ready');
