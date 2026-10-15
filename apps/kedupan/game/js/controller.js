@@ -138,6 +138,8 @@ function createController(deps) {
   // ---------------------------------------------------------------- entry routing (7.5)
 
   c.routeEntry = async function (e) {
+    // the group context lives for the entry that brought it (8.1): a card without a ticket clears the previous one
+    if (!e.join && (e.kind === 'daily' || e.kind === 'group' || e.kind === 'round')) c.group = { status: 'none', groupRef: null, shareTicket: null, errCode: undefined };
     if (e.kind === 'daily') {
       c.track('card_open', { cardKind: e.notice ? 'notice' : 'daily', hasShareTicket: e.hasShareTicket });
       if (e.join) c.joinGroupFor(e);

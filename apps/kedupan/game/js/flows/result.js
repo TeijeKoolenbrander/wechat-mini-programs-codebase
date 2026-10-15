@@ -43,17 +43,22 @@ module.exports = function createResult(c) {
     c.invalidate();
   }
 
-  /** Open the day result. first = reached by finishing card 5 (the 看结果 tap): this is where the marker write happens. */
-  f.open = async function (first, replace) {
+  /**
+   * Open the day result. first = reached by finishing card 5 (the 看结果 tap): this is where the marker write happens.
+   * quiet = coming back from a bonus card: refresh, but do not count another daily_result_view.
+   */
+  f.open = async function (first, quiet) {
     if (!complete()) return c.goHome();
     const d = S.daily;
-    c.go('result', { replace: replace || c.screen === 'card' || c.screen === 'result' });
+    c.go('result', { replace: c.screen === 'card' || c.screen === 'result' });
     r.sheet = null;
     r.bonusAd = 'idle';
     r.distAd = 'idle';
     r.stale = false;
-    track('daily_result_view', { dateKey: d.dateKey, final: c.serverNow() >= closeMs(d.dateKey) });
-    c.analytics.flush();
+    if (!quiet) {
+      track('daily_result_view', { dateKey: d.dateKey, final: c.serverNow() >= closeMs(d.dateKey) });
+      c.analytics.flush();
+    }
     if (first && S.markerDay !== d.dateKey) c.privacy.writeMarker(d.dateKey, d.total).then(() => c.invalidate());
     await refresh();
     return undefined;

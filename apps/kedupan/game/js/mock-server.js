@@ -380,11 +380,15 @@ function createMockServer(opts) {
     return Object.assign({ ok: true }, out);
   };
 
-  function closedKeys() {
+  /** The nightly genDaily would have published every day since launch. */
+  function publishThroughToday() {
     const dk = todayKey();
-    const launch = launchKey();
-    for (let k = launch; k <= dk; k = D.addDays(k, 1)) ensureSet(k);
+    for (let k = launchKey(); k <= dk; k = D.addDays(k, 1)) ensureSet(k);
     lazyFinalizeAll();
+  }
+
+  function closedKeys() {
+    publishThroughToday();
     return Object.keys(db.sets)
       .filter((k) => isClosed(k))
       .sort()
@@ -450,6 +454,7 @@ function createMockServer(opts) {
 
   fns.unlockDistribution = function (d, ctx) {
     const dk = d.dateKey;
+    publishThroughToday();
     if (typeof dk !== 'string' || !db.sets[dk]) return err('INVALID_INPUT');
     if (!rate('dist', ctx.openid, config.extras.distributionPerDay)) return err('RATE_LIMITED');
     const e = db.entries[entryKey(dk, ctx.openid)];

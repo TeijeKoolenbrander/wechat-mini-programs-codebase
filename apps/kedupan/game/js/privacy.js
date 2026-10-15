@@ -147,7 +147,11 @@ function createPrivacy(opts) {
       wx.setUserCloudStorage({
         KVDataList: [{ key: MARKER_KEY, value: JSON.stringify({ d: dateKey, s: total }) }],
         success: () => {
-          if (st().privacy !== 'agreed') st().privacy = 'agreed';
+          if (st().privacy !== 'agreed') {
+            // the official popup (if any) fired on this first privacy-interface call and the user agreed
+            st().privacy = 'agreed';
+            analytics.track('privacy_result', { trigger: 'marker_write', result: 'agreed' });
+          }
           st().markerPending = null;
           store.state.markerDay = dateKey;
           save();

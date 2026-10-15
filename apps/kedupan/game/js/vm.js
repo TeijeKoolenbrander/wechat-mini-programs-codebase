@@ -103,7 +103,7 @@ function cardVm(m, display, features) {
     coach: !!m.coach,
     sheet: m.sheet || null,
     pendingText: phase === 'pending' ? m.pendingText || '网络不稳，答案还没送达' : null,
-    canReport: phase === 'revealed' && m.mode !== 'bonus' && m.canReport !== false,
+    canReport: phase === 'revealed' && m.canReport !== false,
     ends: { left: m.card.left, right: m.card.right },
   };
 }
