@@ -43,7 +43,7 @@ test('identity: no function reads OPENID/openid from client input', () => {
 });
 
 test('secrets: only env vars; no AppSecret/session_key/code2Session anywhere; no committed pepper values', () => {
-  const allowedEnv = new Set(['GROUP_REF_PEPPER', 'JOINGROUP_RETURN_OPENGID', 'LAUNCH_DATE_KEY', 'TZ']);
+  const allowedEnv = new Set(['GROUP_REF_PEPPER', 'JOINGROUP_RETURN_OPENGID', 'LAUNCH_DATE_KEY', 'TZ', 'SUBSCRIBE_TEMPLATE_ID', 'SUBSCRIBE_MP_STATE']);
   for (const [file, src] of sources()) {
     assert.doesNotMatch(src, /appsecret|session_key|code2session|jscode2session/i, file);
     for (const m of src.matchAll(/process\.env\.([A-Z_]+)/g)) assert.ok(allowedEnv.has(m[1]), `${file} reads undocumented env ${m[1]}`);
@@ -53,7 +53,7 @@ test('secrets: only env vars; no AppSecret/session_key/code2Session anywhere; no
     assert.deepEqual(Object.keys(c.envVariables), ['TZ'], 'no secrets in committed function config');
   }
   const readme = read(path.join(CF, 'README.md'));
-  for (const v of ['GROUP_REF_PEPPER', 'JOINGROUP_RETURN_OPENGID', 'LAUNCH_DATE_KEY']) assert.ok(readme.includes(v), `README documents ${v}`);
+  for (const v of ['GROUP_REF_PEPPER', 'JOINGROUP_RETURN_OPENGID', 'LAUNCH_DATE_KEY', 'SUBSCRIBE_TEMPLATE_ID', 'SUBSCRIBE_MP_STATE']) assert.ok(readme.includes(v), `README documents ${v}`);
 });
 
 test('every client-facing function derives identity via the handler wrapper; timers are server-only', () => {

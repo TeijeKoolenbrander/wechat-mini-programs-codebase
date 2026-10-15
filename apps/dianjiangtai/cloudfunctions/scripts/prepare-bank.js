@@ -15,7 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const core = path.resolve(__dirname, '..', '..', 'game', 'core');
+const core = require('./sync-core').DEFAULT_CORE; // game/core, or DJ_CORE_SRC for integration tests
 const content = require(path.join(core, 'content'));
 const config = require(path.join(core, 'config'));
 const sheet = require(path.join(core, 'sheet'));

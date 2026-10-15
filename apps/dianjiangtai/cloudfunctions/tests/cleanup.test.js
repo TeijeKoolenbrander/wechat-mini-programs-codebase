@@ -30,7 +30,7 @@ function seedData() {
   h.db.put('rate_limits', { _id: 'rl_old', expireAt: T0 - 1 });
   h.db.put('rate_limits', { _id: 'rl_new', expireAt: T0 + 1000 });
 }
-const ids = (c) => h.db.all(c).map((d) => d._id).sort();
+const ids = (c) => h.db.all(c).filter((d) => d.name !== 'anomaly_daily').map((d) => d._id).sort();
 
 test('180-day retention deletes old rows, keeps recent rows and daily_stats (AC 57)', async () => {
   seedData();
@@ -58,7 +58,7 @@ test('deletes in batches (the server removes <= 1000 per call)', async () => {
   for (let i = 0; i < 2500; i++) h.db.put('events', { _id: 'e' + i, ts: T0 - 200 * DAY });
   const r = await h.call('cleanup', {}, {});
   assert.equal(r.removed.events, 2500);
-  assert.equal(h.db.all('events').length, 0);
+  assert.equal(h.db.all('events').filter((e) => e.name !== 'anomaly_daily').length, 0);
 });
 
 test('cleanup is server-only: a client call is rejected and deletes nothing', async () => {

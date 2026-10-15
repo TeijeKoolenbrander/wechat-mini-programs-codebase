@@ -2,8 +2,8 @@
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { createHarness, bestActions } = require('./helpers/harness');
-const { runId, playDaily } = require('./helpers/fixtures');
+const { createHarness, bestActions, CV } = require('./helpers/harness');
+const { runId, playDaily, releaseAll } = require('./helpers/fixtures');
 
 const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT
 let h;
@@ -13,7 +13,7 @@ beforeEach(() => {
 });
 afterEach(() => h.teardown());
 
-const sheet = (seed) => require(path.join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, 1);
+const sheet = (seed) => require(path.join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, CV);
 
 /** owner plays a free run on `seed` and creates a challenge from it */
 async function freeChallenge(owner, seed = 777) {
@@ -142,7 +142,13 @@ test('challenge on today\'s daily seed, recipient has not played: it IS their da
   const st = await h.call('startRun', { mode: 'challenge', clientRunId: runId(), challengeId }, { openid: 'friend' });
   assert.deepEqual([st.ok, st.countsAsDaily], [true, true]);
   assert.equal(h.db.all('daily_starts').filter((s) => s.openid === 'friend').length, 1);
-  const res = await h.call('submitRun', { mode: 'challenge', clientRunId: runId(), challengeId, actions: bestActions(view.rounds, { rank: 1 }) }, { openid: 'friend' });
+  // progressive delivery: a challenge that counts as the daily carries no rounds; startRun gave round 1 only
+  assert.equal(view.rounds, undefined);
+  assert.equal(st.rounds.length, 1);
+  const rounds = h.db.all('challenges')[0].rounds;
+  const acts = bestActions(rounds, { rank: 1 });
+  await releaseAll(h, 'friend', h.db.all('challenges')[0].dateKey, acts);
+  const res = await h.call('submitRun', { mode: 'challenge', clientRunId: runId(), challengeId, actions: acts }, { openid: 'friend' });
   assert.equal(res.ok, true, JSON.stringify(res));
   assert.equal(res.ranked, true);
   assert.equal(h.db.all('daily_results').filter((r) => r.openid === 'friend').length, 1);
@@ -180,8 +186,7 @@ test('daily-seed challenge from a past date is a friendly match, never ranked', 
 
 test('a challenge answer without startRun on the daily seed is friendly (cannot preview-then-rank)', async () => {
   const { challengeId } = await dailyChallenge();
-  const view = await h.call('getChallenge', { challengeId }, { openid: 'friend' });
-  const res = await h.call('submitRun', { mode: 'challenge', clientRunId: runId(), challengeId, actions: bestActions(view.rounds) }, { openid: 'friend' });
+  const res = await h.call('submitRun', { mode: 'challenge', clientRunId: runId(), challengeId, actions: bestActions(h.db.all('challenges')[0].rounds) }, { openid: 'friend' });
   assert.equal(res.ranked, false);
   assert.equal(h.db.all('daily_results').filter((r) => r.openid === 'friend').length, 0);
 });

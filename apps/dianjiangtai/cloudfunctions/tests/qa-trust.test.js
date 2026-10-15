@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { createHarness, bestActions } = require('./helpers/harness');
-const { runId, playDaily, startDaily, allStrings, allKeys } = require('./helpers/fixtures');
+const { runId, playDaily, startDaily, releaseAll, sheetOf, prefixThroughPick, allStrings, allKeys } = require('./helpers/fixtures');
 
 const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT
 const CF = path.join(__dirname, '..');
@@ -34,7 +34,7 @@ test('daily best lineup is never obtainable before the caller has a ranked daily
     assert.equal(view.countsAsDaily, true);
     const clientRunId = runId();
     // never calls startRun, so the run is a friendly match and the daily stays unplayed
-    const res = await h.call('submitRun', { mode: 'challenge', clientRunId, challengeId, actions: bestActions(view.rounds) }, { openid: 'cheat' });
+    const res = await h.call('submitRun', { mode: 'challenge', clientRunId, challengeId, actions: bestActions(h.db.all('challenges')[0].rounds) }, { openid: 'cheat' });
     assert.equal(res.ok, true);
     assert.equal(res.ranked, false);
     assert.equal(h.db.all('daily_results').filter((r) => r.openid === 'cheat').length, 0);
@@ -46,12 +46,13 @@ test('daily best lineup is never obtainable before the caller has a ranked daily
 
 test('ONE ranked daily per openid even when the first one came through a challenge', async () => {
   const challengeId = await dailyChallenge();
-  const view = await h.call('getChallenge', { challengeId }, { openid: 'friend' });
   await h.call('startRun', { mode: 'challenge', clientRunId: runId(), challengeId }, { openid: 'friend' });
-  const first = await h.call('submitRun', { mode: 'challenge', clientRunId: runId(), challengeId, actions: bestActions(view.rounds, { rank: 2 }) }, { openid: 'friend' });
+  const acts = bestActions(h.db.all('challenges')[0].rounds, { rank: 2 });
+  await releaseAll(h, 'friend', '20261103', acts);
+  const first = await h.call('submitRun', { mode: 'challenge', clientRunId: runId(), challengeId, actions: acts }, { openid: 'friend' });
   assert.equal(first.ranked, true);
   const d = await h.call('getDaily', {}, { openid: 'friend' });
-  const again = await h.call('submitRun', { mode: 'daily', clientRunId: runId(), dateKey: d.dateKey, actions: bestActions(d.rounds, { rank: 0 }) }, { openid: 'friend' });
+  const again = await h.call('submitRun', { mode: 'daily', clientRunId: runId(), dateKey: d.dateKey, actions: bestActions(sheetOf(h, d.dateKey), { rank: 0 }) }, { openid: 'friend' });
   assert.equal(again.code, 'ALREADY_PLAYED');
   assert.deepEqual(again.result.record, first.record);
   assert.equal(h.db.all('daily_results').filter((r) => r.openid === 'friend').length, 1);
@@ -66,8 +67,10 @@ test('midnight grace boundary is exact: 00:29:59.999 ranks for D, 00:30:00.000 i
       const d = await hh.call('getDaily', {}, { openid: 'u' });
       assert.equal(d.dateKey, '20261103');
       await hh.call('startRun', { mode: 'daily', clientRunId: runId() }, { openid: 'u' });
+      const acts = bestActions(sheetOf(hh, d.dateKey));
+      await releaseAll(hh, 'u', d.dateKey, acts);
       hh.setNow(Date.UTC(2026, 10, 3, 16, 0, 0) + offsetAfterMidnightMs);
-      const r = await hh.call('submitRun', { mode: 'daily', clientRunId: runId(), dateKey: '20261103', actions: bestActions(d.rounds) }, { openid: 'u' });
+      const r = await hh.call('submitRun', { mode: 'daily', clientRunId: runId(), dateKey: '20261103', actions: acts }, { openid: 'u' });
       if (expectOk) { assert.equal(r.ok, true, JSON.stringify(r)); assert.equal(r.ranked, true); } else assert.equal(r.code, 'LATE_SUBMIT');
     } finally { hh.teardown(); }
   }
@@ -95,7 +98,10 @@ test('AC 60 sweep: no function response in a scripted session holds an openid or
   for (const u of OPENIDS) {
     rec(await h.call('startRun', { mode: 'daily', clientRunId: runId() }, { openid: u }));
     const d = await h.call('getDaily', {}, { openid: u });
-    rec(await h.call('submitRun', { mode: 'daily', clientRunId: runId(), dateKey: d.dateKey, actions: bestActions(d.rounds, { rank: n++ }) }, { openid: u }));
+    const acts = bestActions(sheetOf(h, d.dateKey), { rank: n++ });
+    for (let k = 1; k <= 4; k++) rec(await h.call('getRound', { clientRunId: runId(), dateKey: d.dateKey, actions: prefixThroughPick(acts, k) }, { openid: u }));
+    rec(await h.call('submitRun', { mode: 'daily', clientRunId: runId(), dateKey: d.dateKey, actions: acts }, { openid: u }));
+    rec(await h.call('getHistory', {}, { openid: u }));
     h.advance(1000);
   }
   const owned = h.db.all('runs')[0].clientRunId;
@@ -137,7 +143,7 @@ test('board lineups (x) are absent for a caller whose only run is a friendly cha
   const challengeId = await dailyChallenge();
   await playDaily(h, 'other');
   const view = await h.call('getChallenge', { challengeId }, { openid: 'cheat' });
-  await h.call('submitRun', { mode: 'challenge', clientRunId: runId(), challengeId, actions: bestActions(view.rounds) }, { openid: 'cheat' });
+  await h.call('submitRun', { mode: 'challenge', clientRunId: runId(), challengeId, actions: bestActions(h.db.all('challenges')[0].rounds) }, { openid: 'cheat' });
   const b = await h.call('getBoard', { kind: 'friend', dateKey: '20261103' }, { openid: 'cheat' });
   assert.equal(b.viewerPlayed, false);
   for (const r of b.rows) assert.equal(r.length, 3);
@@ -187,7 +193,7 @@ test('regression BUG-1 chain: nothing before the caller has a ranked daily carri
   const owner = h.db.all('challenges')[0].lineup.map((l) => l.generalId);
   const view = await h.call('getChallenge', { challengeId }, { openid: 'cheat' });
   const clientRunId = runId();
-  const res = await h.call('submitRun', { mode: 'challenge', clientRunId, challengeId, actions: bestActions(view.rounds) }, { openid: 'cheat' });
+  const res = await h.call('submitRun', { mode: 'challenge', clientRunId, challengeId, actions: bestActions(h.db.all('challenges')[0].rounds) }, { openid: 'cheat' });
   const rep = await h.call('getReplay', { runId: clientRunId }, { openid: 'cheat' });
   const again = await h.call('getChallenge', { challengeId }, { openid: 'cheat' });
   for (const r of [view, res, rep, again]) {

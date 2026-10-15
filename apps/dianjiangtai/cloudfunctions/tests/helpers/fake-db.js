@@ -19,7 +19,7 @@ function setPath(obj, path, val) {
   o[ks[ks.length - 1]] = val;
 }
 
-const op = (name, v) => ({ __op: name, v });
+const op = (name, v) => ({ __op: name, v, and: (o) => ({ __op: 'and', v: [op(name, v), o] }) });
 const command = {
   inc: (v) => op('inc', v), lt: (v) => op('lt', v), lte: (v) => op('lte', v),
   gt: (v) => op('gt', v), gte: (v) => op('gte', v), in: (v) => op('in', v), neq: (v) => op('neq', v), eq: (v) => op('eq', v),
@@ -31,6 +31,7 @@ function matchVal(actual, cond) {
       case 'lte': return actual !== undefined && actual <= cond.v;
       case 'gt': return actual !== undefined && actual > cond.v;
       case 'gte': return actual !== undefined && actual >= cond.v;
+      case 'and': return cond.v.every((c) => matchVal(actual, c));
       case 'in': return cond.v.includes(actual);
       case 'neq': return actual !== cond.v;
       case 'eq': return actual === cond.v;

@@ -36,7 +36,7 @@ async function bankLeft(v) {
 /** Cheap re-check of a bank entry: the stored best lineup still scores 12-0 on the rebuilt sheet. */
 function bankEntryStillValid(entry, v) {
   try {
-    const rounds = core.buildSheet(entry.seed, v.contentVersion);
+    const rounds = core.buildSheet(entry.seed, v.contentVersion, v.configVersion);
     const lineup = core.normaliseLineup(entry.best && entry.best.lineup);
     if (!rounds || !lineup) return null;
     const r = core.simulate(lineup, entry.seed, v.contentVersion, v.configVersion).record;
@@ -79,7 +79,7 @@ async function tryBank(dateKey, v, issueNo, t0) {
       continue;
     }
     const doc = {
-      _id: dateKey, seed: entry.seed, issueNo, contentVersion: v.contentVersion, configVersion: v.configVersion,
+      _id: dateKey, seed: entry.seed, issueNo, variant: core.variantFor(dateKey), contentVersion: v.contentVersion, configVersion: v.configVersion,
       rounds, best: entry.best, gates: entry.gates, source: 'bank', attempts: 0, genMs: now() - t0,
       boardSalt: crypto.randomBytes(16).toString('hex'), createdAt: now(),
     };
@@ -119,7 +119,7 @@ async function live(dateKey, v, issueNo, t0, startedAt, timeoutMs) {
     throw new AppError('DAILY_UNAVAILABLE', 'no accepted daily seed available');
   }
   const doc = {
-    _id: dateKey, seed: chosen.seed, issueNo, contentVersion: v.contentVersion, configVersion: v.configVersion,
+    _id: dateKey, seed: chosen.seed, issueNo, variant: core.variantFor(dateKey), contentVersion: v.contentVersion, configVersion: v.configVersion,
     rounds: chosen.rounds, best: chosen.best, gates: { ...chosen.gates, relaxed: false }, source: 'live', attempts,
     genMs: now() - t0, boardSalt: crypto.randomBytes(16).toString('hex'), createdAt: now(),
   };

@@ -1,4 +1,4 @@
-# 点将台 cloud functions (Phase 1)
+# 点将台 cloud functions (v1)
 
 WeChat Cloud Development backend for the mini game `dianjiangtai`. Spec: `docs/dianjiangtai/spec.md` §5, §9.2-9.4, §11, §14, §15, §16, §18, §20. Platform facts: `docs/dianjiangtai/phase0-platform.md`.
 
@@ -8,9 +8,12 @@ Status: code and tests complete and passing against the **real game core** (`app
 
 | Function | Trigger | Timeout (s) | Purpose |
 |---|---|---|---|
-| `getDaily` | client | 20 | today's `rounds` + caller status; lazily creates the seed if `genDaily` missed |
+| `getDaily` | client | 20 | status only, **no `rounds`** (v1): `dateKey, issueNo, variant, myStatus, myRecord?, myStreak {current,best}, features`; lazily creates the seed if `genDaily` missed |
 | `genDaily` | timer `0 0 23 * * * *` (UTC+8) | 60 (set from the spike) | next day's seed: **seed bank is the primary path**, live generation is a last resort that publishes nothing if it fails; idempotent |
-| `startRun` | client | 5 | anchors the one daily attempt (`daily_starts`) |
+| `startRun` | client | 5 | anchors the one daily attempt (`daily_starts`) and creates `daily_progress`; returns **only the rounds released so far** (`[round1]` on a fresh start; every released round plus the frozen `actions` on resume) |
+| `getRound` | client | 5 | **new.** progressive delivery: `{clientRunId, dateKey, actions}` -> `{round: n+1, data}` only for a valid partial run ending at round n's pick that extends the frozen prefix |
+| `getHistory` | client | 5 | **new.** the caller's last <= 30 published issues (own record/band/rarity/lineup, distribution, best lineup only after D+1 00:30 BJT) |
+| `subscribeChallenge` | client | 5 | **new.** stores the opt-in subscribe grant for the caller's own challenge |
 | `submitRun` | client | 10 | §14.3 validation, authoritative sim, ranked result, challenge answers |
 | `getReplay` | client | 10 | best lineup (复盘) for the caller's own run |
 | `createChallenge` | client | 5 | one challenge per validated run |
@@ -18,9 +21,9 @@ Status: code and tests complete and passing against the **real game core** (`app
 | `joinGroup` | client | 5 | cloudID-decrypted group entry -> opaque `groupRef` |
 | `getBoard` | client | 5 | hashed server-ranked rows, membership check, cap, 60 s cache |
 | `track` | client | 5 | analytics batch (<= 50), rate limited |
-| `cleanup` | timer `0 0 4 * * * *` | 60 | 180-day retention (D7) |
+| `cleanup` | timer `0 0 4 * * * *` | 60 | 180-day retention (D7) incl. the v1 collections, plus the daily anomaly roll-up |
 
-Every function returns `{ok:true,...}` or `{ok:false, code, message}` and never throws to the client. Codes: the spec's `INVALID_ACTIONS`, `ALREADY_PLAYED`, `SEED_NOT_FOUND`, `CHALLENGE_EXPIRED`, `LATE_SUBMIT`, `RATE_LIMITED`, plus these additions (spec gaps, see below): `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_STARTED`, `OWN_CHALLENGE`, `RUN_NOT_FOUND`, `NOT_MEMBER`, `NOT_GROUP`, `BAD_CLOUDID`, `SERVER_CONFIG`, `INTERNAL`.
+Every function returns `{ok:true,...}` or `{ok:false, code, message}` and never throws to the client. Codes: the spec's `INVALID_ACTIONS`, `ALREADY_PLAYED`, `SEED_NOT_FOUND`, `CHALLENGE_EXPIRED`, `LATE_SUBMIT`, `RATE_LIMITED`, plus these additions (spec gaps, see below): `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_STARTED` (also `getRound`), `NO_TEMPLATE` and `NOT_OWNER` (`subscribeChallenge`), `OWN_CHALLENGE`, `RUN_NOT_FOUND`, `NOT_MEMBER`, `NOT_GROUP`, `BAD_CLOUDID`, `SERVER_CONFIG`, `INTERNAL`.
 
 Identity is always `cloud.getWXContext().OPENID` (read in `common/store.js` only, enforced by a test). `genDaily` and `cleanup` are timer functions: a call that carries an OPENID (i.e. from the mini game) is rejected with `FORBIDDEN`.
 
@@ -53,6 +56,8 @@ npm test         # runs everything, incl. the common drift test
 | `GROUP_REF_PEPPER` | yes | secret pepper: `groupRef = sha256(openGId + pepper)[0..16)`; also keys the challenge-id hash. Without it `joinGroup` and `createChallenge` return `SERVER_CONFIG` |
 | `TZ` | set to `Asia/Shanghai` | in each `function.config.json`. The code does not depend on it (date keys use core `date.js`), it is belt and braces |
 | `LAUNCH_DATE_KEY` | optional | `YYYYMMDD` of issue 1. If unset, the date of the first seed ever created is stored once in `meta/launch` |
+| `SUBSCRIBE_TEMPLATE_ID` | optional | the one-time subscribe-message template id ("好友接下了你的战书"), used when `app_config.subscribe.tmplId` is absent. Without either, `subscribeChallenge` returns `NO_TEMPLATE`, `getDaily.features.subscribe` is absent and nothing is ever sent. Set on `subscribeChallenge` and `getDaily` (and `submitRun` for the send) |
+| `SUBSCRIBE_MP_STATE` | optional | `developer` / `trial` / `formal` (default formal): `miniprogramState` of the send, for testing a trial build |
 | `JOINGROUP_RETURN_OPENGID` | optional, `1` | only if the device spike forces the `groupid` route (spec §9.2 step 6): `joinGroup` then also returns the openGId |
 
 No AppSecret, no `session_key`, no `code2Session` anywhere (cloudID decryption needs none). A test fails if any of those strings appear in the function code.
@@ -63,9 +68,10 @@ No AppSecret, no `session_key`, no `code2Session` anywhere (cloudID decryption n
 2. For each function: upload and deploy (cloud install dependencies), then in the console set the **timeout** and **TZ** from `function.config.json` (the timeouts are explicit values, the platform default of about 3 s is too short; the `genDaily` value is a spike item, E6). `timeout`/`envVariables` in `function.config.json` are our source of truth and are also read by the code (the 70% live-loop cut-off is computed from it); I could not confirm that the WeChat console reads this file itself, so apply it by hand or via the CloudBase CLI. Only `config.json` (triggers) is a verified WeChat format.
 3. Set env var `GROUP_REF_PEPPER` (random, 32+ chars) on `joinGroup`, `createChallenge`, and keep a copy in the team secret store. Rotating it changes every `groupRef` and challenge id (old challenges stay valid, they are looked up by id).
 4. Upload the timer triggers (`genDaily/config.json`, `cleanup/config.json`): one trigger per function, evaluated in UTC+8.
-5. Create the 11 collections (below) and paste the rules from `database/rules.json`; add the indexes.
+5. Create the 16 collections (below) and paste the rules from `database/rules.json`; add the indexes.
 6. Seed bank (the primary daily source, see "Seed bank flow"): generate at least 60 days, import into `daily_seed_bank`, delete the local files. **Never commit them** (spoiler).
-7. Spike items that touch the backend: the real `genDaily` timeout and measured `gateCheck` time (E6), the `callFunction` response size (sets `boardListCap`, config), the cloudID decrypt (E1), `doc.get()`/duplicate-`add` error text on the real DB (see Risks).
+7. v1 setup: (a) deploy the three new functions `getRound`, `getHistory`, `subscribeChallenge`, and redeploy `getDaily`, `startRun`, `submitRun` (its `config.json` now requests the `subscribeMessage.send` openapi permission, approve it in the console), `getChallenge`, `getBoard`, `cleanup`; (b) create `player_stats`, `daily_progress`, `sub_grants`, `anomalies`, `app_config` with the deny-all rules; (c) optional, once the MP console has the one-time template: add a document `app_config/live` = `{"subscribe": {"tmplId": "<template id>", "fields": {"title": "thingN", "theirRecord": "thingN", "myRecord": "thingN", "time": "timeN"}}, "ads": {"banner": {"enabled": false, "adUnitId": ""}, "interstitial": {"enabled": true}}}` (or set env `SUBSCRIBE_TEMPLATE_ID` on `getDaily` and `subscribeChallenge`); the `fields` values must be the keys of the template the founder picked (key names depend on the chosen template; `page: index?c=<id>` is a device-pass item); (d) import the contentVersion 2 seed bank (see "Importing the contentVersion 2 launch bank").
+8. Spike items that touch the backend: the real `genDaily` timeout and measured `gateCheck` time (E6), the `callFunction` response size (sets `boardListCap`, config), the cloudID decrypt (E1), `doc.get()`/duplicate-`add` error text on the real DB (see Risks).
 
 ## Collections
 
@@ -82,6 +88,13 @@ No AppSecret, no `session_key`, no `code2Session` anywhere (cloudID decryption n
 | `events` | auto | track, server events | analytics, 180 days |
 | `rate_limits` | `<bucket>_<openid>_<minute>` | submitRun, createChallenge, track | per-minute counters, trimmed by cleanup |
 | `meta` | `launch` | genDaily/getDaily | launch date for issue numbers |
+| `player_stats` | `<openid>` | submitRun (ranked transaction), anomaly flags | `curStreak, bestStreak, lastDailyDate, totalDailies, flags7d, flagTs[], suspect, updatedAt`. Streaks (spec 8.9) and the observe-only anomaly roll-up. 180 days after `updatedAt` |
+| `daily_progress` | `<dateKey>_<openid>` | startRun (add), getRound (frozen prefix) | `actions[]` (frozen prefix), `released` 1-5, `mode` daily/challenge, `challengeId?`. 180 days |
+| `sub_grants` | `<challengeId>` | subscribeChallenge (add), submitRun (claim in a transaction) | `ownerOpenid, tmplId, used, sentAt?, sendErrCode?`. 180 days |
+| `anomalies` | `<openid>_<runId>_<kind>` | submitRun, getRound | `mismatch / prefix / fast / invalid_ranked`; observe-only. 180 days |
+| `app_config` | `live` | **console only** | remote config: `subscribe {tmplId, fields}`, `ads {banner, interstitial}`; read (60 s cache) by `getDaily`; missing = everything off / defaults. Never purged |
+
+`daily_seeds` documents now also carry `variant` (`shiren` on Sundays, via core `date.variantOf`, else `standard`); `daily_results` carries `lineupFac` and `streak`.
 
 Added beyond spec §14.1: `rate_limits` (the spec asks for rate limiting without naming storage) and `meta`.
 
@@ -103,6 +116,14 @@ File: `database/rules.json`. **Every collection is `{"read": false, "write": fal
 | `challenges` | `createdAt` | cleanup |
 | `events` | `ts`; `name + ts` | cleanup; go/kill metric queries |
 | `rate_limits` | `expireAt` | cleanup |
+| `daily_progress` | `updatedAt` | cleanup |
+| `sub_grants` | `grantedAt` | cleanup |
+| `anomalies` | `ts`; `kind + ts` | cleanup + roll-up counts |
+| `player_stats` | `updatedAt` | cleanup |
+| `events` | `name + ts` (exists) | roll-up idempotency check reads `name = anomaly_daily` |
+| `runs` | `submittedAt` (exists) | roll-up run count |
+
+`daily_seeds` is read by `_id` ranges (`_id < d`, `_id <= today` ordered desc, `limit`): `_id` is always indexed. `getHistory`/`getBoard` read `daily_results`/`daily_stats` with `_id in [...]` (no extra index).
 
 All point reads use the deterministic `_id`.
 
@@ -119,7 +140,30 @@ node apps/dianjiangtai/cloudfunctions/scripts/prepare-bank.js <tmp>/bank.json <t
 
 `prepare-bank.js` re-verifies every entry with the real core (live versions, stored best lineup scores 12-0), assigns `_id = bank_<seed>` (re-importing cannot duplicate) and sets `used:false`. Never commit either file. Each day consumes one entry; 60 entries last 60 days.
 
+### Importing the contentVersion 2 launch bank (`apps/dianjiangtai/seed-bank/bank-cv2-60d.json`)
+
+The core agent generates the launch bank (>= 60 accepted days for contentVersion 2 / configVersion 2, spec 5.2, PO-17). All contentVersion 1 entries are unusable once the live core is 2 (`genDaily` filters by `contentVersion`, `configVersion`, `gateVersion` and would fall back to the slow live loop). Steps for whoever holds the console:
+
+```
+# 1. re-verify every entry against the live core and convert to JSON Lines (offline, no cloud access needed)
+node apps/dianjiangtai/cloudfunctions/scripts/prepare-bank.js apps/dianjiangtai/seed-bank/bank-cv2-60d.json <tmp>/bank.import.jsonl
+#    expect "wrote 60 entries ... (0 skipped)". Skipped entries are listed with the reason (version mismatch, not 12-0 ...).
+# 2. cloud console > database > daily_seed_bank > Import > <tmp>/bank.import.jsonl  (file type: JSON Lines, conflict mode: skip)
+# 3. check: the collection has 60 documents with used:false, contentVersion 2, configVersion 2
+# 4. delete <tmp>/bank.import.jsonl AND the local bank-cv2-60d.json (they list future daily seeds: spoilers; never commit them)
+```
+
+`prepare-bank.js` uses `game/core` (or `DJ_CORE_SRC=<other core dir>` to verify against another checkout). Bank lineups keep the per-entry `faction` the core writes (cohesion needs it); `genDaily` re-checks each entry (rebuilds the sheet for the entry's own versions, simulates the stored lineup, requires 12-0) before using it. Re-importing the same file cannot duplicate (`_id = bank_<seed>`). A day with no matching entry falls back to the live loop, which succeeds on about 1 day in 5: refill when `genDaily` logs the low-bank warning.
+
 ## Behaviour notes
+
+- **Progressive delivery (v1, spec 5.2).** `getDaily` has no `rounds`. `startRun` (first 翻令) creates `daily_progress` (`_id <dateKey>_<openid>`, `released: 1`, `actions: []`) and returns round 1 only. `getRound({clientRunId, dateKey, actions})`: the actions must be a valid partial run (same draft state machine and rules as `submitRun`: pool cap, drafted-person rule, re-spin allowance, no ad re-spin) that ends exactly at the pick of round n (1..4), `released >= n` (so a round can never be skipped), and extend the stored prefix. Then, in a transaction, the prefix is stored (frozen) and `released = n + 1`, and `rounds[n]` is returned whole (`fallback` and, for content 2, `pools` included). Same input again returns the same round; a shorter stale prefix of the stored one returns an already released round and never lowers `released`. A diverging prefix returns `INVALID_ACTIONS` and writes a `prefix` anomaly. Nothing else ever returns a sheet round of an open ranked attempt: `getChallenge` omits `rounds` when the challenge counts as the caller's daily (rounds then come through `startRun`/`getRound`, progress `mode: challenge`); friendly challenges, past/free seeds still get the full sheet. `submitRun` for a ranked run requires `released == 5` and an exact prefix match, else `INVALID_ACTIONS` plus `prefix` and `invalid_ranked` flags.
+- **Streaks (spec 8.9).** In the ranked transaction: `streak(D) = 1 + daily_results[prev published date].streak` (prev = latest `daily_seeds._id < D`, read just before the transaction; days with no seed are skipped automatically). A grace-window submit for D after D+1 was already played re-links the two days (the D+1 row's `streak` is rewritten). `player_stats.curStreak/bestStreak/lastDailyDate/totalDailies` are updated in the same transaction. `getDaily.myStreak.current` shows the streak alive while `lastDailyDate` is today, the previous published date, or (inside its still-open grace window) the one before that; otherwise 0. `LATE_SUBMIT` and `ALREADY_PLAYED` never touch it.
+- **Anomalies (spec 14.5, observe-only).** `mismatch`, `prefix`, `fast` (< `config.anomaly.minDailyMs`, default 8000 ms), `invalid_ranked`: one `anomalies` document per (openid, run, kind), best effort (never throws, never changes a response). `player_stats.flagTs/flags7d` keep the last 20 flag times within 7 days; `suspect` turns true at >= 5 (sticky, for manual review). `cleanup` rolls yesterday up into one `anomaly_daily` event (idempotent per date) and logs `[ALERT]` when mismatches exceed 0.5% of submitted runs.
+- **Subscribe message (spec 8.13).** `subscribeChallenge({challengeId})`: owner only, template id from server config (`app_config.subscribe.tmplId`, else env `SUBSCRIBE_TEMPLATE_ID`), `add` of `sub_grants/<challengeId>` (repeats idempotent), `NO_TEMPLATE` if unconfigured. In `submitRun`, on a caller's first answer to someone else's challenge, the grant is claimed in a transaction (`used: true`; two parallel answers send at most once) and one `cloud.openapi.subscribeMessage.send` goes to the owner with the grant's own `tmplId`, `page: index?c=<challengeId>`, data keys from `app_config.subscribe.fields` (defaults `title: thing1, theirRecord: thing2, myRecord: thing3, time: time4`; values: fixed title, the answerer's and the owner's records as `N胜M负`, Beijing time; no openid or nickname). The send is capped at 2 s; a failure or timeout stores `sendErrCode` on the grant and never changes the response. With no grant, nothing happens. `submitRun/config.json` declares the `subscribeMessage.send` openapi permission.
+- **Remote config.** `getDaily.features = {ads: {banner, interstitial}, subscribe?: {tmplId}}`. Banner is on only with `enabled === true` and a valid `adUnitId`; interstitial values are clamped (`everyNRuns >= 2`, `minLifetimeRuns >= 2`, `minGapSec >= 60`, `maxPerDay` 0..8, invalid -> core defaults). An unreadable or missing `app_config` yields defaults and never fails `getDaily`.
+- **识人 variant.** `daily_seeds.variant` is set at creation from the core (`date.variantOf(dateKey, config.shiren.weekday)`), falling back to a local weekday check on older cores; returned by `getDaily`, `getBoard`, `getChallenge`, `getHistory`.
+- **Content versions.** Every stored run, challenge and seed pins `contentVersion` and `configVersion` (`coreapi.configVersionFor` pairs a free run's explicit `contentVersion` with its default config), so contentVersion 1 runs, challenges and seeds stay valid next to contentVersion 2. Lineups keep the per-pick `faction` the core returns (cohesion) and are passed back to `simulate` unchanged; `daily_results.lineupFac` stores it.
 
 - **Daily spoiler lock.** For any run on a daily seed (by `dateKey` or seed match), `getReplay` returns `REPLAY_LOCKED`, and `challengeCompare` / `getChallenge` return `theirLineup: null, lineupLocked: true`, until the caller has their ranked result for that date or the date is over (after D+1 00:30 BJT). `getBoard` lineups (`x`) follow the same rule via `viewerPlayed`. `track` takes `sessionId` from the top level or from `props.sessionId` and stores it top-level.
 
@@ -131,7 +175,7 @@ node apps/dianjiangtai/cloudfunctions/scripts/prepare-bank.js <tmp>/bank.json <t
 
 ## Tests
 
-`npm test` (Node >= 20; 75 tests): in-memory fake DB with duplicate-`_id` errors, throwing `doc.get`, the 100/1000 row query limits and rolled-back transactions; the SDK is mocked; Date.now is controlled. Functions run against the real core. Only the daily gate is patched (`h.patchGates`) because the real one accepts ~0.4% of seeds; bank tests use real 12-0 optimum seeds from `tests/fixtures/optimal-seeds.json` (a guard test fails if a core retune makes them stale; regenerate by scanning seeds with `search.bestLineup(..., {stopAt12:true})`). Covers validation rejections, idempotency (incl. concurrent), ALREADY_PLAYED, midnight grace, challenge lineup withholding and counting rules, getBoard, joinGroup, track, cleanup, genDaily double-fire/bank/live-failure, TZ=UTC date keys, security rules, drift, prepare-bank.
+`npm test` (Node >= 20; 137 tests, 5 more run when the core holds contentVersion 2): in-memory fake DB with duplicate-`_id` errors, throwing `doc.get`, the 100/1000 row query limits, `_.and` and rolled-back transactions; the SDK is mocked (`h.sdk.openapi` for the subscribe send); Date.now is controlled. Functions run against the real core, **whichever content version it holds** (`CV`/`CFG` exported by the harness; set `DJ_CORE_SRC=<core dir>` to run the whole suite against another core checkout). Only the daily gate is patched (`h.patchGates`) because the real one accepts well under 1% of seeds; bank tests use real 12-0 optimum seeds from `tests/fixtures/optimal-seeds.json` (content 1) or `optimal-seeds.cv2.json` (content 2) (a guard test fails if a core retune makes them stale; regenerate with `node scripts/gen-fixtures.js`, about 1 minute). Test files: `submit`, `challenge`, `spoiler`, `qa-trust` (trust properties), `daily`, `bank`, `board`, `group`, `track`, `cleanup`, `security` (rules, drift, secrets), and the v1 files `progressive` (rounds cannot be fetched out of order or early, prefix freeze, no seed leak), `streak-history` (streak edge cases across the Beijing midnight, grace re-link, unpublished days, getHistory spoiler windows at 00:29:59/00:30:00), `features` (app_config, subscribe, anomalies, roll-up, retention, rules, no openids) and `cv2` (both content versions, spoiler lock, lineupFac).
 
 ## Spec gaps decided (flag if you disagree)
 

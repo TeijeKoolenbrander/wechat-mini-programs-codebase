@@ -1,8 +1,8 @@
 'use strict';
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { createHarness, bestActions } = require('./helpers/harness');
-const { runId, startDaily, playDaily } = require('./helpers/fixtures');
+const { createHarness, bestActions, CV } = require('./helpers/harness');
+const { runId, startDaily, playDaily, releaseAll, sheetOf } = require('./helpers/fixtures');
 
 const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT
 let h;
@@ -26,7 +26,8 @@ test('ranked daily: server record authoritative, daily_results + stats written, 
   assert.equal(r.ranked, true);
   assert.equal(r.record.w + r.record.l, 12);
   assert.equal(r.battles.length, 12);
-  assert.doesNotMatch(JSON.stringify(r), /"seed"|"best"|userA/);
+  assert.doesNotMatch(JSON.stringify(r), /"seed"|"best":\{|"lineup"|userA/); // streak.best is a number, not the optimum
+  assert.deepEqual(r.streak, { current: 1, best: 1 });
   const res = h.db.all('daily_results');
   assert.equal(res.length, 1);
   assert.equal(res[0]._id, '20261103_userA');
@@ -93,10 +94,10 @@ test('rejects duplicate general (same cell drafted twice)', async () => {
   const core = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js'));
   let seed = 1;
   for (; seed < 5000; seed++) {
-    const r = core.buildSheet(seed, 1);
+    const r = core.buildSheet(seed, CV);
     if (r[0].faction === r[1].faction && r[0].era === r[1].era) break;
   }
-  const rounds = core.buildSheet(seed, 1);
+  const rounds = core.buildSheet(seed, CV);
   const a = bestActions(rounds); // best-power picks are distinct by construction
   const g1 = a.find((x) => x.type === 'pick' && x.round === 1).generalId;
   a.find((x) => x.type === 'pick' && x.round === 2).generalId = g1;
@@ -130,7 +131,7 @@ test('rejects malformed input shapes', async () => {
 
 test('free mode: unknown contentVersion rejected, bad seed rejected, ad re-spins allowed (<= 2), unranked', async () => {
   const seed = 4242;
-  const rounds = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, 1);
+  const rounds = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, CV);
   const a = bestActions(rounds, { mode: 'free' });
   const ok = await h.call('submitRun', { mode: 'free', clientRunId: runId(), seed, actions: a }, { openid: 'u' });
   assert.equal(ok.ok, true, JSON.stringify(ok));
@@ -213,7 +214,7 @@ test('stored result survives a retry with different actions (the stored server r
 test('second distinct ranked run -> ALREADY_PLAYED with the original result (AC 22)', async () => {
   const first = await playDaily(h, 'userA');
   const s = { dateKey: '20261103' };
-  const rounds = (await h.call('getDaily', {}, { openid: 'userA' })).rounds;
+  const rounds = sheetOf(h, '20261103');
   const second = await h.call('submitRun', { mode: 'daily', clientRunId: runId(), dateKey: s.dateKey, actions: bestActions(rounds) }, { openid: 'userA' });
   assert.equal(second.ok, false);
   assert.equal(second.code, 'ALREADY_PLAYED');
@@ -237,7 +238,7 @@ test('two concurrent distinct runs: exactly one ranked, the other ALREADY_PLAYED
 
 test('submit without startRun -> NOT_STARTED; unknown date -> SEED_NOT_FOUND; future date rejected', async () => {
   const d = await h.call('getDaily', {}, { openid: 'userA' });
-  const a = bestActions(d.rounds);
+  const a = bestActions(sheetOf(h, d.dateKey));
   assert.equal((await submitDaily('userA', d.dateKey, a)).code, 'NOT_STARTED');
   assert.equal((await submitDaily('userA', '20260101', a)).code, 'SEED_NOT_FOUND');
   h.db.put('daily_seeds', { ...h.db.all('daily_seeds')[0], _id: '20261105' });
@@ -284,7 +285,7 @@ test('startRun: daily only for today; resumed flag; free needs no start', async 
 
 test('submitRun is rate limited per openid', async () => {
   const seed = 99;
-  const rounds = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, 1);
+  const rounds = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, CV);
   const a = bestActions(rounds);
   let limited = 0;
   for (let i = 0; i < 35; i++) {
@@ -312,8 +313,9 @@ test('getReplay: only the owner of a completed run gets the best lineup (and it 
 });
 
 test('getReplay uses final tokens after a free re-spin (复盘 lineup is drawable from them)', async () => {
-  const s = await startDaily(h, 'userA');
+  const s = await startDaily(h, 'userA', { release: false });
   const a = bestActions(s.rounds, { respinFirst: true });
+  await releaseAll(h, 'userA', s.dateKey, a);
   const sub = await h.call('submitRun', { mode: 'daily', clientRunId: runId(), dateKey: s.dateKey, actions: a }, { openid: 'userA' });
   assert.equal(sub.ok, true, JSON.stringify(sub));
   const run = h.db.all('runs')[0];
@@ -324,7 +326,7 @@ test('getReplay uses final tokens after a free re-spin (复盘 lineup is drawabl
   const rep = await h.call('getReplay', { runId: run.clientRunId }, { openid: 'userA' });
   assert.equal(rep.ok, true, JSON.stringify(rep));
   assert.ok(rep.best.record.w >= sub.record.w, 'best is at least as good as the run');
-  const gens = require(require('path').join(h.root, 'getDaily', 'core', 'content.js')).getContent(1).byId;
+  const gens = require(require('path').join(h.root, 'getDaily', 'core', 'content.js')).getContent(CV).byId;
   for (const l of rep.best.lineup) {
     const g = gens[l.generalId];
     assert.ok(run.finalTokens.some((t) => g.faction === t.faction && g.eras.includes(t.era)), l.generalId + ' not drawable from the final tokens');

@@ -12,7 +12,8 @@ const fs = require('fs');
 const path = require('path');
 
 const CF_ROOT = path.resolve(__dirname, '..');
-const DEFAULT_CORE = path.resolve(CF_ROOT, '..', 'game', 'core');
+// DJ_CORE_SRC lets integration/QA test against another core checkout without touching game/core
+const DEFAULT_CORE = process.env.DJ_CORE_SRC ? path.resolve(process.env.DJ_CORE_SRC) : path.resolve(CF_ROOT, '..', 'game', 'core');
 const NOT_FUNCTIONS = new Set(['common', 'scripts', 'tests', 'database', 'node_modules']);
 
 function listFunctions(root = CF_ROOT) {

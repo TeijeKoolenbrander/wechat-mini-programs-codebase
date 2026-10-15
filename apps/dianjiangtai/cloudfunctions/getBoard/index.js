@@ -19,7 +19,7 @@ function cacheSet(key, value, nowMs) {
   cache.set(key, { at: nowMs, value });
 }
 
-const FIELDS = { openid: true, w: true, submittedAt: true, lineupIdx: true };
+const FIELDS = { openid: true, w: true, submittedAt: true, lineupIdx: true, streak: true };
 
 /** all of the date's results (only called when total <= cap) */
 async function loadAll(dateKey, nowMs) {
@@ -99,7 +99,9 @@ exports.main = store.handler(async (event, { openid }) => {
   const rows = raw
     .map((r) => {
       const row = [hashOf(r.openid), r.w, Math.max(0, Math.floor((r.submittedAt - dayStart) / 1000))];
-      if (viewerPlayed && Array.isArray(r.lineupIdx)) row.push(r.lineupIdx.join(','));
+      row.push(viewerPlayed && Array.isArray(r.lineupIdx) ? r.lineupIdx.join(',') : null);
+      if (Number.isInteger(r.streak) && r.streak >= 2) row.push(r.streak); // k: only when >= 2
+      else if (row[3] === null) row.pop(); // keep [h, w, s] when there is nothing to send
       return row;
     })
     .sort((a, b) => b[1] - a[1] || a[2] - b[2] || (a[0] < b[0] ? -1 : 1))
@@ -107,7 +109,7 @@ exports.main = store.handler(async (event, { openid }) => {
 
   const out = {
     ok: true, dateKey, issueNo: seedDoc.issueNo, contentVersion: seedDoc.contentVersion, salt,
-    selfHash: hashOf(openid), mode, viewerPlayed, rows,
+    variant: seedDoc.variant || core.variantFor(dateKey), selfHash: hashOf(openid), mode, viewerPlayed, rows,
   };
   await store.writeEvent(openid, 'board_list', {
     dateKey, kind, mode, rows: rows.length, bytes: JSON.stringify(rows).length, cached,

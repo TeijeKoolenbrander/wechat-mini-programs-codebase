@@ -8,9 +8,14 @@ const path = require('path');
 const Module = require('module');
 const sync = require('../../scripts/sync-core');
 const { FakeDb } = require('./fake-db');
-const OPTIMAL_SEEDS = require('../fixtures/optimal-seeds.json');
-
 const CORE_SRC = sync.DEFAULT_CORE;
+// live versions of the core under test (content 1 = Phase 1 core, 2 = v1 release core)
+const coreContent = require(path.join(CORE_SRC, 'content'));
+const coreConfig = require(path.join(CORE_SRC, 'config'));
+const CV = coreContent.LATEST_CONTENT_VERSION;
+const CFG = coreConfig.LATEST_CONFIG_VERSION;
+const GATE = coreConfig.getConfig(CFG).gateVersion;
+const OPTIMAL_SEEDS = require(CV === 1 ? '../fixtures/optimal-seeds.json' : `../fixtures/optimal-seeds.cv${CV}.json`);
 
 let stageRoot = null;
 function stage() {
@@ -55,6 +60,7 @@ function createHarness({ now = Date.UTC(2026, 10, 3, 4, 0, 0) } = {}) {
   const h = {
     db,
     root,
+    sdk: fakeSdk,
     setNow(ms) { t = ms; },
     advance(ms) { t += ms; },
     now() { return t; },
@@ -75,13 +81,13 @@ function createHarness({ now = Date.UTC(2026, 10, 3, 4, 0, 0) } = {}) {
         const search = require(path.join(dir, 'search.js'));
         gates.acceptDailySeed = (seed) => {
           if (global.__DJ_GATES_LOG) global.__DJ_GATES_LOG.push(seed);
-          const rounds = sheet.buildSheet(seed, 1);
+          const rounds = sheet.buildSheet(seed, CV, CFG);
           const ok0 = !!accept(seed);
           // acceptance depends ONLY on the predicate (deterministic attempt counts); an undraftable sheet gets a stand-in best
-          const real = search.bestLineup(seed, 1, rounds.map((r) => ({ faction: r.faction, era: r.era })), { stopAt12: true });
+          const real = search.bestLineup(seed, CV, rounds.map((r) => ({ faction: r.faction, era: r.era })), { stopAt12: true, rounds, configVersion: CFG });
           const best = real || { lineup: OPTIMAL_SEEDS[0].lineup, record: { w: 12, l: 0 } };
           const ok = ok0;
-          const gatesRec = { optimal: best ? best.record : { w: 0, l: 12 }, greedyRate: 0.02, randomRate: 0, K: 400, gateVersion: 1, relaxed: false };
+          const gatesRec = { optimal: best ? best.record : { w: 0, l: 12 }, greedyRate: 0.02, randomRate: 0, K: 400, gateVersion: GATE, relaxed: false };
           return ok ? { accepted: true, gates: gatesRec, best, rounds } : { accepted: false, gates: gatesRec };
         };
       }
@@ -108,13 +114,14 @@ function createHarness({ now = Date.UTC(2026, 10, 3, 4, 0, 0) } = {}) {
  * Each round picks the `rank`-th strongest (stat total) general of the pool. opts.respinFirst: use the free
  * faction re-spin in round 1 when it is available; opts.mode: daily|free|challenge.
  */
-function bestActions(rounds, { rank = 0, mode = 'daily', respinFirst = false, prelude = [] } = {}) {
+function bestActions(rounds, { rank = 0, mode = 'daily', respinFirst = false, prelude = [], contentVersion = CV } = {}) {
   const dir = path.join(stage(), 'getDaily', 'core');
   const draft = require(path.join(dir, 'draft.js'));
   const content = require(path.join(dir, 'content.js'));
-  const c = content.getContent(1);
+  const c = content.getContent(contentVersion);
+  const cfgV = coreConfig.defaultConfigVersion ? coreConfig.defaultConfigVersion(contentVersion) : CFG;
   const total = (id) => Object.values(c.byId[id].stats).reduce((a, b) => a + b, 0);
-  const run = draft.createRun({ contentVersion: 1, mode, rounds });
+  const run = draft.createRun({ contentVersion, configVersion: cfgV, mode, rounds });
   const actions = [];
   const act = (a) => {
     const r = draft.apply(run, a);
@@ -132,4 +139,4 @@ function bestActions(rounds, { rank = 0, mode = 'daily', respinFirst = false, pr
   return actions;
 }
 
-module.exports = { createHarness, bestActions, CORE_SRC, OPTIMAL_SEEDS };
+module.exports = { createHarness, bestActions, CORE_SRC, OPTIMAL_SEEDS, CV, CFG, GATE };
