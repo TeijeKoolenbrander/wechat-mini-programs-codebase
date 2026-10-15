@@ -278,7 +278,7 @@ test('api: cloud mode never rejects, times out, and sends no identity (spec 11)'
   let timeout = null;
   const api = createApi({ wx, mode: 'cloud', env: 'env1', setTimeout: (f) => (timeout = f), clearTimeout() {} });
   assert.deepEqual(await api.getDaily({}), { ok: true, dateKey: '20261120' });
-  assert.deepEqual(await api.answer({ k: 1 }), { ok: false, code: 'NETWORK', msg: 'cloud.callFunction:fail' });
+  assert.deepEqual(await api.answer({ k: 1 }), { ok: false, code: 'NETWORK', message: 'cloud.callFunction:fail' });
   const pending = api.getBoard({});
   timeout();
   assert.equal((await pending).code, 'TIMEOUT');
@@ -373,7 +373,7 @@ test('mock server: board rows rank by server streak, ties keep earlier end first
   finish('a', 3);
   finish('b', 5);
   finish('c', 3);
-  mock.call('joinGroup', { groupData: { mockData: { opengid: 'GG', chat_type: 3 } } }, 'a');
+  mock.call('joinGroup', { groupData: { cloudID: 'c', data: { opengid: 'GG', chat_type: 3 } } }, 'a');
   const dk = beijingDateKey(now);
   const board = mock.call('getBoard', { kind: 'friend', dateKey: dk }, 'a');
   assert.deepEqual(board.rows.map((r) => r[1]), [5, 3, 3]);
@@ -390,13 +390,13 @@ test('mock server: board rows rank by server streak, ties keep earlier end first
 
 test('joinGroup: one member per group and user, the openGId never comes back, errors write nothing (AC 64)', () => {
   const mock = createMockServer({ now: () => Date.UTC(2026, 10, 20, 4) });
-  const r1 = mock.call('joinGroup', { groupData: { mockData: { opengid: 'GG1', chat_type: 3 } } });
-  const r2 = mock.call('joinGroup', { groupData: { mockData: { opengid: 'GG1', chat_type: 3 } } });
+  const r1 = mock.call('joinGroup', { groupData: { cloudID: 'c', data: { opengid: 'GG1', chat_type: 3 } } });
+  const r2 = mock.call('joinGroup', { groupData: { cloudID: 'c', data: { opengid: 'GG1', chat_type: 3 } } });
   assert.equal(r1.groupRef, r2.groupRef);
   assert.ok(!r1.groupRef.includes('GG1'));
   assert.equal(Object.keys(mock.db.members).length, 1);
-  assert.equal(mock.call('joinGroup', { groupData: { mockData: { opengid: 'G', chat_type: 1 } } }).code, 'NOT_GROUP');
-  assert.equal(mock.call('joinGroup', { groupData: { mockData: { code: 40097 } } }).code, 40097);
+  assert.equal(mock.call('joinGroup', { groupData: { cloudID: 'c', data: { opengid: 'G', chat_type: 1 } } }).code, 'NOT_GROUP');
+  assert.equal(mock.call('joinGroup', { groupData: { cloudID: 'c' } }).code, 'BAD_CLOUDID', 'no decrypted data');
   assert.equal(mock.call('joinGroup', {}).ok, false);
   assert.equal(Object.keys(mock.db.members).length, 1);
 });
@@ -412,7 +412,7 @@ test('getDaily and every function return {ok:false, code} instead of throwing (A
   assert.equal(mock.call('getChallenge', { challengeId: 'x' }).code, 'CHALLENGE_EXPIRED');
   assert.equal(mock.call('startRun', { mode: 'daily', clientRunId: 'a', dateKey: '20000101' }).code, 'DECK_NOT_FOUND');
   assert.equal(mock.call('startRun', { mode: 'challenge', clientRunId: 'a', challengeId: 'zzzz' }).code, 'CHALLENGE_EXPIRED');
-  assert.equal(mock.call('answer', { clientRunId: 'none', k: 1, choice: 'hi' }).code, 'RUN_NOT_FOUND');
+  assert.equal(mock.call('answer', { clientRunId: 'none', k: 1, choice: 'hi' }).code, 'NOT_STARTED');
   assert.equal(mock.call('getHistory', { dateKey: '20250101' }).code, 'DECK_NOT_FOUND');
 });
 
@@ -427,22 +427,21 @@ test('vm: home daily card states, history and issue models, display palette (spe
   const early = V.homeVm({ state: 'done', issueNo: 1, dateKey: '20261120', themeLabel: '山河', streak: 3, rarityShare: null, dayCurrent: 1 }, { free, display: disp });
   assert.equal(early.daily.resultText, '今日连对 3', 'no rarity under 30 results');
   assert.equal(early.daily.dayStreak.text, null);
-  const h = V.historyVm({ state: 'ready', bestDays: 12, bestDaily: 23, items: [{ dateKey: '20261114', issueNo: 11, themeLabel: '山河', mine: { n: 9 }, isToday: false }, { dateKey: '20261115', issueNo: 12, themeLabel: '城市', mine: null, isToday: false }] }, disp);
+  const h = V.historyVm({ state: 'ready', bestDays: 12, bestDaily: 23, items: [{ dateKey: '20261114', issueNo: 11, theme: 'mix', themeLabel: '', mine: { n: 9 }, isToday: false, status: 'done' }, { dateKey: '20261115', issueNo: 12, theme: 'mix', themeLabel: '', mine: null, isToday: true, status: 'open' }] }, disp);
   assert.equal(h.headerText, '最长连续 12 天 · 今日一比最佳 23');
-  assert.deepEqual(h.items.map((i) => [i.dateText, i.mineText]), [['11月14日', '连对 9'], ['11月15日', '未参加']]);
+  assert.deepEqual(h.items.map((i) => [i.dateText, i.mineText, i.statusText]), [['11月14日', '连对 9', null], ['11月15日', '未参加', '进行中']]);
   assert.equal(V.historyVm({ state: 'empty', items: [] }, disp).emptyText, '还没有往期');
   assert.equal(V.historyVm({ state: 'offline' }, disp).errorText, '往期需联网查看');
-  const hist = new Array(41).fill(0);
-  hist[3] = 20;
-  hist[12] = 10;
+  const buckets = [[0, 0, 0], [1, 5, 20], [6, 10, 0], [11, 15, 10], [16, 40, 0]].map((b) => ({ from: b[0], to: b[1], count: b[2] }));
   const face = { factId: 'f', measure: 'river', label: '长江', valueText: '6,300', unitText: '公里', approx: false, sourceText: '来源：水利部 · 2013' };
-  const iv = V.issueVm({ state: 'ready', dateKey: '20261114', data: { issue: { issueNo: 11, themeLabel: '山河' }, mine: { streak: 9, missK: 10 }, stats: { total: 30, hist }, deck: [{ k: 1, a: face, b: face, answerLabel: '更短', mine: 'correct' }], errata: [{ k: 17, text: '已更正' }] } }, disp);
+  const iv = V.issueVm({ state: 'ready', dateKey: '20261114', data: { issue: { issueNo: 11, theme: 'mix', themeLabel: '' }, mine: { streak: 9, missK: 10, endReason: 'miss' }, stats: { total: 30, buckets }, locked: false, deck: [{ k: 1, top: face, bottom: face, answer: 'lo', answerVerb: '更短', mine: 'correct' }], errata: [{ k: 17, text: '已更正' }] } }, disp);
   assert.equal(iv.mineText, '连对 9（倒在第 10 题）');
   assert.equal(iv.stats.totalText, '本期 30 人参加');
-  assert.deepEqual(iv.stats.buckets.map((b) => b.shareText), ['67%', '0%', '33%', '0%', '0%']);
+  assert.deepEqual(iv.stats.buckets.map((b) => [b.label, b.shareText]), [['0', '0%'], ['1-5', '67%'], ['6-10', '0%'], ['11-15', '33%'], ['16-40', '0%']]);
+  assert.equal(iv.titleText, '第11期 · 11月14日', 'no theme, no dangling dot');
   assert.equal(iv.deck[0].answerLabel, '更短');
   assert.equal(iv.errata[0].k, 17);
-  const locked = V.issueVm({ state: 'ready', dateKey: '20261114', data: { issue: { issueNo: 11, themeLabel: '山河' }, mine: null, stats: null, deck: null, errata: [] } }, disp);
+  const locked = V.issueVm({ state: 'ready', dateKey: '20261114', data: { issue: { issueNo: 11, theme: 'mix', themeLabel: '' }, mine: null, stats: null, deck: null, locked: true, errata: [] } }, disp);
   assert.equal(locked.deckLockedText, '今日一比结束后公布题目');
   assert.equal(locked.stats, null);
   // sources text and howto

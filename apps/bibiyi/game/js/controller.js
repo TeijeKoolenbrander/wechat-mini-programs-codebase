@@ -95,6 +95,8 @@ function createController(deps) {
     c.ui.source = null;
     invalidate();
   }
+  /** The server sends the rarity as {pct, total} (percent of players below, 1 decimal) or null; the vm wants a share 0..1. */
+  const shareOf = (rar) => (rar && typeof rar.pct === 'number' ? rar.pct / 100 : null);
   const todayKey = () => beijingDateKey(now() + c.dailyOffsetMs);
   /** The saved free-play category, or 全部 when it is not offered (small categories, or a changed content set). */
   const offeredFreeGroup = () => (offeredGroups(content, config.freeGroupMinFacts).indexOf(S.freeGroup) >= 0 ? S.freeGroup : 'all');
@@ -135,7 +137,7 @@ function createController(deps) {
         S.notes.finalizedSeen[key] = true;
         store.save();
       }
-      c.home.daily = Object.assign(base, { state: 'done', streak: res.n, rarityShare: res.rarity ? res.rarity.share : null, finalizedByWindow: byWindow });
+      c.home.daily = Object.assign(base, { state: 'done', streak: res.n, rarityShare: shareOf(res.rarity), finalizedByWindow: byWindow });
     } else if (cache.myStatus === 'open' && cache.myRun) {
       c.home.daily = Object.assign(base, { state: 'inProgress', progressText: '已连对 ' + cache.myRun.streak + ' · 第 ' + cache.myRun.k + ' 题', streak: cache.myRun.streak });
     } else if (stored && stored.ranked) {
@@ -156,7 +158,7 @@ function createController(deps) {
       c.features = r.features || c.features;
       ads.setRemote(c.features);
       if (r.bests && r.bests.free > S.bestFree) S.bestFree = r.bests.free;
-      S.dailyCache = { dateKey: r.dateKey, issueNo: r.issueNo, themeLabel: r.theme.label, myStatus: r.myStatus, myRun: r.myRun || null, myResult: r.myResult || null, myDays: r.myDays, bests: r.bests };
+      S.dailyCache = { dateKey: r.dateKey, issueNo: r.issueNo, themeLabel: r.themeLabel || '', myStatus: r.myStatus, myRun: r.myRun || null, myResult: r.myResult || null, myDays: r.myDays, bests: r.bests };
       store.save();
       setDailyFromCache();
     } else {
@@ -411,8 +413,8 @@ function createController(deps) {
       r.serverEnded = true;
       return endRun('window');
     }
-    if (code === 'INVALID_ORDER') {
-      // out of step with the server: resync from the open question
+    if (code === 'INVALID_ORDER' || code === 'NOT_STARTED') {
+      // out of step with the server (or the run is unknown to it): resync from the open question
       r.pendingChoice = null;
       r.chosen = null;
       setPhase(r, 'loading');
@@ -630,8 +632,8 @@ function createController(deps) {
         return;
       }
       r.streak = result.n;
-      res = buildResult(r, { streak: result.n, endReason: result.endReason || endReason, rarityShare: result.rarity ? result.rarity.share : null, dayStreak: result.dayStreak });
-      if (result.challengeCompare) res.challengeCompare = { ownerStreak: result.challengeCompare.ownerStreak };
+      res = buildResult(r, { streak: result.n, endReason: result.endReason || endReason, rarityShare: shareOf(result.rarity), dayStreak: result.dayStreak });
+      if (result.compare) res.challengeCompare = { ownerStreak: result.compare.ownerStreak };
       if (r.ranked) {
         S.results[r.dateKey] = Object.assign(strip(res), { ranked: true });
         if (S.dailyCache && S.dailyCache.dateKey === r.dateKey) {
@@ -777,7 +779,7 @@ function createController(deps) {
     }
     if (c.screen === 'issue' && c.issue && c.issue.data && c.issue.data.deck && p[0] === 'issue') {
       const row = c.issue.data.deck.find((x) => x.k === +p[1]);
-      return row ? { face: p[2] === 'top' ? row.a : row.b, where: 'history' } : null;
+      return row ? { face: p[2] === 'top' ? row.top : row.bottom, where: 'history' } : null;
     }
     return null;
   }
@@ -836,6 +838,7 @@ function createController(deps) {
     if (r && r.ok) {
       const ch = Object.assign({ id }, r);
       if (r.kind === 'free') ch.categoryLabel = groupLabel(r.group);
+      if (r.kind === 'daily') ch.pastDeck = r.dateKey !== todayKey();
       if (r.status === 'own' && c.features.subscribe) {
         ch.subscribe = { state: S.subscribeBanned ? 'hidden' : 'offer' };
         if (!S.subscribeBanned) track('subscribe_offer', { where: 'own', challengeId: id });
@@ -1009,7 +1012,7 @@ function createController(deps) {
     b.mode = r.mode;
     b.dateKey = r.dateKey;
     b.issueNo = r.issueNo;
-    b.themeLabel = r.theme || b.themeLabel;
+    b.themeLabel = r.themeLabel !== undefined ? r.themeLabel : b.themeLabel;
     if (!r.rows.length) return view('empty');
     const L = getLayout();
     const msg = V.boardMessage(kind, r, { groupRef: c.group.groupRef, shareTicket: c.group.shareTicket, groupid: c.group.groupid, board: L.board, dpr: L.dpr, showUnverified: config.showUnverified });
@@ -1358,7 +1361,7 @@ function createController(deps) {
     if (st) res = strip(st);
     else if (S.dailyCache.myResult) {
       const m = S.dailyCache.myResult;
-      res = { mode: 'daily', ranked: true, friendly: false, status: 'done', headerText: '今日一比 · 第' + S.dailyCache.issueNo + '期' + V.themeSuffix(S.dailyCache.themeLabel), issueNo: S.dailyCache.issueNo, themeLabel: S.dailyCache.themeLabel, dateKey: key, streak: m.n, lifeUsed: false, cleared: m.endReason === 'cleared', endReason: m.endReason, deckLength: config.deckLen.daily, rarityShare: m.rarity ? m.rarity.share : null, dayStreak: S.dailyCache.myDays ? S.dailyCache.myDays.current : 0, questions: [], miss: null, challengeCompare: null, finalizedByWindow: m.endReason === 'window', deckKind: 'daily' };
+      res = { mode: 'daily', ranked: true, friendly: false, status: 'done', headerText: '今日一比 · 第' + S.dailyCache.issueNo + '期' + V.themeSuffix(S.dailyCache.themeLabel), issueNo: S.dailyCache.issueNo, themeLabel: S.dailyCache.themeLabel, dateKey: key, streak: m.n, lifeUsed: false, cleared: m.endReason === 'cleared', endReason: m.endReason, deckLength: config.deckLen.daily, rarityShare: shareOf(m.rarity), dayStreak: S.dailyCache.myDays ? S.dailyCache.myDays.current : 0, questions: [], miss: null, challengeCompare: null, finalizedByWindow: m.endReason === 'window', deckKind: 'daily' };
     } else return;
     res.status = 'done';
     res.tracked = true;
@@ -1438,7 +1441,7 @@ function createController(deps) {
       res.status = 'done';
       res.streak = cache.myResult.n;
       res.endReason = cache.myResult.endReason;
-      res.rarityShare = cache.myResult.rarity ? cache.myResult.rarity.share : null;
+      res.rarityShare = shareOf(cache.myResult.rarity);
     } else res.status = 'pendingNetwork';
     invalidate();
   }

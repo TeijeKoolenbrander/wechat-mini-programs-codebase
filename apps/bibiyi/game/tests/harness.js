@@ -23,7 +23,7 @@ function fakeContext(log) {
 }
 
 /**
- * opts: { enter: {scene, query, shareTicket, chatType}, storage: {}, privacy: {...}, groupData, now, mockServer }
+ * opts: { enter: {scene, query, shareTicket, chatType}, storage: {}, privacy: {...}, groupData, now, mockServer, cloud }
  */
 /** Mock timers and Date (idempotent per test). Call before boot() when a test needs the clock earlier. */
 function prepare(t, opts) {
@@ -74,7 +74,14 @@ function boot(t, opts) {
       if (opts.groupEnterFail) return o.fail({ errno: opts.groupEnterFail });
       o.success({ cloudID: 'cloud-1', encryptedData: 'x', iv: 'y' });
     },
-    cloud: { CloudID: (id) => ({ mockData: opts.groupData || { opengid: 'G1', chat_type: 3 }, id }) },
+    cloud: {
+      CloudID: (id) => ({ cloudID: id, data: opts.groupData || { opengid: 'G1', chat_type: 3 } }), // the platform delivers {cloudID, data} after decrypting
+      init() {},
+      // opts.cloud(name, data) -> Promise<result>: the game talks to the REAL cloud functions (cloudfunctions/tests/client-contract.test.js)
+      callFunction(o) {
+        Promise.resolve(opts.cloud(o.name, o.data)).then((r) => o.success({ result: JSON.parse(JSON.stringify(r)) }), (e) => o.fail({ errMsg: String(e && e.message) }));
+      },
+    },
     // privacy and friend scope
     getPrivacySetting: (o) => o.success({ needAuthorization: p.state !== 'agreed' }),
     requirePrivacyAuthorize: (o) => {
@@ -144,6 +151,7 @@ function boot(t, opts) {
     const ms = loader.require(path.join(ROOT, 'game.js'), './js/mock-server');
     ms.createMockServer = () => opts.mockServer;
   }
+  if (opts.cloud) loader.require(path.join(ROOT, 'game.js'), './js/build-config').cloudEnv = 'test-env'; // cloud mode: wx.cloud.callFunction
   const app = loader.require(path.join(ROOT, 'game.js'), './js/main');
   t.after(() => {
     delete global.wx;

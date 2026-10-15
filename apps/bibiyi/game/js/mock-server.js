@@ -14,6 +14,10 @@
  * with 模拟), because the real daily facts must never ship in the game package
  * (AC 22). Tests may pass `dailyFacts` (e.g. the placeholder export) instead.
  *
+ * Every response has exactly the shape of the real cloud function of the same name (errors are
+ * {ok:false, code, message}); cloudfunctions/tests/mock-parity.test.js runs one scripted session against
+ * both and fails on any difference.
+ *
  * NOT a security boundary. Real mode (js/api.js) calls wx.cloud.callFunction.
  */
 
@@ -24,14 +28,17 @@ const { MEASURES, BY_KEY } = require('../core/measures');
 const { generateDaily, buildFreeDeck, themeOf, deckFactIds } = require('../core/deck');
 const { replayRun, judge } = require('../core/judge');
 const { questionPayload, revealOf, knownFace } = require('../core/question');
+
 const { rarityShare } = require('../core/score');
 const { beijingDateKey, issueNo, secondsSinceBeijingMidnight, addDays, windowCloseMs, DAY_MS } = require('../core/date');
 
 const ME = 'mock-openid-me';
+/** the distribution buckets of the issue detail (same as cloudfunctions/getHistory) */
+const HIST_BUCKETS = [[0, 0], [1, 5], [6, 10], [11, 15], [16, 20], [21, 30], [31, 39], [40, 40]];
 const REASON_KEYS = ['value', 'unit', 'name', 'source', 'wording', 'other'];
 
-function err(code, msg, extra) {
-  return Object.assign({ ok: false, code, msg: msg || code }, extra || {});
+function err(code, message, extra) {
+  return Object.assign({ ok: false, code, message: message || code }, extra || {});
 }
 
 const SYN_RANGE = {
@@ -108,6 +115,18 @@ function createMockServer(opts) {
     return themeOf(dateKey).label;
   }
 
+  /** the fields every deck-bound response carries: `theme` is the key, `themeLabel` the (empty in v1) label */
+  function themeFields(dateKey) {
+    return { theme: themeOf(dateKey).key, themeLabel: themeLabel(dateKey) };
+  }
+
+  /** a card whose value is public (answered pairs, history): the known face plus the note */
+  function fullCard(fact) {
+    const c = knownFace(fact);
+    if (fact.note) c.note = fact.note;
+    return c;
+  }
+
   function questionOf(deckDoc, k) {
     return questionPayload(deckDoc.deck.questions[k - 1], allIdx.byId);
   }
@@ -131,10 +150,11 @@ function createMockServer(opts) {
     return { current: 0, best: p.bestDays };
   }
 
+  /** {pct, total} (pct = % of players below, 1 decimal) once the day has enough results, else null */
   function rarityFor(dateKey, n) {
     const st = db.stats[dateKey];
-    if (!st || st.total < config.rarityMinTotal) return { share: null, total: st ? st.total : 0 };
-    return { share: rarityShare(st.hist, st.total, n, config.rarityMinTotal), total: st.total };
+    if (!st || st.total < config.rarityMinTotal) return null;
+    return { pct: Math.round(rarityShare(st.hist, st.total, n, config.rarityMinTotal) * 1000) / 10, total: st.total };
   }
 
   // ---------------------------------------------------------------- run progress
@@ -172,14 +192,13 @@ function createMockServer(opts) {
       st.hist[run.streak]++;
       st.total++;
       db.results[dk + '_' + run.who] = { who: run.who, dateKey: dk, n: run.streak, endS: secondsSinceBeijingMidnight(now()), dayStreak: p.curDays, endReason };
-      result.rarity = rarityFor(dk, run.streak);
       result.dayStreak = p.curDays;
       result.bestDaily = p.bestDaily;
+      result.bestDays = p.bestDays;
     }
     if (run.challengeId && db.challenges[run.challengeId]) {
       const c = db.challenges[run.challengeId];
       c.answers.push({ by: run.who, n: run.streak });
-      result.challengeCompare = { ownerStreak: c.ownerStreak };
     }
     // observe-only anomaly flags
     const ms = run.answers.map((a) => a.ms).filter((x) => typeof x === 'number').sort((a, b) => a - b);
@@ -200,18 +219,44 @@ function createMockServer(opts) {
     const deckDoc = db.decks[run.dateKey];
     return run.answers.map((a) => {
       const q = deckDoc.deck.questions[a.k - 1];
-      return { k: a.k, top: knownFace(allIdx.byId[q.a]), bottom: knownFace(allIdx.byId[q.b]), correct: a.ok, choice: a.c };
+      return { k: a.k, choice: a.c, correct: a.ok, top: fullCard(allIdx.byId[q.a]), bottom: fullCard(allIdx.byId[q.b]) };
     });
   }
 
+  /** the run as the client sees it at the end: stored result plus the day's rarity and the challenge comparison */
+  function resultOut(run) {
+    const r = run.result || { n: run.streak, endReason: 'miss' };
+    const out = { n: r.n, endReason: r.endReason, rarity: null, dayStreak: null, bestDaily: null };
+    if (run.ranked) {
+      out.rarity = rarityFor(run.dateKey, r.n);
+      out.dayStreak = r.dayStreak === undefined ? null : r.dayStreak;
+      out.bestDaily = r.bestDaily === undefined ? null : r.bestDaily;
+    }
+    if (run.challengeId && db.challenges[run.challengeId]) out.compare = { ownerStreak: db.challenges[run.challengeId].ownerStreak, myStreak: r.n };
+    return out;
+  }
+
   function runView(run, resumed) {
+    const deckDoc = db.decks[run.dateKey];
     const out = {
-      ok: true, resumed, clientRunId: run.clientRunId, kind: run.kind, ranked: run.ranked, dateKey: run.dateKey, issueNo: db.decks[run.dateKey].issueNo, themeLabel: themeLabel(run.dateKey),
-      k: run.k, streak: run.streak, answered: answeredList(run),
+      ok: true, resumed, clientRunId: run.clientRunId, kind: run.kind, ranked: run.ranked, friendly: !run.ranked, dateKey: run.dateKey, issueNo: deckDoc.issueNo,
+      theme: themeFields(run.dateKey).theme, themeLabel: themeFields(run.dateKey).themeLabel, deckLength: deckDoc.deck.questions.length,
+      k: run.k, streak: run.streak, question: questionOf(deckDoc, run.k), answered: answeredList(run),
     };
-    if (run.status === 'open') out.question = questionOf(db.decks[run.dateKey], run.k);
-    else out.result = run.result;
     if (run.challengeId) out.challenge = { ownerStreak: db.challenges[run.challengeId].ownerStreak };
+    return out;
+  }
+
+  /** the response for an answered question; a repeat of the same k looks exactly like the first answer */
+  function outcomeOf(run, entry) {
+    const deckDoc = db.decks[run.dateKey];
+    const q = deckDoc.deck.questions[entry.k - 1];
+    const out = {
+      ok: true, k: entry.k, correct: entry.ok, choice: entry.c, reveal: revealOf(allIdx.byId[q.b]),
+      streak: run.answers.filter((x) => x.k <= entry.k && x.ok).length, ended: entry.ended,
+    };
+    if (entry.ended) out.result = resultOut(run);
+    else if (run.status === 'open' && run.k === entry.k + 1) out.next = questionOf(deckDoc, run.k);
     return out;
   }
 
@@ -225,13 +270,13 @@ function createMockServer(opts) {
       if (!deckDoc) return err('DAILY_UNAVAILABLE');
       const ranked = db.progress[dateKey + '_' + who];
       const out = {
-        ok: true, dateKey, issueNo: deckDoc.issueNo, theme: { key: themeOf(dateKey).key, label: themeOf(dateKey).label }, serverNow: now(),
+        ok: true, dateKey, issueNo: deckDoc.issueNo, theme: themeFields(dateKey).theme, themeLabel: themeFields(dateKey).themeLabel, serverNow: now(),
         myStatus: !ranked ? 'none' : ranked.status === 'open' ? 'open' : 'done', myDays: daysNow(who),
         bests: { daily: player(who).bestDaily, free: player(who).bestFree },
         features: { subscribe: db.appConfig.subscribe && db.appConfig.subscribe.tmplId ? { tmplId: db.appConfig.subscribe.tmplId } : null, banner: db.appConfig.ads.banner || { enabled: false, adUnitId: null }, interstitial: resolveInterstitial(config, db.appConfig.ads.interstitial) },
       };
-      if (ranked && ranked.status === 'open') out.myRun = { k: ranked.k, streak: ranked.streak, clientRunId: ranked.clientRunId };
-      if (ranked && ranked.status === 'ended') out.myResult = Object.assign({}, ranked.result, { clientRunId: ranked.clientRunId, missK: ranked.missK || null });
+      if (ranked && ranked.status === 'open') out.myRun = { k: ranked.k, streak: ranked.streak };
+      if (ranked && ranked.status === 'ended') out.myResult = { n: ranked.result.n, endReason: ranked.result.endReason, rarity: rarityFor(dateKey, ranked.result.n), dayStreak: ranked.result.dayStreak === undefined ? null : ranked.result.dayStreak };
       return out;
     },
 
@@ -256,14 +301,14 @@ function createMockServer(opts) {
       }
       if (!d.clientRunId) return err('INVALID_ACTIONS');
       const existing = progressOf(who, d.clientRunId);
-      if (existing) return runView(existing, true);
+      if (existing) return existing.status === 'ended' ? err('ALREADY_PLAYED', 'daily already played', { clientRunId: existing.clientRunId, result: existing.result }) : runView(existing, true);
       const today = nowKey();
       const rankedKey = dateKey + '_' + who;
       if (dateKey === today) {
         if (db.progress[rankedKey]) {
           const r = db.progress[rankedKey];
           if (r.status === 'open' && (d.mode === 'daily' || (challenge && !r.challengeId))) return runView(r, true);
-          if (d.mode === 'daily') return Object.assign(err('ALREADY_PLAYED'), { result: r.result, clientRunId: r.clientRunId });
+          if (d.mode === 'daily') return err('ALREADY_PLAYED', 'daily already played', { clientRunId: r.clientRunId, result: Object.assign({}, r.result, { rarity: r.ranked ? rarityFor(r.dateKey, r.result.n) : null }) });
           kind = 'dailyFriendly';
         } else {
           ranked = true;
@@ -282,41 +327,34 @@ function createMockServer(opts) {
 
     answer(d, who) {
       const run = progressOf(who, d.clientRunId);
-      if (!run) return err('RUN_NOT_FOUND');
+      if (!run) return err('NOT_STARTED', 'no such run: call startRun first');
       if (d.choice !== 'hi' && d.choice !== 'lo') return err('INVALID_ACTIONS');
       if (!Number.isInteger(d.k)) return err('INVALID_ORDER');
-      if (d.k < run.k || (run.status === 'ended' && d.k <= run.answers.length)) {
-        const a = run.answers[d.k - 1];
-        if (!a) return err('INVALID_ORDER');
-        return clone(a.resp);
-      }
-      if (run.status === 'ended') return err('INVALID_ORDER');
+      const stored = run.answers.find((x) => x.k === d.k);
+      if (stored) return clone(outcomeOf(run, stored));
+      if (run.status === 'ended') return run.endReason === 'window' ? err('WINDOW_CLOSED', 'window closed', { result: resultOut(run) }) : err('INVALID_ORDER', 'run already ended');
       if (run.ranked && now() > windowCloseMs(run.dateKey)) {
-        const result = finalize(run, 'window');
-        return err('WINDOW_CLOSED', 'window closed', { result, streak: run.streak });
+        finalize(run, 'window');
+        return err('WINDOW_CLOSED', 'window closed', { result: resultOut(run) });
       }
       if (d.k !== run.k) {
         if (run.ranked) flag(who, 'order', d.k, run.dateKey);
-        return err('INVALID_ORDER');
+        return err('INVALID_ORDER', 'not the current question', { expectedK: run.k });
       }
       const deckDoc = db.decks[run.dateKey];
       const q = deckDoc.deck.questions[run.k - 1];
       const a = allIdx.byId[q.a];
       const b = allIdx.byId[q.b];
       const j = judge(a, b, d.choice);
-      const reveal = revealOf(b);
       if (j.correct) run.streak++;
       const cleared = j.correct && run.k >= deckDoc.deck.length;
-      const resp = { ok: true, k: run.k, correct: j.correct, reveal, streak: run.streak, ended: !j.correct || cleared };
-      if (!resp.ended) resp.next = questionOf(deckDoc, run.k + 1);
-      run.answers.push({ k: run.k, c: d.choice, ok: j.correct, ms: d.ms, at: now(), resp: null });
-      const entry = run.answers[run.answers.length - 1];
-      if (resp.ended) {
+      const entry = { k: run.k, c: d.choice, ok: j.correct, ms: d.ms, at: now(), ended: !j.correct || cleared };
+      run.answers.push(entry);
+      if (entry.ended) {
         run.missK = j.correct ? null : run.k;
-        resp.result = finalize(run, j.correct ? 'cleared' : 'miss');
+        finalize(run, j.correct ? 'cleared' : 'miss');
       } else run.k++;
-      entry.resp = resp;
-      return clone(resp);
+      return clone(outcomeOf(run, entry));
     },
 
     submitRun(d, who) {
@@ -337,13 +375,12 @@ function createMockServer(opts) {
       if (mismatch) flag(who, 'mismatch', d.clientStreak + '/' + rep.streak, nowKey());
       const p = player(who);
       p.bestFree = Math.max(p.bestFree, rep.streak);
-      const response = { ok: true, streak: rep.streak, mismatch, endReason: rep.endReason, lifeUsed: rep.lifeUsed };
+      const response = { ok: true, clientRunId: d.clientRunId, streak: rep.streak, mismatch, lifeUsed: rep.lifeUsed };
       if (d.challengeId) {
         const c = db.challenges[d.challengeId];
-        if (!c || t > c.expiresAt) response.challengeCompare = null;
-        else if (c.kind === 'free') {
+        if (c && t <= c.expiresAt && c.kind === 'free') {
           c.answers.push({ by: who, n: rep.streak });
-          response.challengeCompare = { ownerStreak: c.ownerStreak };
+          response.challengeCompare = { ownerStreak: c.ownerStreak, ownerLifeUsed: !!c.ownerLifeUsed, myStreak: rep.streak };
         }
       }
       db.runs[key] = { who, seed: d.seed >>> 0, group, contentVersion: cv, configVersion: cfgNum, serverStreak: rep.streak, lifeUsed: rep.lifeUsed, mismatch, response, submittedAt: t };
@@ -370,34 +407,24 @@ function createMockServer(opts) {
     getChallenge(d, who) {
       const c = db.challenges[d.challengeId];
       const t = now();
-      if (!c) return err('CHALLENGE_EXPIRED', 'not found', { status: 'expired' });
-      if (t > c.expiresAt) return err('CHALLENGE_EXPIRED', 'expired', { status: 'expired' });
-      if (c.contentVersion !== cv || srv.retiredVersions.indexOf(c.contentVersion) >= 0) return { ok: true, status: 'retired', kind: c.kind, ownerStreak: c.ownerStreak };
+      if (!c || t > c.expiresAt) return err('CHALLENGE_EXPIRED', 'challenge expired or missing', { status: 'expired' });
+      if (c.kind === 'free' && (c.contentVersion !== cv || srv.retiredVersions.indexOf(c.contentVersion) >= 0)) return { ok: true, challengeId: c.id, kind: c.kind, ownerStreak: c.ownerStreak, expiresAt: c.expiresAt, group: c.group, ownerLifeUsed: !!c.ownerLifeUsed, status: 'retired', countsAsDaily: false, isFriendly: true };
       const today = nowKey();
       const mine = c.answers.find((a) => a.by === who);
       const rankedToday = !!db.progress[today + '_' + who];
       const dailyToday = c.kind === 'daily' && c.dateKey === today;
-      const out = {
-        ok: true, status: c.owner === who ? 'own' : mine ? 'answered' : 'ready', ownerStreak: c.ownerStreak, kind: c.kind,
-        countsAsDaily: dailyToday && !rankedToday && c.owner !== who, answerCount: c.answers.length,
-      };
-      out.isFriendly = !out.countsAsDaily;
+      const base = { ok: true, challengeId: c.id, kind: c.kind, ownerStreak: c.ownerStreak, expiresAt: c.expiresAt };
       if (c.kind === 'daily') {
-        out.dateKey = c.dateKey;
-        out.issueNo = db.decks[c.dateKey] ? db.decks[c.dateKey].issueNo : issueNo(c.dateKey, launchKey);
-        out.themeLabel = themeLabel(c.dateKey);
-        out.pastDeck = c.dateKey !== today;
-        out.dailyPlayedToday = rankedToday;
+        Object.assign(base, { dateKey: c.dateKey, issueNo: db.decks[c.dateKey] ? db.decks[c.dateKey].issueNo : issueNo(c.dateKey, launchKey) }, themeFields(c.dateKey));
       } else {
-        out.seed = c.seed;
-        out.group = c.group;
-        out.contentVersion = c.contentVersion;
-        out.configVersion = c.configVersion;
-        out.ownerLifeUsed = c.ownerLifeUsed;
+        base.group = c.group;
+        base.ownerLifeUsed = !!c.ownerLifeUsed;
       }
-      if (c.owner === who && c.answers.length) out.bestAnswer = Math.max.apply(null, c.answers.map((a) => a.n));
-      if (mine) out.myStreak = mine.n;
-      return out;
+      if (c.owner === who) return Object.assign(base, { status: 'own', answerCount: c.answers.length, bestAnswer: c.answers.length ? Math.max.apply(null, c.answers.map((a) => a.n)) : null, countsAsDaily: false, isFriendly: true });
+      if (mine) return Object.assign(base, { status: 'answered', myStreak: mine.n, runOpen: !!(db.progress[who + '_' + c.id] && db.progress[who + '_' + c.id].status === 'open'), countsAsDaily: false, isFriendly: true });
+      if (c.kind === 'free') return Object.assign(base, { status: 'ready', seed: c.seed, contentVersion: c.contentVersion, configVersion: c.configVersion, countsAsDaily: false, isFriendly: true });
+      const countsAsDaily = dailyToday && !rankedToday;
+      return Object.assign(base, { status: 'ready', countsAsDaily, isFriendly: !countsAsDaily });
     },
 
     subscribeChallenge(d, who) {
@@ -411,9 +438,9 @@ function createMockServer(opts) {
 
     joinGroup(d, who) {
       const g = d && d.groupData;
-      const data = g && g.mockData ? g.mockData : g;
-      if (!data || !data.opengid) return err(data && data.code ? data.code : 40097);
-      if (data.chat_type !== undefined && data.chat_type !== 3 && data.chat_type !== 4) return err('NOT_GROUP');
+      const data = g && typeof g === 'object' && g.data && typeof g.data === 'object' ? g.data : null;
+      if (!data) return err('BAD_CLOUDID', 'group data missing or not decrypted');
+      if (typeof data.opengid !== 'string' || !data.opengid || (data.chat_type !== undefined && data.chat_type !== 3 && data.chat_type !== 4)) return err('NOT_GROUP', 'not a group chat');
       const ref = hash32('pepper:' + data.opengid).toString(16).padStart(8, '0') + hash32(data.opengid + ':p').toString(16).padStart(8, '0');
       db.groups[ref] = db.groups[ref] || {};
       db.members[ref + '_' + who] = true;
@@ -437,7 +464,7 @@ function createMockServer(opts) {
       rows.sort((a, b) => b[1] - a[1] || a[2] - b[2]);
       const cap = config.boardListCap;
       const mode = rows.length > cap ? (d.kind === 'group' ? 'group' : 'selfOnly') : 'full';
-      return { ok: true, dateKey, issueNo: deckDoc.issueNo, theme: themeLabel(dateKey), contentVersion: cv, salt: deckDoc.salt, selfHash: hashRow(who, deckDoc.salt), mode, rows: rows.slice(0, cap) };
+      return Object.assign({ ok: true, dateKey, issueNo: deckDoc.issueNo }, themeFields(dateKey), { contentVersion: cv, salt: deckDoc.salt, selfHash: hashRow(who, deckDoc.salt), mode, rows: rows.slice(0, cap) });
     },
 
     getHistory(d, who) {
@@ -447,7 +474,8 @@ function createMockServer(opts) {
       if (!d.dateKey) {
         const items = keys.slice(-30).reverse().map((k) => {
           const r = db.results[k + '_' + who];
-          return { dateKey: k, issueNo: db.decks[k].issueNo, themeLabel: themeLabel(k), mine: r ? { n: r.n } : null, isToday: k === today, inProgress: k === today && !r && !!db.progress[k + '_' + who] };
+          const open = k === today && !r && db.progress[k + '_' + who] && db.progress[k + '_' + who].status === 'open';
+          return Object.assign({ dateKey: k, issueNo: db.decks[k].issueNo }, themeFields(k), { isToday: k === today, mine: r ? { n: r.n } : null, status: r ? 'done' : open ? 'open' : 'none' });
         });
         const p = player(who);
         return { ok: true, items, bestDays: p.bestDays, bestDaily: p.bestDaily };
@@ -456,18 +484,21 @@ function createMockServer(opts) {
       if (!deckDoc || d.dateKey > today) return err('DECK_NOT_FOUND');
       const run = db.progress[d.dateKey + '_' + who];
       const st = db.stats[d.dateKey];
+      const res = db.results[d.dateKey + '_' + who];
       const out = {
-        ok: true, issue: { dateKey: d.dateKey, issueNo: deckDoc.issueNo, themeLabel: themeLabel(d.dateKey) },
-        mine: run && run.status === 'ended' ? { streak: run.streak, missK: run.missK } : null,
-        stats: st && st.total >= config.rarityMinTotal ? { total: st.total, hist: st.hist.slice() } : null, deck: null, errata: (db.overrides.errata[d.dateKey] || []).slice(),
+        ok: true, issue: Object.assign({ dateKey: d.dateKey, issueNo: deckDoc.issueNo }, themeFields(d.dateKey)),
+        mine: res ? { streak: res.n, missK: res.endReason === 'miss' ? res.n + 1 : null, endReason: res.endReason } : null,
+        stats: null, deck: null, locked: true, errata: (db.overrides.errata[d.dateKey] || []).map((e) => ({ k: e.k, text: e.text })),
       };
+      if (st && st.total >= config.rarityMinTotal) out.stats = { total: st.total, buckets: HIST_BUCKETS.map((b) => ({ from: b[0], to: b[1], count: st.hist.slice(b[0], b[1] + 1).reduce((x, y) => x + y, 0) })) };
       if (now() > windowCloseMs(d.dateKey)) {
-        out.deck = deckDoc.deck.questions.map((q) => {
+        out.locked = false;
+        out.deck = deckDoc.deck.questions.map((q, i) => {
           const a = allIdx.byId[q.a];
           const b = allIdx.byId[q.b];
-          const m = BY_KEY[a.measure];
-          const ans = run ? run.answers.find((x) => x.k === q.k) : null;
-          return { k: q.k, a: knownFace(a), b: knownFace(b), answerLabel: b.value > a.value ? m.hi : m.lo, mine: ans ? (ans.ok ? 'correct' : 'miss') : 'unanswered' };
+          const ans = run ? run.answers.find((x) => x.k === i + 1) : null;
+          const correct = b.value > a.value ? 'hi' : 'lo';
+          return { k: i + 1, top: fullCard(a), bottom: fullCard(b), answer: correct, answerVerb: BY_KEY[a.measure][correct], mine: !run ? null : ans ? (ans.ok ? 'correct' : 'miss') : 'unanswered' };
         });
       }
       return out;
@@ -490,8 +521,9 @@ function createMockServer(opts) {
     },
 
     track(d) {
-      for (const e of (d && d.events) || []) db.events.push(e);
-      return { ok: true };
+      const list = ((d && d.events) || []).slice(0, 50);
+      for (const e of list) db.events.push(e);
+      return { ok: true, accepted: list.length };
     },
   };
 

@@ -357,13 +357,10 @@ function boardMessage(kind, payload, extra) {
 
 // ---------------------------------------------------------------- history
 
-const BUCKETS = [
-  { label: '0-4', from: 0, to: 4 },
-  { label: '5-9', from: 5, to: 9 },
-  { label: '10-14', from: 10, to: 14 },
-  { label: '15-19', from: 15, to: 19 },
-  { label: '20+', from: 20, to: 1e9 },
-];
+/** "0" or "1-5": the label of a distribution bucket {from, to} sent by getHistory */
+function bucketLabel(b) {
+  return b.from === b.to ? String(b.from) : b.from + '-' + b.to;
+}
 
 function dateText(dateKey) {
   return +dateKey.slice(4, 6) + '月' + +dateKey.slice(6, 8) + '日';
@@ -381,7 +378,7 @@ function historyVm(h, display) {
       themeLabel: it.themeLabel,
       mineText: it.mine ? '连对 ' + it.mine.n : '未参加',
       isToday: !!it.isToday,
-      statusText: it.isToday ? (it.mine ? '今日连对 ' + it.mine.n : it.inProgress ? '进行中' : null) : null,
+      statusText: it.isToday ? (it.mine ? '今日连对 ' + it.mine.n : it.status === 'open' ? '进行中' : null) : null,
     }));
   }
   if (h.state === 'empty') out.emptyText = '还没有往期';
@@ -406,20 +403,16 @@ function issueVm(d, display) {
     const total = data.stats.total;
     out.stats = {
       totalText: '本期 ' + total.toLocaleString('en-US') + ' 人参加',
-      buckets: BUCKETS.map((b) => {
-        let n = 0;
-        for (let i = b.from; i <= b.to && i < data.stats.hist.length; i++) n += data.stats.hist[i];
-        return { label: b.label, shareText: Math.round((n / total) * 100) + '%' };
-      }),
+      buckets: data.stats.buckets.map((b) => ({ label: bucketLabel(b), shareText: Math.round((b.count / total) * 100) + '%' })),
     };
   }
   if (data.deck) {
     out.deck = data.deck.map((row) => ({
       k: row.k,
-      top: faceVm(row.a, { canReport: true }),
-      bottom: faceVm(row.b, { canReport: true }),
-      answerLabel: row.answerLabel,
-      mine: row.mine,
+      top: faceVm(row.top, { canReport: true }),
+      bottom: faceVm(row.bottom, { canReport: true }),
+      answerLabel: row.answerVerb,
+      mine: row.mine === null || row.mine === undefined ? 'unanswered' : row.mine,
     }));
   } else out.deckLockedText = '今日一比结束后公布题目';
   out.errata = (data.errata || []).map((e) => ({ k: e.k, text: e.text }));
@@ -447,7 +440,7 @@ function cardVm(res) {
 }
 
 module.exports = {
-  themeSuffix, HOWTO_LINES, SOURCES, REPORT_THANKS, REPORT_TITLE, BUCKETS,
+  themeSuffix, HOWTO_LINES, SOURCES, REPORT_THANKS, REPORT_TITLE, bucketLabel,
   displayVm, faceVm, revealedFace, homeVm, howtoVm, sourcesVm, settingsVm, categoryVm, playVm, continueSheetVm, sourceSheetVm, reportVm, resultVm,
   challengeVm, boardVm, boardMessage, historyVm, issueVm, cardVm, headerOf, dateText,
 };
