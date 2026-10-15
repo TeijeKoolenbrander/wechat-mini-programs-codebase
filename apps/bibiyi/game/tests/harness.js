@@ -25,12 +25,17 @@ function fakeContext(log) {
 /**
  * opts: { enter: {scene, query, shareTicket, chatType}, storage: {}, privacy: {...}, groupData, now, mockServer }
  */
-function boot(t, opts) {
-  opts = opts || {};
+/** Mock timers and Date (idempotent per test). Call before boot() when a test needs the clock earlier. */
+function prepare(t, opts) {
   if (!t.__timers) {
     t.__timers = true;
-    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: opts.now || Date.UTC(2026, 10, 20, 4, 0, 0) });
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: (opts && opts.now) || Date.UTC(2026, 10, 20, 4, 0, 0) });
   }
+}
+
+function boot(t, opts) {
+  opts = opts || {};
+  prepare(t, opts);
 
   const log = { text: [], images: [], calls: [], storageWrites: 0, cloudWrites: [], shares: [], ads: [], menu: [], console: [], saved: [], subscribe: [] };
   const storage = opts.storage || {};
@@ -133,7 +138,13 @@ function boot(t, opts) {
   t.mock.method(console, 'log', (...a) => log.console.push(a.join(' ')));
 
   // WeChat resolution rules (.js only, relative paths, no Node built-ins), fresh module cache per boot
-  const app = createLoader(ROOT).require(path.join(ROOT, 'game.js'), './js/main');
+  const loader = createLoader(ROOT);
+  if (opts.mockServer) {
+    // reuse one in-memory server across boots (a relaunch talks to the same cloud)
+    const ms = loader.require(path.join(ROOT, 'game.js'), './js/mock-server');
+    ms.createMockServer = () => opts.mockServer;
+  }
+  const app = loader.require(path.join(ROOT, 'game.js'), './js/main');
   t.after(() => {
     delete global.wx;
     delete global.requestAnimationFrame;
@@ -182,6 +193,10 @@ function boot(t, opts) {
     },
     wait(ms) {
       t.mock.timers.tick(ms);
+    },
+    /** Jump the mocked clock (no timers fire). */
+    setTime(ms) {
+      t.mock.timers.setTime(ms);
     },
     /** Let pending promises (mock server, awaits) settle. */
     async settle() {
@@ -236,4 +251,4 @@ function correctFrom(byId) {
   return (q) => (byId[q.bottom.factId].value > byId[q.top.factId].value ? 'hi' : 'lo');
 }
 
-module.exports = { boot, answer, correctFrom, SCREEN, CAPSULE };
+module.exports = { boot, prepare, answer, correctFrom, SCREEN, CAPSULE };

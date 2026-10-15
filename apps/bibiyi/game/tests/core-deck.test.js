@@ -209,7 +209,7 @@ test('questions reveal nothing about the bottom card before the answer (AC 2, 18
   assert.ok(p.top.valueText && p.top.sourceText && p.top.unitText);
   assert.equal(p.bottom.valueText, undefined);
   assert.equal(p.bottom.sourceText, undefined);
-  assert.deepEqual(Object.keys(p.bottom).sort(), ['factId', 'label', 'unitText'].concat(p.bottom.sub ? ['sub'] : []).sort());
+  assert.deepEqual(Object.keys(p.bottom).sort(), ['factId', 'label', 'measure', 'unitText'].concat(p.bottom.sub ? ['sub'] : []).sort());
   const text = JSON.stringify(p);
   assert.ok(!text.includes(String(free.byId[q.b].value)) || String(free.byId[q.b].value) === String(free.byId[q.a].value));
   assert.equal(p.verbs.hi, BY_KEY[q.m].hi);

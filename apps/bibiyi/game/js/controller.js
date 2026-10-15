@@ -732,7 +732,7 @@ function createController(deps) {
     c.ui.dialog = null;
     if (c.screen !== 'home') go('home');
     c.screen = 'home';
-    setDailyFromCache();
+    if (c.home.daily.state !== 'offline' && c.home.daily.state !== 'error') setDailyFromCache();
     if (c.pendingEntry) {
       const e = c.pendingEntry;
       c.pendingEntry = null;

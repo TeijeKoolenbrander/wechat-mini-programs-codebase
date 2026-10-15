@@ -200,7 +200,7 @@ function createMockServer(opts) {
     const deckDoc = db.decks[run.dateKey];
     return run.answers.map((a) => {
       const q = deckDoc.deck.questions[a.k - 1];
-      return { k: a.k, top: knownFace(allIdx.byId[q.a]), bottom: Object.assign({ factId: q.b, label: allIdx.byId[q.b].label }, a.resp.reveal), correct: a.ok, choice: a.c };
+      return { k: a.k, top: knownFace(allIdx.byId[q.a]), bottom: knownFace(allIdx.byId[q.b]), correct: a.ok, choice: a.c };
     });
   }
 
