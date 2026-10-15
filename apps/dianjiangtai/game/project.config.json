@@ -1,6 +1,5 @@
 {
-  "_TODO": "The founder supplies the real AppID (D9). 'touristappid' is a placeholder: cloud, ads, share tickets and the open data domain do not work with it. Do not commit the real AppID's private config.",
-  "appid": "touristappid",
+  "appid": "wx172906d7bfd6036f",
   "compileType": "game",
   "projectname": "dianjiangtai-game",
   "libVersion": "latest",
