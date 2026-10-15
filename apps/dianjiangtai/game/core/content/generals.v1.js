@@ -1,4 +1,7 @@
-{
+'use strict';
+// contentVersion 1 roster + texts (spec Appendix B). Single source of truth: a CommonJS module,
+// because WeChat mini games can only require() .js files (never .json).
+module.exports = {
  "contentVersion": 1,
  "note": "Phase 1 roster, spec Appendix B. Stats are our own judgement (INFERENCE); any change bumps contentVersion.",
  "generals": [
@@ -935,4 +938,4 @@
    "bad": "错位"
   }
  }
-}
+};

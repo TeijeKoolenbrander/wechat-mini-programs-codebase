@@ -9,7 +9,7 @@ const path = require('path');
 const GAME = path.join(__dirname, '..');
 const REPO = path.join(GAME, '..', '..', '..');
 const SPEC = fs.readFileSync(path.join(REPO, 'docs', 'dianjiangtai', 'spec.md'), 'utf8');
-const content = JSON.parse(fs.readFileSync(path.join(GAME, 'core', 'content', 'generals.v1.json'), 'utf8'));
+const content = require('../core/content/generals.v1.js');
 
 const FAC = { 蜀: 'shu', 魏: 'wei', 吴: 'wu', 群: 'qun' };
 const ERA = { HJ: 'huangjin', QX: 'qunxiong', CB: 'chibi', SF: 'sanfen' };
@@ -18,7 +18,9 @@ const TIER = { 甲: 'jia', 乙: 'yi', 丙: 'bing' };
 
 function parseAppendixB() {
   const start = SPEC.indexOf('## Appendix B');
-  const rows = SPEC.slice(start).split('\n').filter((l) => /^\| (蜀|魏|吴|群) \|/.test(l));
+  const end = SPEC.indexOf('## Appendix C', start);
+  assert.ok(start >= 0 && end > start, 'spec has Appendix B followed by Appendix C');
+  const rows = SPEC.slice(start, end).split('\n').filter((l) => /^\| (蜀|魏|吴|群) \|/.test(l));
   return rows.map((l) => {
     const c = l.split('|').map((s) => s.trim()).slice(1, -1);
     const m = c[1].match(/^(\S+?)(?: \((\S+)\))?$/);
@@ -33,7 +35,7 @@ function parseAppendixB() {
   });
 }
 
-test('Appendix B (parsed from spec.md) equals generals.v1.json exactly: 32 generals, every stat, era, tier, role, bond', () => {
+test('Appendix B (parsed from spec.md) equals generals.v1.js exactly: 32 generals, every stat, era, tier, role, bond', () => {
   const spec = parseAppendixB();
   assert.equal(spec.length, 32, 'spec table rows');
   assert.equal(content.generals.length, 32);

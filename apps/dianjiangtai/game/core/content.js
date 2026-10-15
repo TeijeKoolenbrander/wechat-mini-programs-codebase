@@ -3,11 +3,11 @@
  *
  *   getContent(contentVersion) -> content | null
  *
- * Content ships as core/content/generals.v<N>.json. The sim and server
+ * Content ships as core/content/generals.v<N>.js. The sim and server
  * validation pin to the contentVersion; the server keeps the last 2 versions.
  */
 
-const V1 = require('./content/generals.v1.json');
+const V1 = require('./content/generals.v1.js');
 
 const STAT_KEYS = ['zhi', 'xin', 'ren', 'yong', 'yan'];
 

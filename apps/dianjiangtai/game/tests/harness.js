@@ -5,6 +5,7 @@
  */
 
 const path = require('node:path');
+const { createLoader } = require('./wechat-loader');
 
 const ROOT = path.join(__dirname, '..');
 const SCREEN = { windowWidth: 375, windowHeight: 812, pixelRatio: 3, statusBarHeight: 44 };
@@ -116,8 +117,8 @@ function boot(t, opts) {
   global.wx = wx;
   t.mock.method(console, 'log', (...a) => log.console.push(a.join(' ')));
 
-  for (const k of Object.keys(require.cache)) if (k.startsWith(path.join(ROOT, 'js')) || k.startsWith(path.join(ROOT, 'core'))) delete require.cache[k];
-  const app = require('../js/main');
+  // WeChat resolution rules (.js only, relative paths, no Node built-ins), fresh module cache per boot
+  const app = createLoader(ROOT).require(path.join(ROOT, 'game.js'), './js/main');
   t.after(() => {
     delete global.wx;
     delete global.requestAnimationFrame;
