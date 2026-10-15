@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { sub, hash32, mulberry32, shuffle } = require('../core/rng');
 const D = require('../core/date');
-const { MEASURES, CATEGORIES, THEMES, FREE_GROUPS } = require('../core/measures');
+const { MEASURES, CATEGORIES, DAILY_THEME, FREE_GROUPS } = require('../core/measures');
 const F = require('../core/format');
 const J = require('../core/judge');
 const S = require('../core/score');
@@ -67,7 +67,8 @@ test('measures: 13 measures in 8 categories, real verbs, never a bare big/small 
   }
   assert.equal(MEASURES.find((m) => m.key === 'river').hi, '更长');
   assert.equal(MEASURES.find((m) => m.key === 'year').hi, '更晚');
-  assert.equal(Object.keys(THEMES).length, 7);
+  assert.deepEqual(DAILY_THEME, { key: 'mix', label: '', categories: null }, 'v1 has no weekday themes');
+  assert.equal(MEASURES.find((m) => m.key === 'animal_life').subLabel, '最长寿命纪录', 'decision b: never a typical lifespan');
   assert.equal(FREE_GROUPS.length, 9);
 });
 

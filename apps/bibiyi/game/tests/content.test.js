@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { validateContent, getContent, indexFacts, BANNED_HOSTS } = require('../core/content');
+const { validateContent, getContent, indexFacts, BANNED_HOSTS, V1_MEASURES, NOT_IN_V1 } = require('../core/content');
 const B = require('../tools/build-content');
 
 function good(over) {
@@ -69,25 +69,28 @@ test('validator caps FACT-CITED at 25 per source (AC 12)', () => {
   assert.deepEqual(errs(many.slice(0, 25)), []);
 });
 
-test('strict mode checks the launch counts (AC 11)', () => {
+test('strict mode checks the v1 minimums and that dropped measures hold nothing (AC 11)', () => {
   const r = validateContent([good()], { strict: true });
-  assert.ok(r.errors.some((e) => /counts 1\/1\/0 expected 40\/26\/14/.test(e)));
-  assert.ok(r.errors.some((e) => /theme group/.test(e)));
+  assert.ok(r.errors.some((e) => /measure city_pop: counts 0\/0\/0 below the v1 minimum/.test(e)));
+  assert.ok(r.errors.some((e) => /measure river is not in v1 but has 1 facts/.test(e)));
+  assert.ok(!r.errors.some((e) => /theme group/.test(e)), 'no weekday themes, no per-theme minimum');
 });
 
-test('the fixture content validates and the bundled game pool holds no daily fact (AC 15, 22)', () => {
-  const r = B.build({});
+test('the real content validates (strict) and the bundled game pool holds no daily fact (AC 15, 22)', () => {
+  const r = B.build({ strict: true });
   assert.deepEqual(r.problems, []);
-  assert.ok(r.info.placeholder);
+  assert.equal(r.info.placeholder, false);
   const bundled = getContent(1);
+  assert.equal(bundled.facts.length, r.info.facts.length);
   const daily = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'tools', 'out', 'daily-facts.json'), 'utf8'));
-  assert.ok(daily.facts.length > 100);
+  assert.ok(daily.facts.length > 150);
   const freeIds = new Set(bundled.facts.map((f) => f.id));
-  const freeLabels = new Set(bundled.facts.map((f) => f.label));
+  const freeLabels = new Set(bundled.facts.map((f) => f.measure + '|' + f.label));
   daily.facts.forEach((f) => {
     assert.ok(!freeIds.has(f.id), f.id);
-    assert.ok(!freeLabels.has(f.label), f.label);
+    assert.ok(!freeLabels.has(f.measure + '|' + f.label), f.label);
   });
+  assert.equal(daily.placeholder, false);
   // the on-disk bundle is what the tool would write now
   const onDisk = fs.readFileSync(path.join(__dirname, '..', 'core', 'content', 'facts.free.js'), 'utf8').replace(/\r\n/g, '\n');
   assert.equal(onDisk, r.freeText);
@@ -130,5 +133,31 @@ test('every bundled and server-side fact passes the validator and indexes by mea
   const bundled = getContent(1);
   assert.deepEqual(validateContent(bundled.facts).errors.filter((e) => !/verifiedBy/.test(e)), []);
   const idx = indexFacts(bundled.facts, 1);
-  assert.ok(Object.keys(idx.byMeasure).every((k) => idx.byMeasure[k].length > 0));
+  Object.keys(V1_MEASURES).forEach((k) => assert.ok(idx.byMeasure[k].length > 0, k));
+  NOT_IN_V1.forEach((k) => assert.equal(idx.byMeasure[k].length, 0, k + ' is not in v1'));
+});
+
+test('content decisions of 2026-10-15 hold in the shipped data (a, b, c, e)', () => {
+  const free = getContent(1).facts;
+  const daily = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'tools', 'out', 'daily-facts.json'), 'utf8')).facts;
+  const all = free.concat(daily);
+  // (a) the anecdotal 177-year tortoise is gone; the domestic donkey is not labelled as a wild ass
+  assert.ok(!all.some((f) => /象龟/.test(f.label)), 'no giant tortoise record');
+  assert.ok(!all.some((f) => /野驴/.test(f.label)), 'no 非洲野驴');
+  assert.ok(all.some((f) => f.measure === 'animal_weight' && f.label === '驴'));
+  // (c) rivers, lakes and the unsourced measures are not shipped; the empty river file is gone
+  ['river', 'lake', 'year', 'structure_len', 'structure_height'].forEach((k) => assert.ok(!all.some((f) => f.measure === k), k));
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', '..', 'content-src', 'river.jsonl')));
+  // (e) distances: computed, attributed, neutral
+  const dist = all.filter((f) => f.measure === 'distance');
+  assert.ok(dist.length >= 100, 'distance facts: ' + dist.length);
+  dist.forEach((f) => {
+    assert.equal(f.method, 'computed');
+    assert.equal(f.licence, 'CC-BY-4.0');
+    assert.match(f.label, /^.+—.+$/);
+    assert.match(f.attribution, /GeoNames/);
+    assert.equal(f.value % 10, 0, 'rounded to 10 km: ' + f.label);
+  });
+  // AnAge facts carry their CC BY 3.0 credit
+  all.filter((f) => f.licence === 'CC-BY-3.0').forEach((f) => assert.match(f.attribution, /AnAge/));
 });

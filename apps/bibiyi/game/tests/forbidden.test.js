@@ -45,16 +45,20 @@ test('no shipped file, comment or content row contains a forbidden term (AC 9)',
   assert.deepEqual(hits, []);
 });
 
-test('the placeholder content and the generated server export are free of forbidden terms', () => {
-  for (const f of [path.join(GAME, 'tools', 'out', 'daily-facts.json'), ...fs.readdirSync(path.join(GAME, 'tools', 'fixtures', 'content-src')).map((n) => path.join(GAME, 'tools', 'fixtures', 'content-src', n))]) {
-    assert.equal(findForbidden(fs.readFileSync(f, 'utf8')), null, f);
-  }
+test('the content sources and the generated server export are free of forbidden terms', () => {
+  const src = path.join(GAME, '..', 'content-src');
+  const files = [path.join(GAME, 'tools', 'out', 'daily-facts.json')].concat(fs.readdirSync(src).filter((n) => /\.(jsonl|json)$/.test(n)).map((n) => path.join(src, n)));
+  assert.ok(files.length > 8);
+  for (const f of files) assert.equal(findForbidden(fs.readFileSync(f, 'utf8')), null, f);
 });
 
 test('every string the game draws over a tour of all screens is free of forbidden terms (AC 9)', async (t) => {
   const g = await startUp(t, { privacy: { state: 'agreed', scope: true } });
   const seen = [];
-  const take = () => seen.push(g.frame());
+  const take = () => {
+    g.frame();
+    seen.push(g.log.text.join('\n')); // one string per drawn text, so two adjacent buttons never read as one phrase
+  };
   take();
   await closeHowto(g);
   take();

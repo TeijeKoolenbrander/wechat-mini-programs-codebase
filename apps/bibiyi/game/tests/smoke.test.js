@@ -57,7 +57,8 @@ test('boots to home, first launch opens the how-to sheet once, no login and no p
   assert.strictEqual(count(g, 'session_start'), 1);
   const hv = g.app.ctl.view().vm;
   assert.strictEqual(hv.daily.state, 'available');
-  assert.ok(hv.daily.themeLabel && hv.daily.issueNo >= 1);
+  assert.strictEqual(hv.daily.themeLabel, '', 'no weekday themes in v1');
+  assert.ok(hv.daily.issueNo >= 1);
   assert.strictEqual(hv.free.categoryLabel, '全部');
   // second launch: the how-to sheet does not come back
   const g2 = boot(t, { storage: g.storage });

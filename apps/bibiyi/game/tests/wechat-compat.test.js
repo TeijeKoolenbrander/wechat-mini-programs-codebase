@@ -134,7 +134,8 @@ test('the game package holds no daily-pool fact and no deck data (AC 22)', () =>
   for (const fact of daily.facts) {
     for (const { f, text } of files) {
       if (text.includes('"' + fact.id + '"') || text.includes("'" + fact.id + "'")) hits.push(posix(f) + ' has daily id ' + fact.id);
-      if (text.includes('"label":"' + fact.label + '"')) hits.push(posix(f) + ' has daily label ' + fact.label);
+      // the same name may be a free fact of ANOTHER measure (AnAge weight vs lifespan); the same measure is a leak
+      if (text.split('\n').some((line) => line.includes('"measure":"' + fact.measure + '"') && line.includes('"label":"' + fact.label + '"'))) hits.push(posix(f) + ' has daily label ' + fact.label);
     }
   }
   assert.deepEqual(hits.slice(0, 10), []);

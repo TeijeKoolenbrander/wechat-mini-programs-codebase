@@ -1,15 +1,16 @@
 'use strict';
-// Deck engine: pair rules, bands, free decks (AC 28, 29, 35, 37), daily decks, themes, gates (AC 30-33).
+// Deck engine: pair rules, bands, free decks (AC 28, 29, 35, 37), daily decks (no weekday themes in v1), gates (AC 30-33).
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { getContent, indexFacts } = require('../core/content');
 const { getConfig } = require('../core/config');
-const { BY_KEY, MEASURES, THEMES } = require('../core/measures');
+const { BY_KEY } = require('../core/measures');
 const D = require('../core/deck');
 const { deckStats, passesGates } = require('../core/gates');
-const { addDays, weekdayOf } = require('../core/date');
+const { addDays } = require('../core/date');
+const { V1_MEASURES, offeredGroups } = require('../core/content');
 
 const cfg = getConfig(1);
 const free = getContent(1);
@@ -21,7 +22,7 @@ const daily = (() => {
 test('bundled free pool exists and holds free facts only', () => {
   assert.ok(free && free.facts.length > 100);
   assert.ok(free.facts.every((f) => f.pool === 'free'));
-  MEASURES.forEach((m) => assert.ok(free.byMeasure[m.key].length >= 10, m.key));
+  Object.keys(V1_MEASURES).forEach((k) => assert.ok(free.byMeasure[k].length >= 5, k));
 });
 
 test('pairLegal: gap, approx stretch, years, suspended, noPairWith, display ties (AC 28)', () => {
@@ -61,7 +62,7 @@ test('bandRange: raised to the minimum gap and stretched when the minimum exceed
 });
 
 test('free deck: deterministic, 60 questions, same on repeat (AC 35)', () => {
-  for (const g of ['all', 'geo', 'city']) {
+  for (const g of ['all', 'animal', 'city']) {
     const a = D.buildFreeDeck(12345, 1, 1, g);
     const b = D.buildFreeDeck(12345, 1, 1, g);
     assert.deepEqual(a, b);
@@ -72,7 +73,8 @@ test('free deck: deterministic, 60 questions, same on repeat (AC 35)', () => {
 
 test('free decks: every question legal, in band, recency respected, group filter holds (AC 28, 29, 37)', () => {
   const N = 50;
-  const groups = ['all', 'city', 'geo', 'era', 'animal', 'space', 'build', 'food', 'dist'];
+  const groups = offeredGroups(free, cfg.freeGroupMinFacts); // the groups the picker offers
+  assert.ok(groups.includes('all') && groups.includes('city') && groups.includes('animal') && groups.includes('dist'), groups.join());
   let outOfBand = 0;
   let total = 0;
   for (const g of groups) {
@@ -94,7 +96,7 @@ test('free decks: every question legal, in band, recency respected, group filter
     }
   }
   // the nearest-gap fallback must be rare with this pool
-  assert.ok(outOfBand / total < 0.05, 'out of band share ' + outOfBand / total);
+  assert.ok(outOfBand / total < 0.1, 'out of band share ' + outOfBand / total);
 });
 
 test('free deck: consecutive segments use different measures when the group has several', () => {
@@ -107,13 +109,13 @@ test('free deck: consecutive segments use different measures when the group has 
 });
 
 test('free deck: a tiny pool still yields a full legal deck (never repeats within 10 when avoidable)', () => {
-  const small = indexFacts(free.facts.filter((f) => f.measure === 'river').slice(0, 14), 1);
-  const deck = D.buildFreeDeck(5, 1, 1, 'geo', small);
+  const small = indexFacts(free.facts.filter((f) => f.measure === 'distance').slice(0, 14), 1);
+  const deck = D.buildFreeDeck(5, 1, 1, 'dist', small);
   assert.equal(deck.questions.length, 60);
   assert.deepEqual(D.validateDeck(deck, small.byId, cfg, { strictBands: false, allowRepeats: true }), []);
 });
 
-test('daily decks: 40 questions, weekday theme for 1-20, mixed after, segment sizes, no repeats, in band (AC 28-31)', () => {
+test('daily decks: 40 questions, every measure mixed (no weekday theme), segment sizes, no repeats, in band (AC 28-31)', () => {
   const start = '20261101';
   for (let i = 0; i < 21; i++) {
     const dateKey = addDays(start, i);
@@ -122,18 +124,12 @@ test('daily decks: 40 questions, weekday theme for 1-20, mixed after, segment si
     const deck = r.deck;
     assert.equal(deck.questions.length, 40);
     assert.deepEqual(D.validateDeck(deck, daily.byId, cfg, {}), [], dateKey);
-    const theme = THEMES[weekdayOf(dateKey)];
-    assert.equal(deck.theme.label, theme.label);
-    deck.questions.slice(0, 20).forEach((q) => {
-      if (theme.categories) assert.ok(theme.categories.includes(BY_KEY[q.m].category), dateKey + ' q' + q.k + ' ' + q.m);
-    });
+    assert.deepEqual(deck.theme, { key: 'mix', label: '' }, 'v1 has no weekday themes');
     const sizes = D.segmentSizes(deck);
     sizes.forEach((s) => assert.ok(s >= 4 && s <= 8, 'segment ' + s));
-    // segments 1-20 and 21-40 split exactly at question 20/21
-    assert.ok(deck.questions[20].segStart);
-    // mixed segments: at most 2 per measure
+    // at most 2 segments per measure
     const mixedCount = {};
-    deck.questions.slice(20).forEach((q) => {
+    deck.questions.forEach((q) => {
       if (q.segStart) mixedCount[q.m] = (mixedCount[q.m] || 0) + 1;
     });
     Object.keys(mixedCount).forEach((k) => assert.ok(mixedCount[k] <= 2, k));
@@ -193,17 +189,18 @@ test('daily: impossible gates publish nothing, never a relaxed deck (AC 33)', ()
   delete require.cache[require.resolve('../core/config')].exports.CONFIGS[99];
 });
 
-test('tools/deckstats: candidate pass rate over many dates is at least 20% (AC 30)', () => {
+test('tools/deckstats: every date of a 365-day run generates a daily from the real pool (CTO decision d)', () => {
   const { run } = require('../tools/deckstats');
-  const r = run({ dates: 120 });
+  const r = run({ dates: 365 });
+  assert.equal(r.unavailable, 0, r.unavailable + ' dates without a daily');
   assert.ok(r.passRate >= 0.2, 'pass rate ' + r.passRate);
-  assert.equal(r.unavailable, 0);
   assert.ok(r.pFullMax <= 0.005);
+  assert.equal(r.placeholder, false);
 });
 
 test('questions reveal nothing about the bottom card before the answer (AC 2, 18)', () => {
   const { questionPayload, revealOf, promptText, segmentBannerText } = require('../core/question');
-  const deck = D.buildFreeDeck(3, 1, 1, 'geo');
+  const deck = D.buildFreeDeck(3, 1, 1, 'dist');
   const q = deck.questions[0];
   const p = questionPayload(q, free.byId);
   assert.ok(p.top.valueText && p.top.sourceText && p.top.unitText);

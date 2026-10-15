@@ -34,7 +34,7 @@ test('building a free deck is fast enough for a mid-range phone (well under 100 
   const { buildFreeDeck } = require('../core/deck');
   const t0 = Date.now();
   const N = 60;
-  for (let s = 1; s <= N; s++) buildFreeDeck(s * 7, 1, 1, s % 2 ? 'all' : 'era');
+  for (let s = 1; s <= N; s++) buildFreeDeck(s * 7, 1, 1, s % 2 ? 'all' : 'animal');
   const avg = (Date.now() - t0) / N;
   assert.ok(avg < 60, 'average free deck build ' + avg + ' ms');
 });

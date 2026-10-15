@@ -143,25 +143,25 @@ test('free play: the category picker filters decks and persists (AC 37, 40)', as
   await closeHowto(g);
   g.tapId('home:category');
   const sv = g.view().vm.sheetVm;
-  assert.strictEqual(sv.options.length, 9);
+  assert.deepStrictEqual(sv.options.map((o) => o.key), ['all', 'city', 'animal', 'dist'], 'only categories with enough free facts are offered');
   assert.ok(sv.options.every((o) => o.factCount > 0));
-  g.tapId('category:geo');
+  g.tapId('category:animal');
   assert.strictEqual(g.view().vm.sheet, null);
-  assert.strictEqual(g.view().vm.free.categoryLabel, '山河');
+  assert.strictEqual(g.view().vm.free.categoryLabel, '动物');
   assert.strictEqual(count(g, 'category_select'), 1);
   g.tapId('home:free');
-  assert.strictEqual(g.view().vm.headerText, '随便比比 · 山河');
+  assert.strictEqual(g.view().vm.headerText, '随便比比 · 动物');
   const r = g.app.ctl.state.r;
-  r.deck.questions.forEach((qq) => assert.ok(['mountain', 'river', 'lake'].includes(qq.m)));
+  r.deck.questions.forEach((qq) => assert.ok(['animal_weight', 'animal_life'].includes(qq.m)));
   await rights(g, 1);
   await miss(g);
   g.tapId('continue:result');
   await g.settle();
   g.tapId('result:again');
-  assert.strictEqual(g.view().vm.headerText, '随便比比 · 山河', '再来一局 uses the last category');
+  assert.strictEqual(g.view().vm.headerText, '随便比比 · 动物', '再来一局 uses the last category');
   const g2 = boot(t, { storage: g.storage });
   await g2.settle();
-  assert.strictEqual(g2.view().vm.free.categoryLabel, '山河', 'the choice persists');
+  assert.strictEqual(g2.view().vm.free.categoryLabel, '动物', 'the choice persists');
 });
 
 test('free play resumes after a kill: same question and streak (AC 8, 26)', async (t) => {
