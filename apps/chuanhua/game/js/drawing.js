@@ -41,8 +41,17 @@ function createDrawingTool(opts) {
   const tool = {};
 
   const inRect = (x, y) => x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
-  const toGrid = (x, y) => [Math.max(0, Math.min(GRID_MAX, Math.round(((x - rect.x) / rect.w) * GRID_MAX))), Math.max(0, Math.min(GRID_MAX, Math.round(((y - rect.y) / rect.h) * GRID_MAX)))];
-  const liveCount = () => points + (cur ? cur.pts.length : 0);
+  // grid mapping writes into two scratch variables: no allocation per pointer event
+  let gx = 0;
+  let gy = 0;
+  const toGrid = (x, y) => {
+    gx = Math.max(0, Math.min(GRID_MAX, Math.round(((x - rect.x) / rect.w) * GRID_MAX)));
+    gy = Math.max(0, Math.min(GRID_MAX, Math.round(((y - rect.y) / rect.h) * GRID_MAX)));
+  };
+  const liveCount = () => points + (cur ? cur.n : 0);
+  // the render object is rebuilt only when the stroke list changes; the stroke in progress is appended in place
+  let renderObj = { v: L.version, s: [] };
+  let renderDirty = true;
 
   tool.setRect = (r) => {
     if (r && r.w > 0 && r.h > 0) rect = { x: r.x, y: r.y, w: r.w, h: r.h };
@@ -52,37 +61,45 @@ function createDrawingTool(opts) {
     if (cur) return false; // single finger
     if (!inRect(x, y)) return false; // touches that start outside never draw
     if (strokes.length >= L.maxStrokes || points >= L.maxPoints) return false;
-    cur = { c: colorIdx, w: sizeIdx, pts: [toGrid(x, y)], finger: id };
+    toGrid(x, y);
+    // cur.arr is the stroke in core's format, built incrementally (first point absolute, then deltas)
+    cur = { arr: [colorIdx, sizeIdx, gx, gy], n: 1, lx: gx, ly: gy, finger: id };
+    renderDirty = true;
     return true;
   };
 
   tool.pointerMove = (id, x, y) => {
     if (!cur || cur.finger !== id) return false;
-    const g = toGrid(x, y);
-    const last = cur.pts[cur.pts.length - 1];
-    const dx = g[0] - last[0];
-    const dy = g[1] - last[1];
+    toGrid(x, y);
+    const dx = gx - cur.lx;
+    const dy = gy - cur.ly;
     if (dx * dx + dy * dy < L.minPointDist * L.minPointDist) return false;
-    if (cur.pts.length >= L.maxPointsPerStroke || liveCount() >= L.maxPoints) return false;
-    cur.pts.push(g);
+    if (cur.n >= L.maxPointsPerStroke || liveCount() >= L.maxPoints) return false;
+    cur.arr.push(dx, dy);
+    cur.n++;
+    cur.lx = gx;
+    cur.ly = gy;
     return true;
   };
 
   function finish() {
     const s = cur;
     cur = null;
-    strokes.push(St.makeStroke(s.c, s.w, s.pts));
-    points += s.pts.length;
-    used[s.c] = true;
+    strokes.push(s.arr);
+    points += s.n;
+    used[s.arr[0]] = true;
+    renderDirty = true;
     return true;
   }
 
   tool.pointerUp = (id, x, y) => {
     if (!cur || cur.finger !== id) return false;
     if (x !== undefined) {
-      const g = toGrid(x, y);
-      const last = cur.pts[cur.pts.length - 1];
-      if ((g[0] !== last[0] || g[1] !== last[1]) && cur.pts.length < L.maxPointsPerStroke && liveCount() < L.maxPoints) cur.pts.push(g);
+      toGrid(x, y);
+      if ((gx !== cur.lx || gy !== cur.ly) && cur.n < L.maxPointsPerStroke && liveCount() < L.maxPoints) {
+        cur.arr.push(gx - cur.lx, gy - cur.ly);
+        cur.n++;
+      }
     }
     return finish();
   };
@@ -113,6 +130,7 @@ function createDrawingTool(opts) {
     const s = strokes.pop();
     points -= St.strokePointCount(s);
     undoCount++;
+    renderDirty = true;
     return true;
   };
 
@@ -120,15 +138,19 @@ function createDrawingTool(opts) {
     if (cur) return false;
     strokes = [];
     points = 0;
+    renderDirty = true;
     return true;
   };
 
   tool.drawing = () => ({ v: L.version, s: strokes.map((s) => s.slice()) });
 
   tool.strokesForRender = () => {
-    const d = { v: L.version, s: strokes.slice() };
-    if (cur) d.s.push(St.makeStroke(cur.c, cur.w, cur.pts));
-    return d;
+    if (renderDirty) {
+      renderObj = { v: L.version, s: strokes.slice() };
+      if (cur) renderObj.s.push(cur.arr);
+      renderDirty = false;
+    }
+    return renderObj;
   };
 
   tool.load = (drawing) => {
@@ -136,6 +158,7 @@ function createDrawingTool(opts) {
     strokes = drawing.s.map((s) => s.slice());
     points = St.pointCount(drawing);
     cur = null;
+    renderDirty = true;
     strokes.forEach((s) => (used[s[0]] = true));
     return true;
   };

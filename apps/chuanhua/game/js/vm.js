@@ -113,12 +113,20 @@ function pickerVm(p) {
 
 // ---------------------------------------------------------------- Draw
 
+// the palette is the same every frame: two shared arrays (locked / unlocked) instead of 12 new objects per frame
+const PALETTES = {};
+function paletteVm(unlocked) {
+  const k = unlocked ? 'open' : 'locked';
+  if (!PALETTES[k]) PALETTES[k] = CONFIG.palette.map((color, idx) => ({ idx, color, locked: idx >= CONFIG.baseColors && !unlocked, name: CONFIG.paletteNames[idx] }));
+  return PALETTES[k];
+}
+
 /** d = { turn, tool info, drawing (for render), unlocked, paletteAdState, paletteAdOffered, status, errorText, now } */
 function drawVm(d) {
   const t = d.turn;
   const info = d.info;
   const timer = C.turnTimer('draw', t.startedAt, d.now, d.cfg);
-  const palette = CONFIG.palette.map((color, idx) => ({ idx, color, locked: idx >= CONFIG.baseColors && !d.unlocked, name: CONFIG.paletteNames[idx] }));
+  const palette = paletteVm(!!d.unlocked);
   return {
     chainId: t.chainId,
     claimId: t.claimId,
