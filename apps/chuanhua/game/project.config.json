@@ -33,7 +33,8 @@
       { "value": "package.json", "type": "file" },
       { "value": "package-lock.json", "type": "file" },
       { "value": "core/README.md", "type": "file" },
-      { "value": "js/CONTRACT.md", "type": "file" }
+      { "value": "js/CONTRACT.md", "type": "file" },
+      { "value": "js/render/CONTRACT.md", "type": "file" }
     ],
     "include": []
   },

@@ -206,6 +206,17 @@ test('share cards: the vms share.js builds are what shareCard.js reads, and no d
   assert.ok(!/require\(['"]\.\/strokes/.test(fs.readFileSync(path.join(ROOT, 'js', 'render', 'shareCard.js'), 'utf8')), 'the share card module cannot draw strokes');
 });
 
+test('share: the static fallback image ships (without it WeChat screenshots the game canvas, which may show a drawing)', () => {
+  const { FALLBACK_IMAGE } = require('../js/share');
+  const f = path.join(ROOT, FALLBACK_IMAGE);
+  assert.ok(fs.existsSync(f), FALLBACK_IMAGE + ' exists');
+  const b = fs.readFileSync(f);
+  assert.equal(b.slice(1, 4).toString(), 'PNG');
+  assert.ok(b.length < 200 * 1024, 'small');
+  assert.equal(b.readUInt32BE(16), 500);
+  assert.equal(b.readUInt32BE(20), 400);
+});
+
 test('DUMP_VIEWS writes the real view models for the preview tool', () => {
   if (!process.env.DUMP_VIEWS) return;
   fs.mkdirSync(process.env.DUMP_VIEWS, { recursive: true });
