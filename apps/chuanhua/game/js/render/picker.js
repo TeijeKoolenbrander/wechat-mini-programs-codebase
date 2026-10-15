@@ -15,6 +15,7 @@ const { page } = require('./page');
 const C = T.COLORS;
 
 function draw(ctx, vm, L) {
+  T.applyDisplay(vm.display); // sizes below depend on the mode
   const state = vm.state || 'ready';
   const prompts = vm.prompts || [];
   const custom = vm.custom || { open: false };

@@ -86,7 +86,9 @@ function wrap(ctx, str, maxW, size, weight, round) {
   const lines = [];
   let line = '';
   const noStart = '，。！？、；：）】」』”’》…,.!?;:)~';
-  Array.from(String(str == null ? '' : str)).forEach((ch) => {
+  // units: runs of ASCII letters/digits/slashes stay together (never "3" / "/6"), CJK breaks anywhere
+  const units = String(str == null ? '' : str).match(/[A-Za-z0-9\/:.%'-]+|[\s\S]/g) || [];
+  units.forEach((ch) => {
     if (ch === '\n') {
       lines.push(line);
       line = '';
@@ -94,7 +96,7 @@ function wrap(ctx, str, maxW, size, weight, round) {
     }
     const test = line + ch;
     if (ctx.measureText(test).width > maxW && line) {
-      if (noStart.indexOf(ch) >= 0) {
+      if (ch.length === 1 && noStart.indexOf(ch) >= 0) {
         line = test;
         return;
       }
@@ -557,7 +559,7 @@ function link(ctx, hits, o) {
     ctx.fillStyle = col;
     ctx.fillRect(x + iconW, o.y + size * 0.62, tw, 1.5);
   }
-  if (o.id) addTap(hits, o.id, x - 8, o.y - T.MIN_TAP / 2, total + 16, T.MIN_TAP);
+  if (o.id) addTap(hits, o.id, x - 8, o.minTop != null ? Math.max(o.y - T.MIN_TAP / 2, o.minTop) : o.y - T.MIN_TAP / 2, total + 16, T.MIN_TAP);
   return { x, w: total };
 }
 

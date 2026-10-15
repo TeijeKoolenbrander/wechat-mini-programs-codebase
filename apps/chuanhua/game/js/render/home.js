@@ -137,6 +137,7 @@ function dailyCard(ctx, hits, vm, L, x, y, w) {
 }
 
 function draw(ctx, vm, L) {
+  T.applyDisplay(vm.display); // sizes below depend on the mode
   const state = vm.state || 'loading';
   const start = vm.start || { label: '开一条接龙', sublabel: null, enabled: false, freeLeft: 0, adLeft: 0 };
   const unseen = (vm.album && vm.album.unseenReveals) || 0;

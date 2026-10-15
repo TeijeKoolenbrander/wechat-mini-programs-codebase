@@ -110,11 +110,11 @@ function draw(ctx, strokes, rect, o) {
 
   ctx.save();
   if (o.bg !== false) {
-    roundRect(ctx, x, y, w, h, r);
+    rectPath(ctx, x, y, w, h, r);
     ctx.fillStyle = o.bg || '#FFFFFF';
     ctx.fill();
   }
-  roundRect(ctx, x, y, w, h, r);
+  rectPath(ctx, x, y, w, h, r);
   ctx.clip();
 
   const list = decode(strokes);
@@ -152,14 +152,14 @@ function draw(ctx, strokes, rect, o) {
   ctx.restore();
 
   if (o.border) {
-    roundRect(ctx, x, y, w, h, r);
+    rectPath(ctx, x, y, w, h, r);
     ctx.strokeStyle = o.border;
     ctx.lineWidth = o.borderWidth || 2;
     ctx.stroke();
   }
 }
 
-function roundRect(ctx, x, y, w, h, r) {
+function rectPath(ctx, x, y, w, h, r) {
   r = Math.min(r || 0, w / 2, h / 2);
   ctx.beginPath();
   if (!r) {

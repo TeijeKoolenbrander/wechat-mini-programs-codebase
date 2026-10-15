@@ -19,7 +19,7 @@ const STANDARD = {
   card: '#FFFFFF',
   ink: '#1E1B18',
   sub: '#5E574F', // 6.6:1 on paper
-  zhu: '#D8433B', // 朱, fills and big shapes
+  zhu: '#CF3C34', // 朱 (direction #D8433B, nudged darker so white text on it is 4.5:1)
   zhuText: '#B8302A', // 朱 for text on paper (5.5:1)
   zhuSoft: 'rgba(216,67,59,0.12)',
   orange: '#F29B30', // 橙

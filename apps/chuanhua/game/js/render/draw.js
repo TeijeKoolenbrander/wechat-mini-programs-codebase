@@ -46,7 +46,7 @@ function sourceStrip(ctx, hits, vm, L, x, y, w) {
   const headH = Math.round(T.FS.body * 1.6);
   const cardH = lines * lh + 16;
   W.text(ctx, vm.title || '画出来', x + 2, y + headH / 2, { size: T.FS.body, weight: 800, round: true, color: C.zhuText, maxW: w - 100 });
-  if (vm.canReport) W.link(ctx, hits, { id: 'draw:report', x: x + w, y: y + headH / 2, label: '举报', icon: 'flag', align: 'right', color: C.sub, size: T.FS.small });
+  if (vm.canReport) W.link(ctx, hits, { id: 'draw:report', x: x + w, y: y + headH / 2, label: '举报', icon: 'flag', align: 'right', color: C.sub, size: T.FS.small, minTop: L.navBottom });
   const cy = y + headH + 2;
   W.sticker(ctx, x, cy, w, cardH, 12, { off: 2 });
   W.paragraph(ctx, full, x + 12, cy + 8, w - 24, lh, { size, weight: 700, maxLines: 2 });

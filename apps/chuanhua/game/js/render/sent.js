@@ -27,6 +27,7 @@ const MOD_TEXT = {
 };
 
 function draw(ctx, vm, L) {
+  T.applyDisplay(vm.display); // sizes below depend on the mode
   const mod = STAMP[vm.modState] ? vm.modState : 'pending';
   const mine = vm.mine || {};
   const sub = (vm.subscribe && vm.subscribe.state) || 'hidden';

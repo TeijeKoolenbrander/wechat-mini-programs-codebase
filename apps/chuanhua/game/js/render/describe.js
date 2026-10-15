@@ -41,7 +41,7 @@ function draw(ctx, vm, L) {
   let y = L.navBottom + L.u(4);
   const headH = Math.round(T.FS.body * 1.6);
   W.text(ctx, vm.title || '猜一猜', x + 2, y + headH / 2, { size: T.FS.body, weight: 800, round: true, color: C.zhuText, maxW: w - 100 });
-  if (vm.canReport) W.link(ctx, hits, { id: 'describe:report', x: x + w, y: y + headH / 2, label: '举报', icon: 'flag', align: 'right', color: C.sub, size: T.FS.small });
+  if (vm.canReport) W.link(ctx, hits, { id: 'describe:report', x: x + w, y: y + headH / 2, label: '举报', icon: 'flag', align: 'right', color: C.sub, size: T.FS.small, minTop: L.navBottom });
   y += headH + 2;
   const drawingTop = y;
 

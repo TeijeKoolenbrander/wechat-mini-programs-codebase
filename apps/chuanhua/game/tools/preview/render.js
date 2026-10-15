@@ -48,7 +48,8 @@ function renderState(screen, st, L, mode) {
   const ctx = c.getContext('2d');
   ctx.scale(DPR, DPR);
   const vm = Object.assign({}, st.vm, { display: MODES[mode] });
-  let hits = render.screens[screen].draw(ctx, vm, L) || [];
+  // the "overlay" fixtures draw a base screen (group) and then the overlay on top
+  let hits = render.screens[screen === 'overlay' ? 'group' : screen].draw(ctx, vm, L) || [];
   if (st.overlay) hits = hits.concat(render.overlay.draw(ctx, Object.assign({}, st.overlay, { display: MODES[mode] }), L));
   ctx.strokeStyle = 'rgba(0,120,255,0.55)';
   ctx.lineWidth = 1;
