@@ -1,6 +1,6 @@
 # Output format of the similarity-data pipeline
 
-Contract for the backend (cloud functions, import scripts). All files are produced by `run_all.ps1` / the numbered scripts (see README.md). `V` = vocabulary size (30,000 for `vocabVersion` 1). All integers are **little-endian**.
+Contract for the backend (cloud functions, import scripts). All files are produced by `run_all.ps1` / the numbered scripts (see README.md). `V` = vocabulary size (30,000 for `vocabVersion` 1). Current build: 491 answers = 130 `daily` (seq 1-130) + 361 `practice` (practiceNo 1-361), `bank.import.jsonl` about 39.7 MB. All integers are **little-endian**.
 
 Directory layout (relative to `apps/yuyirelen/data-pipeline/`):
 
@@ -42,8 +42,8 @@ JSON Lines (one JSON object per line, UTF-8), directly importable into the cloud
 | `synonyms` | int[] | vocab indices of reviewed exact synonyms (empty until a human reviewer fills them) |
 | `ranks` | string | **base64 of a `Uint16Array(V)` (little-endian)**: `ranks[vocabIdx]` = rank of that word for this answer, 1 = the answer itself, 1..V a permutation. Length 40,000 base64 chars per 30,000 words (about 80 KB) |
 | `top100` | int[100] | `vocabIdx` of the words at rank 1..100 (`top100[0] == wordIdx`); precomputed for the reveal list |
-| `difficulty` | `"easy"`, `"medium"` or `"hard"` | from the chip-walker median: easy 10-17, medium 18-24, hard 25-30 |
-| `category` | string | one of `food animal home nature weather school work sport transport feeling season tool` |
+| `difficulty` | `"easy"`, `"medium"` or `"hard"` | **relative** tag: rank of the answer's chip-walker median within the gate-passing set (lowest 35% `easy`, next 45% `medium`, top 20% `hard`). The spec's absolute bands (easy 10-17 / medium 18-24 / hard 25-30) would leave `easy` empty with the spec'd bot (see README, deviations) |
+| `category` | string | one of `food animal home nature weather school work sport transport feeling season tool` (assigned by embedding similarity to seed words; unbalanced, `work` is a catch-all, see README) |
 | `gate` | object | `{chipMedian, chipP90, typistMedian, solve80, chipSolve80, typistSolve80}` (numbers, from 200 bot runs each) |
 | `reviewStatus` | `"pending"` | **no entry has been human-reviewed.** The neighbour review and synonym listing (spec 3.5) are still to be done by product-ux/QA/founder; set to `"approved"` only after that. Functions should publish only `approved` entries in production |
 | `reviewedBy` | string[] | empty until reviewed |

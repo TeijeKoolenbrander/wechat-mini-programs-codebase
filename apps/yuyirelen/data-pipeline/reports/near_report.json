@@ -1,0 +1,8 @@
+{
+  "mean_top1_cosine": 0.8215,
+  "mean_top20_cosine": 0.7079,
+  "near_bytes": 1200000,
+  "near_k": 20,
+  "top5_share_with_char_overlap": 0.9062,
+  "vocab_size": 30000
+}

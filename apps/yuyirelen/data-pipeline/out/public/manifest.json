@@ -1,0 +1,32 @@
+{
+  "answers": 491,
+  "bankJsonl": {
+    "bytes": 39732457,
+    "committed": false,
+    "sha256": "6da99f1ec10dde550d500ed2a6de3eae61e9bcf0d0abd8dba508cc2446cf3f47"
+  },
+  "configVersion": 1,
+  "daily": 130,
+  "files": {
+    "near.v1.bin": {
+      "bytes": 1200000,
+      "sha256": "9caa5d5fe1db484cf369599d1559253904b6fd3332f920b19e30d2722508a716"
+    },
+    "vocab.v1.txt": {
+      "bytes": 219210,
+      "sha256": "ccdb8c32930107826795c238c7c792eae8cb098e67b954c39b96e716fdc0a377"
+    }
+  },
+  "gateVersion": 1,
+  "model": {
+    "dims": 1024,
+    "fallbackUsed": false,
+    "id": "BAAI/bge-large-zh-v1.5",
+    "licence": "MIT",
+    "revision": "79e7739b6ab944e86d6171e44d24c997fc1e0116"
+  },
+  "nearK": 20,
+  "practice": 361,
+  "vocabSize": 30000,
+  "vocabVersion": 1
+}

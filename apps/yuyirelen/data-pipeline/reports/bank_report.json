@@ -1,0 +1,41 @@
+{
+  "answers": 491,
+  "bank_jsonl_bytes": 39732457,
+  "by_category": {
+    "animal": 8,
+    "feeling": 72,
+    "food": 21,
+    "home": 26,
+    "nature": 50,
+    "school": 43,
+    "season": 11,
+    "sport": 19,
+    "tool": 19,
+    "transport": 29,
+    "weather": 15,
+    "work": 178
+  },
+  "by_difficulty": {
+    "easy": 168,
+    "hard": 95,
+    "medium": 228
+  },
+  "chip_median_of_medians": 28.0,
+  "chip_p90_max": 45.0,
+  "daily": 130,
+  "daily_by_difficulty": {
+    "easy": 38,
+    "hard": 23,
+    "medium": 69
+  },
+  "gate_candidates_simulated": 2472,
+  "gate_pass_rate": 0.271,
+  "gate_passed": 670,
+  "noun_share": 0.721,
+  "passing_rejected_for_neighbour_blocklist": 68,
+  "practice": 361,
+  "review_status": "all pending: human neighbour review and synonym listing not done",
+  "two_char_share": 0.957,
+  "typist_median_of_medians": 47.0,
+  "vocab_size": 30000
+}

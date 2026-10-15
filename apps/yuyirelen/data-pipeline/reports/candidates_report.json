@@ -1,0 +1,30 @@
+{
+  "by_category": {
+    "animal": 35,
+    "feeling": 700,
+    "food": 82,
+    "home": 96,
+    "nature": 223,
+    "school": 177,
+    "season": 59,
+    "sport": 75,
+    "tool": 140,
+    "transport": 104,
+    "weather": 81,
+    "work": 700
+  },
+  "by_pos": {
+    "a": 241,
+    "n": 1429,
+    "v": 802
+  },
+  "candidates": 2472,
+  "dropped": {
+    "category": 0,
+    "category_cap": 1502,
+    "relatedness": 442
+  },
+  "min_category_cosine": 0.5951,
+  "min_top10_mean_cosine": 0.7029,
+  "pool_before_proxies": 4416
+}

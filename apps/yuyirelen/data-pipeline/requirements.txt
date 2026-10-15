@@ -1,0 +1,8 @@
+huggingface_hub==1.33.0
+jieba==0.42.1
+numpy==2.4.6
+safetensors==0.8.0
+sentence-transformers==6.1.0
+tokenizers==0.23.3
+torch==2.14.1
+transformers==5.19.0

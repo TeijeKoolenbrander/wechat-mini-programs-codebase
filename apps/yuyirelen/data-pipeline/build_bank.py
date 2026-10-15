@@ -76,6 +76,9 @@ def main():
     own_exact = set(P.read_list(os.path.join(P.BLOCK, "exact.txt")))
     own_sub = P.read_list(os.path.join(P.BLOCK, "substring.txt"))
     rng = random.Random(P.SEED)
+    # Heavy-topic words that stay in the vocabulary (illness, money, alcohol, violence tools...) must not appear in an
+    # answer's public top-100 list (automatic proxy for the human neighbour review).
+    heavy = {w for w in P.read_list(os.path.join(P.BLOCK, "answer_exclude.txt")) if any(ch in w for ch in "病药酒钱血战枪刀烟痛伤贷税险股")}
 
     passing = []
     rejected_neighbour = 0
@@ -85,14 +88,19 @@ def main():
             continue
         ranks, order = rank_list(emb, i)
         top100 = order[:100].tolist()
-        bad = [j for j in top100 if words[j] in own_exact or any(s in words[j] for s in own_sub)]
+        bad = [j for j in top100 if words[j] in own_exact or any(s in words[j] for s in own_sub) or words[j] in heavy]
         if bad:
             rejected_neighbour += 1
             continue
         c = dict(cands[i])
-        c["difficulty"] = difficulty(g["chip"]["median"])
         c["gate"] = g
         passing.append(c)
+    # Difficulty tags are RELATIVE (rank within the gate-passing set): the spec's absolute windows
+    # (easy 10-17 / medium 18-24 / hard 25-30) leave "easy" empty under the spec'd bot, see README.
+    ranked = sorted(passing, key=lambda c: (c["gate"]["chip"]["median"], c["gate"]["chip"]["p90"], c["idx"]))
+    for k, c in enumerate(ranked):
+        f = k / len(ranked)
+        c["difficulty"] = "easy" if f < 0.35 else "medium" if f < 0.80 else "hard"
     passing.sort(key=lambda c: c["idx"])
     by_cat = collections.defaultdict(list)
     for c in passing:
@@ -101,8 +109,7 @@ def main():
     per_cat = total // len(cats)
     chosen = []
     for cat in cats:
-        pool = by_cat[cat][:]
-        rng.shuffle(pool)
+        pool = sorted(by_cat[cat], key=lambda c: (-c["catCos"], c["idx"]))  # most on-topic (concrete) words first
         quota = {d: int(round(per_cat * f)) for d, f in PER_CAT_DIFF.items()}
         cnt = collections.Counter()
         three = nouns = 0
@@ -140,9 +147,17 @@ def main():
         chosen += picked
     # top up to `total` if rounding left a gap
     leftovers = [c for c in passing if c not in chosen]
-    rng.shuffle(leftovers)
-    while len(chosen) < total and leftovers:
-        chosen.append(leftovers.pop())
+    leftovers.sort(key=lambda c: (c["pos"] != "n", len(c["word"]) == 3, -c["catCos"]))  # prefer 2-char nouns when topping up
+    k = 0
+    while len(chosen) < total and k < len(leftovers):
+        chosen.append(leftovers[k])
+        k += 1
+    # spec 3.5: nouns >= 70% of the answers. Drop the least on-topic non-nouns until the share is met
+    # (the bank may end up smaller than `total`; the report states the final count).
+    while sum(1 for c in chosen if c["pos"] == "n") < 0.72 * len(chosen):
+        worst = min((c for c in chosen if c["pos"] != "n"), key=lambda c: c["catCos"])
+        chosen.remove(worst)
+    a.practice = min(a.practice, len(chosen) - a.daily)
     daily, rest = schedule(chosen, a.daily, rng)
     rng.shuffle(rest)
     practice = rest[: a.practice]
