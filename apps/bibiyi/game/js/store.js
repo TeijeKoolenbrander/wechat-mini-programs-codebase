@@ -19,7 +19,7 @@ function fresh() {
     howtoSeen: false,
     coachSeen: false,
     lifetimeRuns: 0, // completed runs, any mode
-    freeGroup: 'all', // category chip (spec 6.14)
+    freeGroup: 'all', // free-play category filter (spec 6.14)
     bestFree: 0, // local best, merged with the server's
     dailyCache: null, // { dateKey, issueNo, themeLabel, myStatus, myRun, myResult, myDays, bests }
     active: null, // the in-progress run, see controller.persistActive

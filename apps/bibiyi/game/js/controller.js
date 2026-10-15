@@ -652,10 +652,20 @@ function createController(deps) {
       if (r.challengeId) S.results['c_' + r.challengeId] = strip(res);
     }
     S.active = null;
+    pruneResults();
     store.save();
     c.r = r;
     showResult(res);
     trackComplete(res, r);
+  }
+
+  /** Keep the stored result views bounded: the last 30 issues and the last 20 challenges. */
+  function pruneResults() {
+    const keys = Object.keys(S.results);
+    const days = keys.filter((k) => /^[0-9]{8}$/.test(k)).sort();
+    days.slice(0, Math.max(0, days.length - 30)).forEach((k) => delete S.results[k]);
+    const chs = keys.filter((k) => k.indexOf('c_') === 0);
+    chs.slice(0, Math.max(0, chs.length - 20)).forEach((k) => delete S.results[k]);
   }
 
   /** Best-effort submit of a finished free run; failures wait in S.pendingSubmits. */
@@ -819,7 +829,10 @@ function createController(deps) {
     if (r && r.ok) {
       const ch = Object.assign({ id }, r);
       if (r.kind === 'free') ch.categoryLabel = groupLabel(r.group);
-      if (r.status === 'own' && c.features.subscribe) ch.subscribe = { state: S.subscribeBanned ? 'hidden' : 'offer' };
+      if (r.status === 'own' && c.features.subscribe) {
+        ch.subscribe = { state: S.subscribeBanned ? 'hidden' : 'offer' };
+        if (!S.subscribeBanned) track('subscribe_offer', { where: 'own', challengeId: id });
+      }
       c.challenge = ch;
     } else if (r && (r.status === 'expired' || r.code === 'CHALLENGE_EXPIRED')) {
       c.challenge = { id, status: 'expired', ownerStreak: 0, kind: 'daily' };
