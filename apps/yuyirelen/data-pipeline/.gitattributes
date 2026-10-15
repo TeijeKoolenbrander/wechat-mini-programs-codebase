@@ -1,0 +1,3 @@
+* text=auto eol=lf
+out/public/*.bin binary
+out/public/vocab.v1.txt text eol=lf

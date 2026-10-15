@@ -1,0 +1,43 @@
+{
+  "after_basic_filters": 153593,
+  "basic_drops": {
+    "chars": 25781,
+    "edge": 2369,
+    "length": 7050,
+    "pos": 160253
+  },
+  "candidates_before_sensitive": 40000,
+  "coverage_added": 56,
+  "coverage_list_size": 354,
+  "coverage_missing_after": 0,
+  "coverage_present_before_add": 298,
+  "dict_rows": 349046,
+  "jieba_version": "0.42.1",
+  "length_histogram": {
+    "1": 1496,
+    "2": 24514,
+    "3": 3414,
+    "4": 576
+  },
+  "min_freq_in_vocab": 22,
+  "pos_histogram": {
+    "a": 1496,
+    "ad": 54,
+    "an": 22,
+    "d": 821,
+    "manual": 56,
+    "n": 17277,
+    "s": 297,
+    "t": 619,
+    "v": 8704,
+    "vn": 654
+  },
+  "public_list_terms": 29402,
+  "sensitive_removed": {
+    "own_exact": 359,
+    "own_substring": 151,
+    "public_exact": 581,
+    "public_substring3": 28
+  },
+  "vocab_size": 30000
+}

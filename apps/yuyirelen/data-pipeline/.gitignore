@@ -1,0 +1,7 @@
+.venv/
+cache/
+work/
+inputs/
+__pycache__/
+# spoiler data (answers, rank lists, embeddings): never committed
+out/private/
