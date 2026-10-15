@@ -18,6 +18,7 @@ const { mockCtx, mockCreateCanvas, SIZES, MODES, layoutFor, eachState } = requir
 
 const ALL = Object.keys(MODES);
 
+const FOOTER_IDS = /^home:(sound|settings)$/;
 const STRUCTURAL = /(:block|:card|:scrim|:body|^sheet:close$|:list$|:scroll$|^result:skip$|^result:revealSkip$)/;
 
 /** Ids that draw as buttons (large-text mode: at least 56pt tall). */
@@ -64,7 +65,11 @@ test('AC 44: nothing tappable overlaps the capsule menu, and nothing sits below 
       if (STRUCTURAL.test(h.id) || (h.w >= L.W - 1 && h.h >= L.H - L.navBottom - 1)) return;
       const overlap = h.x < c.x + c.w && h.x + h.w > c.x && h.y < c.y + c.h && h.y + h.h > c.y;
       assert.ok(!overlap, mode + ' ' + screen + '/' + name + ' ' + h.id + ' overlaps the capsule at ' + L.W + 'x' + L.H);
-      assert.ok(h.y + h.h <= L.bottomEdge + 0.5, mode + ' ' + screen + '/' + name + ' ' + h.id + ' below safe area');
+      // Deliberate exception: the home footer row (声音 / 隐私与设置) is pinned to the very
+      // bottom, its 48pt tap area may extend into the inset (text stays above the indicator bar).
+      // It must still be on screen. See the 'home footer' test.
+      const limit = FOOTER_IDS.test(h.id) && screen === 'home' ? L.H : L.bottomEdge;
+      assert.ok(h.y + h.h <= limit + 0.5, mode + ' ' + screen + '/' + name + ' ' + h.id + ' below safe area');
     });
   }, ALL);
 });
@@ -326,4 +331,38 @@ test('no screen module touches wx, timers or the network', () => {
       assert.ok(!/\bwx\./.test(src), f + ' uses wx');
       assert.ok(!/setTimeout|setInterval|requestAnimationFrame|Date\.now/.test(src), f + ' uses timers');
     });
+});
+
+test('home footer: 声音 / 隐私与设置 stay pinned to the bottom of the page (all states, sizes, modes)', () => {
+  const MAX_TAP_GAP = 0.5; // tap area is flush with the screen bottom
+  let seen = 0;
+  eachState((screen, name, hits, calls, L, sz, vm, st, mode) => {
+    if (screen !== 'home' || vm.sheet) return; // sheets cover the footer
+    const where = mode + ' home/' + name + ' at ' + L.W + 'x' + L.H;
+    ['home:sound', 'home:settings'].forEach((id) => {
+      const h = hits.find((a) => a.id === id);
+      assert.ok(h, where + ' ' + id + ' missing');
+      const gap = L.H - (h.y + h.h);
+      assert.ok(gap >= -0.5 && gap <= MAX_TAP_GAP, where + ' ' + id + ' tap area bottom is ' + gap.toFixed(1) + 'pt from the screen bottom');
+      assert.ok(h.h >= 47.9 && h.w >= 47.9, where + ' ' + id + ' tap size');
+    });
+    // text: baseline 8-14pt (scaled by L.s) above the physical bottom (clear of the home indicator), never below it
+    const label = calls.find((c) => /^声音/.test(c.s));
+    const priv = calls.find((c) => c.s === '隐私与设置');
+    [label, priv].forEach((c) => {
+      assert.ok(c, where + ' footer text drawn');
+      const baseline = c.y + c.size * 0.35;
+      const gap = L.H - baseline;
+      assert.ok(gap >= 7.5 && gap <= L.u(14) + 1, where + ' footer text baseline ' + gap.toFixed(1) + 'pt above the bottom');
+    });
+    // nothing else tappable sits lower than the footer row, and nothing overlaps it
+    const foot = hits.filter((a) => FOOTER_IDS.test(a.id));
+    hits.forEach((a) => {
+      if (FOOTER_IDS.test(a.id) || STRUCTURAL.test(a.id)) return;
+      assert.ok(a.y + a.h <= L.footer.top + 0.5, where + ' ' + a.id + ' overlaps the footer row');
+    });
+    assert.strictEqual(foot.length, 2);
+    seen++;
+  }, ALL);
+  assert.ok(seen > 200, 'checked ' + seen);
 });

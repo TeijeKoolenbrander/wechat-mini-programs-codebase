@@ -78,10 +78,12 @@ function titleBlock(ctx, L, top, avail) {
   W.spaced(ctx, '点 将 台', L.cx, by + tSize / 2, { size: tSize, weight: 800, serif: true, color: C.ink, align: 'center', spacing: tSize * 0.28 });
 }
 
-function footer(ctx, L, hits, vm, x, cw, y, h) {
-  const fy = y + h / 2;
-  W.link(ctx, L, hits, { id: 'home:sound', x, y: fy, label: '声音 ' + (vm.muted ? '关' : '开'), icon: 'speaker', muted: vm.muted, color: C.sub, size: T.FS.body });
-  W.link(ctx, L, hits, { id: 'home:settings', x: x + cw, y: fy, label: '隐私与设置', align: 'right', color: C.sub, size: T.FS.body });
+/** Pinned to the very bottom of the page (L.footer, see layout.js). */
+function footer(ctx, L, hits, vm, x, cw) {
+  const fy = L.footer.textY;
+  const tapY = L.footer.tapY;
+  W.link(ctx, L, hits, { id: 'home:sound', x, y: fy, tapY, label: '声音 ' + (vm.muted ? '关' : '开'), icon: 'speaker', muted: vm.muted, color: C.sub, size: T.FS.body });
+  W.link(ctx, L, hits, { id: 'home:settings', x: x + cw, y: fy, tapY, label: '隐私与设置', align: 'right', color: C.sub, size: T.FS.body });
 }
 
 function draw(ctx, vm, L) {
@@ -103,12 +105,8 @@ function drawStandard(ctx, vm, L, hits, d) {
   const x = L.x0;
 
   // ---- bottom-anchored stack (thumb zone) ----
-  let y = L.bottomEdge - L.bottomPad;
-
-  const footH = L.u(48);
-  y -= footH;
-  footer(ctx, L, hits, vm, x, cw, y, footH);
-  y -= L.u(4);
+  footer(ctx, L, hits, vm, x, cw);
+  let y = L.footer.top - L.u(4);
 
   // 群榜 / 好友榜 / 往期 / 玩法
   const rowH = boardButtons(ctx, L, hits, vm, x, y - T.btn(L, 48), cw);
@@ -142,12 +140,8 @@ function drawLarge(ctx, vm, L, hits, d) {
   const gap = L.u(L.compact ? 8 : 12);
   const cw = L.contentW;
   const x = L.x0;
-  let y = L.bottomEdge - L.bottomPad;
-
-  const footH = T.btn(L, 48);
-  y -= footH;
-  footer(ctx, L, hits, vm, x, cw, y, footH);
-  y -= L.u(4);
+  footer(ctx, L, hits, vm, x, cw);
+  let y = L.footer.top - L.u(4);
 
   const freeH = T.btn(L, 54);
   y -= freeH;

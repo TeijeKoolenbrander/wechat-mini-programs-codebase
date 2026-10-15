@@ -373,7 +373,7 @@ function link(ctx, L, hits, o) {
     ctx.fillRect(x + iconW, o.y + size * 0.62, tw, 1);
     ctx.globalAlpha = 1;
   }
-  if (o.id) addTap(hits, L, o.id, x - L.u(8), o.y - T.MIN_TAP / 2, total + L.u(16), T.MIN_TAP);
+  if (o.id) addTap(hits, L, o.id, x - L.u(8), (o.tapY != null ? o.tapY : o.y) - T.MIN_TAP / 2, total + L.u(16), T.MIN_TAP);
 }
 
 /** Small outlined pill label (e.g. the 识人 badge). Returns its width. align: left (default) | center | right. */

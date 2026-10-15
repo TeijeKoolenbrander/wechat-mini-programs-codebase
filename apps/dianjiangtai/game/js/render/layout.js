@@ -44,6 +44,20 @@ function makeLayout(sys) {
   const bottomEdge = H - safeBottom; // nothing tappable below this
   const bottomPad = u(compact ? 10 : 16);
 
+  // Home footer row (声音 / 隐私与设置): pinned to the very bottom of the page.
+  // The 48pt tap area is flush with the physical bottom (it may extend into the
+  // inset; a tap there is still a normal tap, only a swipe-up is the OS gesture).
+  // The text is lifted off the edge so it clears the home-indicator bar:
+  //   notched: text centre 18pt up -> baseline ~12pt above the bottom edge
+  //   no inset: text centre 15pt up -> baseline ~9pt above the bottom edge
+  const footerTapH = MIN_TAP;
+  const footer = {
+    tapH: footerTapH,
+    top: H - footerTapH,
+    tapY: H - footerTapH / 2,
+    textY: H - u(safeBottom > 0 ? 18 : 15),
+  };
+
   // Board (open data domain) rectangle: below the title, above the footer.
   const boardTop = navBottom + u(44);
   const boardBottom = bottomEdge - bottomPad - u(56) - u(compact ? 8 : 12);
@@ -59,6 +73,7 @@ function makeLayout(sys) {
     safeBottom,
     bottomEdge,
     bottomPad,
+    footer,
     capsule,
     navBottom,
     pad,
