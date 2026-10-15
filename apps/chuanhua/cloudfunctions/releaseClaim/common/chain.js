@@ -50,8 +50,9 @@ function evaluateClaim({ chain, player, openid, nowMs, ugc, group, restricted })
   if (chain.state === 'abandoned') return { ok: false, code: 'CHAIN_NOT_FOUND' };
   if (chain.hidden) return { ok: false, code: 'CHAIN_HIDDEN' };
   if (CLOSED_STATES.has(chain.state) || nowMs >= chain.expiresAt) return { ok: false, code: 'CHAIN_CLOSED' };
-  if (restricted) return { ok: false, code: 'RESTRICTED', extra: { until: restricted.until, permanent: restricted.permanent } };
+  // same order as the client's core/chain.js canClaim: RULES_REQUIRED, RESTRICTED, UGC_PAUSED
   if ((player.rulesVersion || 0) < LIMITS.rulesVersion) return { ok: false, code: 'RULES_REQUIRED' };
+  if (restricted) return { ok: false, code: 'RESTRICTED', extra: { until: restricted.until, permanent: restricted.permanent } };
   if (!ugc.createOk) return { ok: false, code: 'UGC_PAUSED' };
   if (chain.state === 'pending') return { ok: false, code: 'PENDING' };
   const n = chain.nextStep;

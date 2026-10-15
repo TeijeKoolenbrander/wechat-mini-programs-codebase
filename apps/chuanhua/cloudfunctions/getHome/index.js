@@ -25,17 +25,29 @@ exports.main = store.handler(async (event, { openid }) => {
   const cfg = await cfgLib.getConfig();
   const ugc = cfgLib.ugcState(cfg, nowMs);
 
-  const ids = core.dailyPromptIds(dateKey, await launchKey(dateKey));
+  // With the game core present its own launch date (core CONFIG.daily) is used, so the client's offline
+  // computation and the server always agree; LAUNCH_DATE_KEY overrides it only if both are changed together.
+  const envKey = process.env.LAUNCH_DATE_KEY && isDateKey(process.env.LAUNCH_DATE_KEY) ? process.env.LAUNCH_DATE_KEY : undefined;
+  const launch = envKey || (core.hasCoreDaily() ? undefined : await launchKey(dateKey));
+  const ids = core.dailyPromptIds(dateKey, launch);
   const stats = (await store.getDoc('daily_stats', dateKey)) || {};
   const byPrompt = stats.byPrompt || {};
+  const counts = {};
   const prompts = ids.map((id) => {
     const p = core.promptById(id);
     if (!p) fail('SERVER_CONFIG', 'daily prompt missing from bank');
     const n = byPrompt[id] || 0;
-    return { id, text: p.text, count: n >= NATIONAL_MIN ? n : null }; // aggregate only, shown at >= 30 (AC 89)
+    if (n >= NATIONAL_MIN) counts[id] = n; // aggregate only, shown at >= 30 (AC 89)
+    return { id, text: p.text, count: n >= NATIONAL_MIN ? n : null };
   });
 
   const p = await players.loadPlayer(openid, nowMs);
+  // revealed chains the player took part in and has not opened yet (the 我的接龙 dot)
+  let unseenReveals = 0;
+  try {
+    const rv = await store.db().collection('chains').where({ participants: openid, state: 'revealed' }).limit(50).get();
+    unseenReveals = rv.data.filter((c) => !c.hidden && !(p.seen || []).includes(c._id)).length;
+  } catch (e) { /* cosmetic */ }
   const r = players.restriction(p, nowMs);
   const day = p.day && p.day.dateKey === dateKey ? p.day : players.freshDay(dateKey);
   const warn = !!p.warnPending;
@@ -46,8 +58,10 @@ exports.main = store.handler(async (event, { openid }) => {
     ok: true,
     dateKey,
     serverNow: nowMs,
-    daily: { prompts },
+    daily: { prompts, counts },
     me: {
+      unseenReveals,
+      lifetimeReveals: p.lifetimeReveals || 0,
       rulesVersion: p.rulesVersion || 0,
       rulesCurrent: cfgLib.LIMITS.rulesVersion,
       restriction: r ? { until: r.until, permanent: r.permanent } : null,

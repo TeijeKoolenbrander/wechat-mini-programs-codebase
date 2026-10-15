@@ -10,10 +10,9 @@ const players = require('./common/players');
 const lifecycle = require('./common/lifecycle');
 const moderation = require('./common/moderation');
 const activity = require('./common/activity');
-const core = require('./common/coreapi');
 const input = require('./common/input');
 const { validateStrokes, countPoints } = require('./common/strokes');
-const { validateText } = require('./common/text');
+const { checkLocalText } = require('./common/localcheck');
 const { LIMITS } = require('./common/config');
 const { ugcContext } = require('./common/guard');
 const { AppError, fail, kindOfStep, isInt } = require('./common/util');
@@ -53,7 +52,7 @@ exports.main = store.handler(async (event, { openid }) => {
   const n = chain0.claim.step;
   if (n !== chain0.nextStep) fail('CLAIM_LOST', 'claim lost');
   const kind = kindOfStep(n);
-  if ((kind === 'draw') !== hasStrokes) fail('WRONG_KIND', `step ${n} expects ${kind === 'draw' ? 'strokes' : 'text'}`);
+  if ((kind === 'draw') !== hasStrokes) fail('BAD_KIND', `step ${n} expects ${kind === 'draw' ? 'strokes' : 'text'}`);
 
   // a restriction that predates this claim blocks the submit; one imposed mid-turn lets the claim finish (edge 19)
   const p0 = await players.loadPlayer(openid, nowMs);
@@ -101,7 +100,7 @@ function bookAttempt(chain, step, player, claimId, nowMs) {
 }
 
 async function submitText({ openid, chainId, claimId, n, text, nowMs, dateKey, clientMs, undoCount }) {
-  const v = validateText(text, { min: LIMITS.describeMin, max: LIMITS.describeMax, blocklist: core.blocklist() });
+  const v = checkLocalText(text, 'desc');
   if (!v.ok) fail('TEXT_REJECTED', 'rejected locally'); // no API call, no strike
   const chk = await moderation.checkText(openid, v.text); // MODERATION_BUSY on any failure; nothing stored
   await moderation.writeModLog({

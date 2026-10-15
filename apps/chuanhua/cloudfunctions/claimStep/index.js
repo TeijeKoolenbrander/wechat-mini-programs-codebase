@@ -19,7 +19,7 @@ exports.main = store.handler(async (event, { openid }) => {
   await store.rateLimit(openid, 'claim', 1, 20);
 
   // kill switch: no previous 棒 is ever returned while viewing is off, and no lock is taken (AC 54)
-  if (!ugc.viewOk) return { ok: true, claimId: null, placeholder: 'paused', prev: null };
+  if (!ugc.viewOk) return { ok: true, claimId: null, placeholder: 'paused', prev: { kind: 'paused' }, serverNow: nowMs };
 
   const pre = await store.getDoc('chains', chainId);
   if (!pre) fail('CHAIN_NOT_FOUND', 'chain not found');
@@ -28,6 +28,7 @@ exports.main = store.handler(async (event, { openid }) => {
 
   let claim = null;
   let chainAfter = null;
+  let resumed = false;
   await store.txn(async (t) => {
     const chain = await store.getDocT(t, 'chains', chainId);
     const pc = lifecycle.makePlayerCache(t, nowMs);
@@ -38,7 +39,9 @@ exports.main = store.handler(async (event, { openid }) => {
       chain, player, openid, nowMs, ugc, group: { memberOfChainGroup: member, ctxOpenGId }, restricted: players.restriction(player, nowMs),
     });
     if (!ev.ok) throw new AppError(ev.code, ev.code, ev.extra || undefined);
+    resumed = false;
     if (ev.resume) {
+      resumed = true;
       claim = { ...chain.claim };
       chainAfter = chain;
       return;
@@ -75,6 +78,8 @@ exports.main = store.handler(async (event, { openid }) => {
     step: n,
     kind: kindOfStep(n),
     expiresAt: claim.expiresAt,
+    serverNow: nowMs,
+    resumed,
     timerSec: kindOfStep(n) === 'draw' ? cfg.timers.drawSec : cfg.timers.describeSec,
     prev,
   };

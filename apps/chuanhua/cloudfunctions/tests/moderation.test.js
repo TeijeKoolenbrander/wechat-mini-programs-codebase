@@ -174,8 +174,8 @@ test('no content of a pending 棒 is returned to anyone but its author (AC 43, 4
   for (const p of probes) assert.ok(!/strokes/.test(JSON.stringify(p)), JSON.stringify(p));
   // the author sees it, marked pending
   const mine = await h.call('getMyChains', { chainId: c.chainId }, { openid: A });
-  assert.equal(mine.mine[0].modState, 'pending');
-  assert.ok(mine.mine[0].strokes);
+  assert.equal(mine.items[0].mine[0].modState, 'pending');
+  assert.ok(mine.items[0].mine[0].strokes);
   const list = await h.call('getMyChains', {}, { openid: A });
   assert.equal(list.items[0].status, 'pending');
 });
@@ -204,7 +204,7 @@ test('onMediaCheck: pass opens the next 棒; review blocks (no strike); risky bl
     assert.equal(view.state, 'claimable');
     assert.ok(!JSON.stringify(view).includes('block'));
     const mine = await h.call('getMyChains', { chainId: x.c.chainId }, { openid: A });
-    assert.equal(mine.mine[0].modState, 'blocked');
+    assert.equal(mine.items[0].mine[0].modState, 'blocked');
   }
 });
 
@@ -253,7 +253,7 @@ test('no verdict for 35 min: exactly one re-check, then void with no strike and 
   assert.equal(ch.state, 'open');
   assert.equal(ch.nextStep, 1);
   const mine = await h.call('getMyChains', { chainId: c.chainId }, { openid: A });
-  assert.equal(mine.mine[0].modState, 'void');
+  assert.equal(mine.items[0].mine[0].modState, 'void');
   assert.equal((await F.claim(h, B, c.chainId, gref)).ok, true, 'the 棒 reopens for others');
   // a late risky verdict: strike, no visibility change
   await h.call('onMediaCheck', evt('trace2', 'risky'));
@@ -463,12 +463,12 @@ test('viewEnabled=false: claimStep and getReveal return placeholders and no cont
   const cl = await F.claim(h, B, open, gref);
   assert.equal(cl.ok, true);
   assert.equal(cl.placeholder, 'paused');
-  assert.equal(cl.prev, null);
+  assert.deepEqual(cl.prev, { kind: "paused" });
   assert.equal(h.db.get('chains', open).claim, null, 'no lock is taken while viewing is off');
   const rv = await h.call('getReveal', { chainId: rev }, { openid: A });
   assert.equal(rv.state, 'paused');
   assert.ok(rv.steps.every((s) => s.placeholder === 'paused' && !s.text && !s.strokes));
-  assert.equal(rv.prompt.text, null);
+  assert.equal(rv.promptText, null);
   const gc = await h.call('getGroupChains', { groupRef: gref }, { openid: A });
   assert.ok(gc.revealed.every((r) => r.promptText === null && r.finalText === null));
   await h.call('admin', { op: 'setUgc', viewEnabled: true });

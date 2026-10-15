@@ -444,10 +444,10 @@ test('getGroupChains: membership checked, waiting vs in-progress, revealed tease
   h.db.put('group_stats', { _id: F.GROUP_A, started: 5, revealed: 12, drawings: 41, lastActivityAt: h.now() });
   const r = await h.call('getGroupChains', { groupRef: refs[A] }, { openid: A });
   assert.equal(r.ok, true);
-  assert.deepEqual(r.stats, { revealed: 12, drawings: 41 });
+  assert.deepEqual(r.stats, { revealed: 12, drawings: 41, started: 5 });
   assert.ok(r.waiting.some((x) => x.chainId === waiting && x.nextStep === 3 && x.nextKind === 'draw'));
-  assert.ok(r.inProgress.some((x) => x.chainId === mineWait && x.reason === 'prevMine'));
-  assert.ok(r.inProgress.some((x) => x.chainId === pending && x.reason === 'pending'));
+  assert.ok(r.inProgress.some((x) => x.chainId === mineWait && x.why === 'prevMine'));
+  assert.ok(r.inProgress.some((x) => x.chainId === pending && x.why === 'pending'));
   const ids = [...r.waiting, ...r.inProgress, ...r.revealed].map((x) => x.chainId);
   assert.ok(!ids.includes(hidden) && !ids.includes(other));
   assert.equal(r.revealed[0].chainId, rev);

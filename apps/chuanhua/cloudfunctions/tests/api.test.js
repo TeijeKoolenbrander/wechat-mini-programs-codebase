@@ -186,14 +186,14 @@ test('getMyChains: list statuses, paging, own 棒 detail only, no foreign conten
   assert.equal(by[exp].promptText, '题目1号', 'the starter sees the prompt of an unfinished chain');
   assert.equal(by[c.chainId].status, 'pending');
   assert.equal(by[open].promptText, null, 'no prompt on open chains');
-  assert.deepEqual(by[open].myNs, [1]);
+  assert.deepEqual(by[open].mySteps, [1]);
   await h.call('getReveal', { chainId: rev }, { openid: A });
   assert.equal((await h.call('getMyChains', {}, { openid: A })).items.find((i) => i.chainId === rev).unseen, false);
   const bList = await h.call('getMyChains', {}, { openid: B });
   assert.equal(bList.items.find((i) => i.chainId === exp).promptText, null, 'a non-starter does not get the prompt of an unfinished chain');
   // detail: only my own 棒
   const d = await h.call('getMyChains', { chainId: open }, { openid: A });
-  assert.deepEqual(d.mine.map((m) => m.n), [1]);
+  assert.deepEqual(d.items[0].mine.map((m) => m.n), [1]);
   assert.ok(!JSON.stringify(d).includes('猜测2号'));
   assert.equal((await h.call('getMyChains', { chainId: open }, { openid: C })).code, 'CHAIN_NOT_FOUND');
   // paging

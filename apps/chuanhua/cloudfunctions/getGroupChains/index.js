@@ -11,7 +11,7 @@ const input = require('./common/input');
 const { fail, now, dateKeyAt, kindOfStep, CHAIN_LENGTH } = require('./common/util');
 
 const REASON = {
-  PENDING: 'pending', TAKEN: 'taken', PREV_MINE: 'prevMine', CAP_REACHED: 'cap', STEP_LIMIT: 'limit',
+  PENDING: 'pending', TAKEN: 'taken', PREV_MINE: 'prevMine', CAP_REACHED: 'capReached', STEP_LIMIT: 'limit',
   CLAIM_LIMIT: 'limit', RESTRICTED: 'restricted', RULES_REQUIRED: 'rules', UGC_PAUSED: 'paused', CHAIN_CLOSED: 'closed',
   NEED_GROUP: 'group', WRONG_GROUP: 'group',
 };
@@ -39,7 +39,7 @@ exports.main = store.handler(async (event, { openid }) => {
     const ev = chainLib.evaluateClaim({ chain: c, player, openid, nowMs, ugc, group: { memberOfChainGroup: true, ctxOpenGId: openGId }, restricted });
     const base = { chainId: c._id, passed: c.passed, length: CHAIN_LENGTH };
     if (ev.ok) waiting.push({ ...base, nextStep: ev.step, nextKind: kindOfStep(ev.step) });
-    else inProgress.push({ ...base, nextStep: c.nextStep, nextKind: c.nextStep ? kindOfStep(c.nextStep) : null, reason: REASON[ev.code] || 'closed' });
+    else inProgress.push({ ...base, nextStep: c.nextStep, nextKind: c.nextStep ? kindOfStep(c.nextStep) : null, why: REASON[ev.code] || 'closed' });
   }
 
   const rv = await store.db().collection('chains').where({ openGId, state: 'revealed' }).orderBy('revealedAt', 'desc').limit(20).get();
@@ -63,7 +63,7 @@ exports.main = store.handler(async (event, { openid }) => {
   const gs = (await store.getDoc('group_stats', openGId)) || {};
   return {
     ok: true,
-    stats: { revealed: gs.revealed || 0, drawings: gs.drawings || 0 },
+    stats: { revealed: gs.revealed || 0, drawings: gs.drawings || 0, started: gs.started || 0 },
     waiting,
     inProgress,
     revealed,

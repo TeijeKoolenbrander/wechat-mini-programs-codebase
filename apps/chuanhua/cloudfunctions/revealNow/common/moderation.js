@@ -11,6 +11,7 @@ const cfgLib = require('./config');
 const lifecycle = require('./lifecycle');
 const players = require('./players');
 const raster = require('./raster');
+const coreapi = require('./coreapi');
 const { LIMITS } = cfgLib;
 const { fail, now, dateKeyAt, withTimeout, randomBase32 } = require('./util');
 
@@ -119,7 +120,7 @@ function pngPathFor(step) {
 
 async function ensurePng(step) {
   if (step.fileID) return step.fileID;
-  const png = raster.renderPng(step.strokes);
+  const png = coreapi.renderPngFromCore(step.strokes) || raster.renderPng(step.strokes); // core renderer = pixel parity with the client
   const up = await store.sdk().uploadFile({ cloudPath: pngPathFor(step), fileContent: png });
   if (!up || !up.fileID) throw new Error('uploadFile returned no fileID');
   step.fileID = up.fileID;

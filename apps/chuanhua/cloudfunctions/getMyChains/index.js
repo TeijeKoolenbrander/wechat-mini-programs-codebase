@@ -32,7 +32,10 @@ exports.main = store.handler(async (event, { openid }) => {
       text: s.kind === 'describe' && s.state === 'passed' ? s.text : undefined,
       canDelete: s.state === 'passed',
     }));
-    return { ok: true, chainId, state: chain.state, mine };
+    return {
+      ok: true,
+      items: [{ chainId, status: chain.state, passed: chain.passed, mySteps: mine.filter((m) => ['passed', 'pending'].includes(m.modState)).map((m) => m.n), at: chain.lastActivityAt, unseen: false, mine }],
+    };
   }
 
   const cursor = input.optInt(event.cursor, 0, 100000, 0);
@@ -60,8 +63,8 @@ exports.main = store.handler(async (event, { openid }) => {
       status,
       passed: c.passed,
       length: c.length,
-      myNs,
-      timeMs: c.lastActivityAt,
+      mySteps: myNs,
+      at: c.lastActivityAt,
       unseen: status === 'revealed' && participant && !(player.seen || []).includes(c._id),
       promptText: showPrompt && !c.hidden ? c.promptText : null,
     };

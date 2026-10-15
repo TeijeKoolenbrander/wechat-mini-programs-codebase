@@ -15,6 +15,8 @@ const activity = require('./common/activity');
 const { LIMITS } = cfgLib;
 const { now, dateKeyAt, configuredTimeoutMs } = require('./common/util');
 
+const ABANDON_GRACE_MS = 5 * 60 * 1000;
+
 async function run(name, fn, out) {
   try {
     out[name] = await fn();
@@ -89,7 +91,8 @@ async function sweepExpiry(nowMs, deadline) {
       if (!chain || !['open', 'starting'].includes(chain.state)) return;
       const active = chain.claim && chain.claim.expiresAt > nowMs;
       if (chain.state === 'starting') {
-        if (active) return;
+        // 5 min grace after the claim ran out, so a slightly late starter still submits (core CONFIG.chain.abandonGraceMs)
+        if (active || (chain.claim && chain.claim.expiresAt + ABANDON_GRACE_MS > nowMs)) return;
         chain.state = 'abandoned'; // 第 1 棒 never submitted and the claim ran out (spec 3.2)
         chain.claim = null;
         chain.lastActivityAt = nowMs;

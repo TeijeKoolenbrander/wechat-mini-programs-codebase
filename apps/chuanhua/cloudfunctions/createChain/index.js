@@ -10,8 +10,7 @@ const lifecycle = require('./common/lifecycle');
 const core = require('./common/coreapi');
 const input = require('./common/input');
 const groups = require('./common/groups');
-const { validateText } = require('./common/text');
-const { LIMITS } = require('./common/config');
+const { checkLocalText } = require('./common/localcheck');
 const { ugcContext } = require('./common/guard');
 const { fail, newChainId, newClaimId, randomBase32 } = require('./common/util');
 
@@ -39,7 +38,7 @@ exports.main = store.handler(async (event, { openid }) => {
     promptText = pr.text;
   } else {
     custom = true;
-    const v = validateText(event.customText, { min: LIMITS.promptMin, max: LIMITS.promptMax, blocklist: core.blocklist() });
+    const v = checkLocalText(event.customText, 'prompt');
     if (!v.ok) fail('TEXT_REJECTED', 'rejected locally'); // no API call, no strike (AC 34/35)
     const chk = await moderation.checkText(openid, v.text); // throws MODERATION_BUSY
     await moderation.writeModLog({

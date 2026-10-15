@@ -2,7 +2,7 @@
 
 WeChat Cloud Development backend for the mini game `chuanhua`. Spec: `docs/chuanhua/spec.md` §6, §7, §13, §16, §19; decisions `docs/chuanhua/decisions.md` (PO-10, PO-13..PO-19, PO-33).
 
-Status: code and tests complete and passing against a **test double** of the game core (`tests/fake-core`). Not deployed (no AppID or cloud environment yet). Founder items are in "What the device pass must prove" below.
+Status: code and tests complete and passing against a **test double** of the game core (`tests/fake-core`, same export shapes as the real core README). Not deployed (no AppID or cloud environment yet). The game core (minigame-dev, branch `worktree-agent-a4d33d779bf3c2cfb`, commit `63da5b2`) was read but **not merged or run** by this branch; `tests/core-adapter.test.js` contains 4 `REAL CORE` tests that skip until `apps/chuanhua/game/core` is in the tree, then verify parity (prompts/blocklist shapes, daily ids, stroke validation, rasteriser, constants). **After merging both branches run `npm run sync && npm run check && npm test` here.** Founder items are in "What the device pass / console must prove" below.
 
 ## Functions
 
@@ -33,7 +33,7 @@ Status: code and tests complete and passing against a **test double** of the gam
 
 Every function returns `{ok:true,...}` or `{ok:false, code, message}` and never throws to the client (fuzz test). Identity is always `cloud.getWXContext().OPENID`, read in `common/store.js` only (a test enforces this). Timer functions and `cleanup`/`modSweeper` reject any call that carries an OPENID.
 
-Error codes: the spec's list plus `BAD_INPUT`, `WRONG_KIND`, `NOT_REVEALED`, `NOT_MEMBER`, `CHAIN_REMOVED`, `CHAIN_HIDDEN`, `REWARD_LIMIT`.
+Error codes: the spec's list plus `BAD_INPUT`, `BAD_KIND`, `NOT_REVEALED`, `NOT_MEMBER`, `CHAIN_REMOVED`, `CHAIN_HIDDEN`, `REWARD_LIMIT`.
 
 ## Layout
 
@@ -53,7 +53,7 @@ npm run check    # drift check; FAILS if the game core is missing (run before ev
 npm test         # pretest syncs common only; the harness stages its own copy with tests/fake-core
 ```
 
-Core dependency is deliberately narrow (`common/coreapi.js`): only `core/content/prompts.v1.js` (array or `{PROMPTS}` of `{id,text,cat,retired?}`), `core/content/blocklist.v1.js` (array or `{BLOCKLIST}`) and optionally `core/daily.js#dailyPromptIds(dateKey, ids, launchKey)`. Everything security-relevant (stroke limits, text rules, rasteriser, date keys) lives in `common/` so the server never trusts a client-owned module. **Re-check when the game core lands:** that the exported shapes match, that `daily.js` and the fallback walk agree (AC 88), and that the client renderer matches `common/raster.js` pixel for pixel (AC 27, golden test is minigame-dev's).
+Core dependency is deliberately narrow (`common/coreapi.js`, the only file that touches the core): `core/content/prompts.v1.js` (`{prompts:[{id,text,cat,retired?}]}`), `core/content/blocklist.v1.js` (`{categories:{name:[terms]}}`, flattened), `core/daily.js#dailyIds(dateKey[, launchKey])` (preferred, so client and server agree; without it a local fallback walk with `meta/launch` is used), `core/text.js#check(str,'prompt'|'desc')` (applied in addition to the server's own rules, so anything the client rejects is rejected here), and `core/raster.js` + `core/png.js` (the moderation PNG is rendered with the core rasteriser for pixel parity with the client, `zlib.deflateSync` injected; `common/raster.js` is the fallback). Everything security-relevant (stroke limits, text rules, rasteriser, date keys) lives in `common/` so the server never trusts a client-owned module. **Re-check when the game core lands:** that the exported shapes match, that `daily.js` and the fallback walk agree (AC 88), and that the client renderer matches `common/raster.js` pixel for pixel (AC 27, golden test is minigame-dev's).
 
 ## Environment variables (cloud environment config; never committed)
 
@@ -118,6 +118,7 @@ Create them in the console, paste `database/rules.json` (every collection is `{"
 | Collection | Index | Used by |
 |---|---|---|
 | `chains` | `involved` | getMyChains |
+| `chains` | `participants + state` | getHome (unseen reveals) |
 | `chains` | `participants` | album/participant queries |
 | `chains` | `openGId + state + lastActivityAt` | getGroupChains |
 | `chains` | `openGId + state + revealedAt` | getGroupChains (recent reveals) |
@@ -149,11 +150,13 @@ All point reads use deterministic `_id`s; uniqueness never relies on indexes.
 - `report` ids are `<reporterOpenid>_<stepId>` (spec 13.1), so `admin.listReports` shows an id that embeds the reporter's openid; admin console only, never returned to clients.
 - Restriction imposed **mid-turn** lets the current claim finish (spec edge 19); one that predates the claim blocks the submit (`players.restrictedAt`).
 - `claimStep` with `viewEnabled=false` takes **no lock** and returns `{placeholder:'paused'}`.
-- A `starting` chain is `abandoned` as soon as its claim expires unused (sweeper) or the starter releases; cleanup removes it after 1 day.
+- A `starting` chain is `abandoned` when the starter releases, or by the sweeper 5 minutes after its claim expired unused (core `abandonGraceMs`, so a slightly late starter still submits); cleanup removes it after 1 day.
+- Claim refusal order matches the client's `core/chain.js`: `RULES_REQUIRED` before `RESTRICTED` before `UGC_PAUSED`.
+- Response shapes follow the client contract in the core README (`getHome.daily.counts`, `me.unseenReveals/lifetimeReveals`, `getChain.expiresAt/serverNow/code`, `claimStep.serverNow/resumed/prev:{kind:'paused'}`, `getReveal.promptText/durationMs`, `getMyChains` `mySteps/at` and detail as `items[0].mine`, `getGroupChains` `why` and `stats.started`).
 - Hiding a step reopens it only if it is the latest passed 棒 of an `open` chain; `restoreStep`/`dismissReport(restore)` only restore a step still referenced by the chain (otherwise it would re-enter an open chain).
 - Blocked attempts and voids do not count toward the 3-棒 cap; a hidden or deleted 棒 does (conservative).
 - Sweeper ordering: pending drawings are scanned 200 at a time; at very high volume raise the page size or split the timer.
 
 ## Tests
 
-`npm test` (Node >= 20): in-memory fake DB with duplicate-`_id` errors, throwing `doc.get`, query limits, array-contains, serialised transactions with rollback; the SDK is a scriptable double (`msgSecCheck`, `mediaCheckAsync`, `imgSecCheck`, storage, updatable messages, subscribe messages); the clock is controlled. Covers chain rules and caps, 50 concurrent claim races, lazy claim expiry, idempotent submit, text and image moderation (parameters asserted), push idempotency and HTTP signature/AES, timeouts/retries/void, fail-closed, dev budget, prod-mock guard, kill switches, breaker, quotas, reports, strikes and escalation, admin, deletion, retention, participants-only reveal, no openids or file references in any response, rules/permissions/secrets/drift static checks, fuzzed inputs.
+`npm test` (Node >= 20; 118 tests, 4 REAL CORE tests skipped until the core is merged): in-memory fake DB with duplicate-`_id` errors, throwing `doc.get`, query limits, array-contains, serialised transactions with rollback; the SDK is a scriptable double (`msgSecCheck`, `mediaCheckAsync`, `imgSecCheck`, storage, updatable messages, subscribe messages); the clock is controlled. Covers chain rules and caps, 50 concurrent claim races, lazy claim expiry, idempotent submit, text and image moderation (parameters asserted), push idempotency and HTTP signature/AES, timeouts/retries/void, fail-closed, dev budget, prod-mock guard, kill switches, breaker, quotas, reports, strikes and escalation, admin, deletion, retention, participants-only reveal, no openids or file references in any response, rules/permissions/secrets/drift static checks, fuzzed inputs.

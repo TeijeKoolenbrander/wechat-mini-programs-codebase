@@ -38,7 +38,7 @@ test('a chain has a prompt and 6 棒; text for a draw 棒 and strokes for a desc
   assert.equal(c.claim.step, 1);
   assert.equal(c.claim.kind, 'draw');
   const wrong = await F.submit(h, A, c.chainId, c.claim.claimId, { text: '一二' });
-  assert.equal(wrong.code, 'WRONG_KIND');
+  assert.equal(wrong.code, 'BAD_KIND');
   const both = await F.submit(h, A, c.chainId, c.claim.claimId, { text: '一二', strokes: F.strokes() });
   assert.equal(both.code, 'BAD_INPUT');
   const chainId = c.chainId;
@@ -48,7 +48,7 @@ test('a chain has a prompt and 6 棒; text for a draw 棒 and strokes for a desc
   const cl = await F.claim(h, B, chainId, gref);
   assert.equal(cl.kind, 'describe');
   const wrong2 = await F.submit(h, B, chainId, cl.claimId, { strokes: F.strokes() });
-  assert.equal(wrong2.code, 'WRONG_KIND');
+  assert.equal(wrong2.code, 'BAD_KIND');
 });
 
 test('createChain claims 第 1 棒 for the starter with the prompt; nobody else can claim it meanwhile (AC 2)', async () => {
@@ -80,7 +80,7 @@ test('a start is counted only when 第 1 棒 is submitted; an abandoned 第 1 �
   assert.equal((await h.call('getHome', {}, { openid: A })).me.startsLeft, 2);
   // a claim that simply runs out becomes abandoned via the sweeper, start untouched
   const c3 = await F.create(h, A, { groupRef: gref });
-  h.advance(160000);
+  h.advance(160000 + 5 * 60000);
   await h.call('modSweeper', {});
   assert.equal(h.db.get('chains', c3.chainId).state, 'abandoned');
 });
