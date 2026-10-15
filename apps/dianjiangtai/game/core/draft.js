@@ -26,14 +26,15 @@
 
 const { getContent, SLOTS, cellKey } = require('./content');
 const { buildSheet, isValidCell } = require('./sheet');
-const { getConfig, LATEST_CONFIG_VERSION } = require('./config');
+const { getConfig, defaultConfigVersion } = require('./config');
 
 const ACTION_TYPES = ['flip', 'respinFaction', 'respinEra', 'pick', 'undo'];
 
 function createRun(opts) {
   const content = getContent(opts.contentVersion);
   if (!content) return null;
-  const config = getConfig(opts.configVersion || LATEST_CONFIG_VERSION);
+  const config = getConfig(opts.configVersion || defaultConfigVersion(content.contentVersion));
+  if (!config) return null;
   const mode = opts.mode || 'free';
   const allowance = config.allowance[mode];
   if (!allowance) return null;
@@ -64,11 +65,34 @@ function createRun(opts) {
   };
 }
 
-/** Undrafted generals (roster indexes) of a (faction, era) cell. */
+/**
+ * The selectable pool (roster indexes, roster order) of a (faction, era) cell in the run's current round
+ * (spec 4): the first `config.poolCap` undrafted members in the round's seeded pool order
+ * (`rounds[r].pools[cell]`), or all undrafted members when the cell has no order (size <= poolCap).
+ * Depends only on the seed, the round, the cell and which people are drafted.
+ */
 function poolOf(run, faction, era) {
+  const key = cellKey(faction, era);
+  const cell = run.content.cells[key] || [];
+  const round = run.rounds[run.round - 1];
+  const order = round && round.pools && round.pools[key];
+  const roster = run.content.roster;
+  const cap = run.config.poolCap;
+  const out = [];
+  if (order && order.length > cap) {
+    for (let i = 0; i < order.length && out.length < cap; i++) if (!run.drafted[roster[order[i]]]) out.push(order[i]);
+    out.sort((a, b) => a - b);
+    return out;
+  }
+  for (let i = 0; i < cell.length; i++) if (!run.drafted[roster[cell[i]]]) out.push(cell[i]);
+  return out;
+}
+
+/** Members of the cell already in the lineup (roster indexes): shown after the pool, dimmed "已点将", not selectable. */
+function draftedInCell(run, faction, era) {
   const cell = run.content.cells[cellKey(faction, era)] || [];
   const out = [];
-  for (let i = 0; i < cell.length; i++) if (!run.drafted[run.content.roster[cell[i]]]) out.push(cell[i]);
+  for (let i = 0; i < cell.length; i++) if (run.drafted[run.content.roster[cell[i]]]) out.push(cell[i]);
   return out;
 }
 
@@ -137,6 +161,8 @@ function apply(run, a) {
 
   if (type === 'flip') {
     if (run.phase === 'placed' && run.round < run.config.rounds && a.round === run.round + 1) {
+      // progressive delivery (spec 5.2): a client holding only the rounds released so far cannot flip further
+      if (!run.rounds[run.round]) return reject('ROUND_NOT_RELEASED');
       run.round++;
       run.phase = 'awaitFlip';
       run.token = null;
@@ -146,6 +172,7 @@ function apply(run, a) {
     if (a.round !== run.round) return reject('ROUND_MISMATCH');
     if (run.phase !== 'awaitFlip') return reject('ALREADY_FLIPPED');
     const t = startToken(run);
+    if (!t) return reject('ROUND_NOT_RELEASED');
     run.token = { faction: t.faction, era: t.era, altFaction: t.altFaction, altEra: t.altEra };
     if (!settleToken(run)) return reject('NO_POOL');
     run.phase = 'flipped';
@@ -194,11 +221,14 @@ function apply(run, a) {
     if (gi === undefined) return reject('NOT_IN_POOL');
     const inCell = content.cells[cellKey(run.token.faction, run.token.era)].indexOf(gi) >= 0;
     if (!inCell) return reject('NOT_IN_POOL');
+    // a person can be drafted at most once per run, from whichever cell (spec 3.2)
     if (run.drafted[a.generalId]) return reject('DUPLICATE_GENERAL');
+    // pool cap (spec 4): only the first poolCap undrafted members of the pool order are selectable
+    if (currentPool(run).indexOf(gi) < 0) return reject('NOT_IN_POOL');
     if (run.slots[a.slot]) return reject('DUPLICATE_SLOT');
     run.drafted[a.generalId] = true;
     run.slots[a.slot] = a.generalId;
-    run.picks.push({ round: run.round, generalId: a.generalId, slot: a.slot });
+    run.picks.push({ round: run.round, generalId: a.generalId, slot: a.slot, faction: run.token.faction });
     run.finalTokens[run.round - 1] = { faction: run.token.faction, era: run.token.era };
     run.phase = 'placed';
     run.actions.push({ round: a.round, type, generalId: a.generalId, slot: a.slot });
@@ -233,9 +263,15 @@ function isComplete(run) {
   return run.picks.length === run.config.rounds;
 }
 
-/** Lineup in fixed slot order. Slots may be null until complete. */
+/**
+ * Lineup in fixed slot order. Slots may be null until complete. Each entry carries `faction`, the faction of the
+ * cell the general was drafted from (cohesion uses it, spec 3.2/7.2); pass the entries to `simulate` unchanged.
+ */
 function lineupOf(run) {
-  return SLOTS.map((s) => ({ slot: s, generalId: run.slots[s] }));
+  return SLOTS.map((s) => {
+    const p = run.picks.find((x) => x.slot === s);
+    return { slot: s, generalId: run.slots[s], faction: p ? p.faction : null };
+  });
 }
 
 module.exports = {
@@ -243,6 +279,7 @@ module.exports = {
   apply,
   nextRound,
   poolOf,
+  draftedInCell,
   currentPool,
   respinInfo,
   isComplete,

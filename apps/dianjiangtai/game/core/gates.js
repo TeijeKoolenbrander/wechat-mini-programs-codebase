@@ -16,18 +16,18 @@
  */
 
 const { sub } = require('./rng');
-const { getConfig, LATEST_CONFIG_VERSION } = require('./config');
+const { getConfig, defaultConfigVersion } = require('./config');
 const { LATEST_CONTENT_VERSION } = require('./content');
 const { makeScenario } = require('./sim');
 const { bestLineup } = require('./search');
 const { buildSheet } = require('./sheet');
 const { playRun } = require('./players');
 
-function population(model, prefix, seed, contentVersion, scn, K) {
+function population(model, prefix, seed, contentVersion, scn, K, rounds) {
   let perfect = 0;
   for (let j = 0; j < K; j++) {
     const rng = sub(seed, prefix + j);
-    const r = playRun(model, seed, contentVersion, 'daily', rng, scn);
+    const r = playRun(model, seed, contentVersion, 'daily', rng, scn, { rounds });
     if (r.record.l === 0) perfect++;
   }
   return perfect / K;
@@ -35,12 +35,12 @@ function population(model, prefix, seed, contentVersion, scn, K) {
 
 function gateCheck(seed, contentVersion, configVersion) {
   const cv = contentVersion || LATEST_CONTENT_VERSION;
-  const config = getConfig(configVersion || LATEST_CONFIG_VERSION);
+  const config = getConfig(configVersion || defaultConfigVersion(cv));
   const g = config.gates;
   const scn = makeScenario(seed, cv, config.configVersion);
   const rounds = buildSheet(seed, cv, config.configVersion);
   const primary = rounds.map((r) => ({ faction: r.faction, era: r.era }));
-  const opt = bestLineup(seed, cv, primary, { scenario: scn, stopAt12: true });
+  const opt = bestLineup(seed, cv, primary, { scenario: scn, stopAt12: true, rounds });
   const rec = {
     optimal: opt ? opt.record : { w: 0, l: config.battles },
     greedyRate: null,
@@ -54,8 +54,8 @@ function gateCheck(seed, contentVersion, configVersion) {
     rec.pass = { optimal: false, greedy: false, random: false, all: false };
     return rec;
   }
-  rec.greedyRate = population('greedyNoisy', 'gate:greedy:', seed, cv, scn, g.K);
-  rec.randomRate = population('random', 'gate:random:', seed, cv, scn, g.K);
+  rec.greedyRate = population('greedyNoisy', 'gate:greedy:', seed, cv, scn, g.K, rounds);
+  rec.randomRate = population('random', 'gate:random:', seed, cv, scn, g.K, rounds);
   const greedyOk = rec.greedyRate >= g.greedy.rateMin && rec.greedyRate <= g.greedy.rateMax;
   const randomOk = rec.randomRate < g.random.rateMax;
   rec.pass = { optimal: true, greedy: greedyOk, random: randomOk, all: greedyOk && randomOk };
@@ -69,12 +69,12 @@ function gateCheck(seed, contentVersion, configVersion) {
 function acceptDailySeed(seed, opts) {
   opts = opts || {};
   const cv = opts.contentVersion || LATEST_CONTENT_VERSION;
-  const config = getConfig(opts.configVersion || LATEST_CONFIG_VERSION);
+  const config = getConfig(opts.configVersion || defaultConfigVersion(cv));
   const gates = gateCheck(seed, cv, config.configVersion);
   if (!gates.pass.all) return { accepted: false, gates };
   const rounds = buildSheet(seed, cv, config.configVersion);
   const primary = rounds.map((r) => ({ faction: r.faction, era: r.era }));
-  const best = bestLineup(seed, cv, primary, {});
+  const best = bestLineup(seed, cv, primary, { rounds });
   return { accepted: true, gates, best, rounds };
 }
 
