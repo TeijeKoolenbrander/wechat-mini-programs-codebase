@@ -29,7 +29,7 @@ function makeWx(opts, log, handlers) {
   let raf = null;
   global.requestAnimationFrame = (cb) => (raf = cb);
   const wx = {
-    getWindowInfo: () => ({ ...SCREEN, safeArea: { bottom: 778 }, platform: 'ios' }),
+    getWindowInfo: () => ({ ...(opts.screen || SCREEN), safeArea: { bottom: (opts.screen || SCREEN).windowHeight - 34 }, platform: 'ios' }),
     getMenuButtonBoundingClientRect: () => CAPSULE,
     createCanvas: () => ({ width: 0, height: 0, getContext: () => fakeContext(log), toTempFilePath: (o) => o.success({ tempFilePath: 'tmp://card.png' }) }),
     createImage: () => ({}),
@@ -249,7 +249,8 @@ function makeClient(t, srv, openid, opts) {
   const { createKeyboard } = require('../js/keyboard');
   const { createAudio } = require('../js/audio');
   const { createController } = require('../js/controller');
-  const R = require('../js/renderers').loadRenderers();
+  const R0 = require('../js/renderers').loadRenderers();
+  const R = opts.probe ? opts.probe.wrap(R0) : R0;
   const { CONFIG } = require('../core/config');
   const log = newLog();
   const handlers = {};
@@ -265,7 +266,7 @@ function makeClient(t, srv, openid, opts) {
   const privacy = createPrivacy({ wx, store, analytics });
   const keyboard = createKeyboard(wx);
   const audio = createAudio(wx, false);
-  const layout = R.makeLayout({ ...SCREEN, safeArea: { bottom: 778 }, menuRect: CAPSULE });
+  const layout = R.makeLayout({ ...(opts.screen || SCREEN), safeArea: { bottom: (opts.screen || SCREEN).windowHeight - 34 }, menuRect: CAPSULE });
   const ctl = createController({ wx, api, store, analytics, ads, share, privacy, keyboard, audio, config: CONFIG, invalidate() {}, getLayout: () => layout });
   const c = {
     openid,
@@ -298,13 +299,13 @@ function makeClient(t, srv, openid, opts) {
     },
     tapId(id) {
       c.frame();
-      let h = c.hits.slice().reverse().find((x) => x.id === id);
+      let h = c.hits.slice().reverse().find(typeof id === 'function' ? id : (x) => x.id === id);
       for (let i = 0; !h && i < 80; i++) {
         const sid = Object.keys(c.hits.scrollMax)[0];
         if (!sid || (ctl.state.ui.scroll[sid] || 0) >= c.hits.scrollMax[sid]) break;
         ctl.onDrag(sid, -120);
         c.frame();
-        h = c.hits.slice().reverse().find((x) => x.id === id);
+        h = c.hits.slice().reverse().find(typeof id === 'function' ? id : (x) => x.id === id);
       }
       if (!h) throw new Error('no hit ' + id + ' among ' + c.hits.map((x) => x.id).join(','));
       ctl.onHit(h.id);

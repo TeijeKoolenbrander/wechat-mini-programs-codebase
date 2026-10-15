@@ -34,6 +34,7 @@ const { createDrawingTool } = require('./drawing');
 const V = require('./vm');
 const { uuid } = require('./util');
 const { RULES_LINES } = require('./privacy');
+const build = require('./build-config');
 
 const TOAST_MS = 2400;
 const COACH_MS = 3000;
@@ -1364,6 +1365,8 @@ function createController(deps) {
       case 'settings:palette':
         if (paletteToday()) return toast('今日彩笔已解锁');
         return paletteAd('settings');
+      case 'settings:deleteRetry':
+        return doDeleteAll();
       case 'settings:deleteAll':
         c.ui.dialog = { text: '删除我的全部接龙内容？删除后，你画的和写的内容将不再展示，正在进行的接龙会让出你的那一棒', confirmLabel: '继续', cancelLabel: '取消', danger: true, action: 'deleteAll1' };
         c.settings.deleteState = 'confirm1';
@@ -1450,7 +1453,7 @@ function createController(deps) {
       if (rp.state !== 'submitting') rp.state = 'idle';
       return invalidate();
     }
-    if (id === 'report:submit' || id === 'report:retry') return submitReport();
+    if (id === 'report:submit') return submitReport();
   }
 
   // ---------------------------------------------------------------- card entry
@@ -1738,7 +1741,7 @@ function createController(deps) {
         vm = V.revealVm({ state: rv.state, chainId: rv.chainId, data: rv.data, now: t, autoplay: rv.autoplay, interstitialDue: ads.interstitialDue({ lifetimeReveals: S.lifetimeReveals }) });
         if (rv.solo && vm.play) {
           const idx = vm.steps.findIndex((s) => s.n === rv.solo.n);
-          if (idx >= 0 && vm.steps[idx].kind === 'draw') vm.play[idx] = { shown: true, progress: Math.min(1, (t - rv.solo.startedAt) / V.T_DRAW) };
+          if (idx >= 0 && vm.steps[idx].kind === 'draw') vm.replay = { n: rv.solo.n, progress: Math.min(1, (t - rv.solo.startedAt) / V.T_DRAW) };
         }
         break;
       }
@@ -1755,7 +1758,7 @@ function createController(deps) {
         vm = c.detail.item ? Object.assign(V.detailVm(c.detail.item), { state: c.detail.state }) : { chainId: c.detail.chainId, mine: [], state: c.detail.state };
         break;
       case 'settings':
-        vm = V.settingsVm({ muted: S.muted, largeText: S.largeText, highContrast: S.highContrast, canUnlockPalette: !paletteToday(), paletteUnlockedToday: paletteToday(), deleteState: c.settings.deleteState === 'confirm1' || c.settings.deleteState === 'confirm2' ? 'idle' : c.settings.deleteState, /* the two confirms are overlay.dialog */ paletteAdState: c.settings.paletteAdState });
+        vm = V.settingsVm({ muted: S.muted, largeText: S.largeText, highContrast: S.highContrast, canUnlockPalette: !paletteToday(), paletteUnlockedToday: paletteToday(), deleteState: c.settings.deleteState === 'confirm1' || c.settings.deleteState === 'confirm2' ? 'idle' : c.settings.deleteState, /* the two confirms are overlay.dialog */ paletteAdState: c.settings.paletteAdState, version: build.appVersion });
         break;
     }
     const overlay = {};

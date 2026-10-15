@@ -107,6 +107,7 @@ function pickerVm(p) {
     custom: { open: !!custom.open, text: custom.text || '', count: n + '/' + CONFIG.text.promptMax, error: custom.error || null },
     canStart: p.state === 'ready' && (custom.open ? customOk : !!sel),
     errorText: p.errorText || null,
+    drawSec: CONFIG.timers.drawSec, // extra
     startLabel: p.state === 'creating' ? '准备画布…' : custom.open ? '确定' : '开始画 (' + CONFIG.timers.drawSec + ' 秒)', // extra
   };
 }
@@ -176,6 +177,7 @@ function describeVm(d) {
     status: d.status,
     errorText: d.errorText || null,
     placeholder: '你觉得这画的是什么？', // extra
+    focused: d.status === 'typing' || d.status === 'blocked' || d.status === 'busy' || d.status === 'error', // extra: caret shown
     shake: !!d.shake, // extra
   };
 }
@@ -385,7 +387,7 @@ function revealVm(r) {
       steps: [],
       summaryText: '',
       nationalText: null,
-      autoplay: { enabled: false, panel: 0, playing: false },
+      autoplay: { enabled: false, panel: 0, playing: false, progress: 0 },
       canSameAgain: false,
       messageText: r.state === 'offline' || r.state === 'error' ? COPY.offlineReveal : r.state === 'paused' ? COPY.paused : r.state === 'loading' ? '正在展开…' : null, // extra
     });
@@ -411,6 +413,8 @@ function revealVm(r) {
   tl.panels.forEach((p, k) => {
     if (el >= p.start) panel = k;
   });
+  const cur = tl.panels[panel];
+  const curProgress = ap.playing && cur ? Math.max(0, Math.min(1, (el - cur.start) / (cur.end - cur.start))) : 1; // progress inside the current panel
   const play = rows.map(() => ({ shown: true, progress: 1 }));
   if (ap.playing) {
     tl.panels.forEach((p) => {
@@ -433,7 +437,7 @@ function revealVm(r) {
     steps: rows,
     summaryText: summaryOf(d.promptText, rows, d.passed),
     nationalText: d.nationalCount && d.promptText && !d.custom ? '今天全国 ' + thousands(d.nationalCount) + ' 条接龙从「' + d.promptText + '」出发' : null,
-    autoplay: { enabled: !!ap.enabled, panel, playing: !!ap.playing },
+    autoplay: { enabled: !!ap.enabled, panel, playing: !!ap.playing, progress: curProgress },
     canSameAgain: !d.custom,
     play, // extra: per step { shown, progress 0..1 } (draw: replay fraction, describe: typed fraction)
     promptShown, // extra
@@ -518,6 +522,7 @@ function albumVm(a) {
     banner: a.banner || { show: false, reservedHeight: 0 },
     emptyText: a.state === 'empty' ? '还没有接龙，去开一条吧' : null, // extra
     staleNote: a.state === 'offline' ? '离线中，显示上次的列表' : null, // extra
+    offlineNote: a.state === 'offline' && (a.items || []).length > 0, // extra: the cached list is shown read-only
   };
 }
 
@@ -553,7 +558,8 @@ function settingsVm(s) {
     paletteUnlockedToday: !!s.paletteUnlockedToday,
     deleteAll: { state: s.deleteState || 'idle' },
     paletteAdState: s.paletteAdState || 'idle', // extra
-    subscribeNote: s.subscribeNote || null, // extra
+    subscribeStatusText: s.subscribeNote || null, // extra
+    version: s.version || '', // extra
   };
 }
 
