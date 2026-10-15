@@ -97,8 +97,9 @@ function drawDailyCard(ctx, vm, L, hits, d, x, y, w, h, pad, btnH) {
   W.card(ctx, x, y, w, h, { shadow: true });
   const ix = x + pad;
   const iw = w - 2 * pad;
+  const mx = ix + iw / 2;
   const issue = d.issueNo != null ? '今日军令 · 第 ' + d.issueNo + ' 期' : '今日军令';
-  W.text(ctx, issue, ix, y + L.u(24), { size: T.FS.title, weight: 800, serif: true, maxW: iw });
+  W.text(ctx, issue, mx, y + L.u(24), { size: T.FS.title, weight: 800, serif: true, maxW: iw, align: 'center' });
 
   let sub = '全服同一手令牌，每日一战';
   let subColor = C.sub;
@@ -143,13 +144,13 @@ function drawDailyCard(ctx, vm, L, hits, d, x, y, w, h, pad, btnH) {
   }
 
   if (d.state === 'loading') {
-    W.skeleton(ctx, ix, y + L.u(40), iw * 0.7, L.u(18), vm.t, 6);
-    W.text(ctx, '正在取今日军令…', ix, y + L.u(76), { size: T.FS.body, color: C.sub });
+    W.skeleton(ctx, ix + iw * 0.15, y + L.u(40), iw * 0.7, L.u(18), vm.t, 6);
+    W.text(ctx, '正在取今日军令…', mx, y + L.u(76), { align: 'center', size: T.FS.body, color: C.sub });
   } else if (line) {
-    W.text(ctx, line, ix, y + L.u(L.compact ? 48 : 54), { size: T.FS.bodyL + 2, weight: 800, color: d.state === 'pendingSubmit' || d.state === 'error' || d.state === 'offline' ? C.seal : C.ink, serif: true, maxW: iw });
-    if (sub) W.text(ctx, sub, ix, y + L.u(L.compact ? 69 : 78), { size: T.FS.body, color: subColor, maxW: iw });
+    W.text(ctx, line, mx, y + L.u(L.compact ? 48 : 54), { size: T.FS.bodyL + 2, weight: 800, color: d.state === 'pendingSubmit' || d.state === 'error' || d.state === 'offline' ? C.seal : C.ink, serif: true, maxW: iw, align: 'center' });
+    if (sub) W.text(ctx, sub, mx, y + L.u(L.compact ? 69 : 78), { size: T.FS.body, color: subColor, maxW: iw, align: 'center' });
   } else if (sub) {
-    W.text(ctx, sub, ix, y + L.u(52), { size: T.FS.body, color: subColor, maxW: iw });
+    W.text(ctx, sub, mx, y + L.u(52), { size: T.FS.body, color: subColor, maxW: iw, align: 'center' });
   }
   W.button(ctx, L, hits, { id, x: ix, y: y + h - pad - btnH, w: iw, h: btnH, label, kind, disabled });
 }
