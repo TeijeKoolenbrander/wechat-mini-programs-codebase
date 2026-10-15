@@ -1,0 +1,22 @@
+{
+  "_comment": "Indexes to create in the console (Database > collection > Index management), one per entry. `_id` is always indexed. Each entry names the query that needs it. Keys are in order; 'asc'/'desc' as listed.",
+  "answer_bank": [
+    { "keys": [["pool", "asc"], ["used", "asc"], ["vocabVersion", "asc"], ["gateVersion", "asc"], ["seq", "asc"]], "for": "genDaily: next unused daily entry by seq; low-bank count" },
+    { "keys": [["pool", "asc"], ["practiceNo", "asc"]], "for": "practice puzzle p<n> lookup; practice total", "note": "do NOT make this unique: daily entries have no practiceNo" }
+  ],
+  "plays": [
+    { "keys": [["puzzleId", "asc"], ["ranked", "asc"]], "for": "getBoard: ranked plays of one daily (count + page)" },
+    { "keys": [["openid", "asc"], ["kind", "asc"], ["status", "asc"]], "for": "startPuzzle {next}, getHistory practice done count" },
+    { "keys": [["lastAt", "asc"]], "for": "cleanup retention" }
+  ],
+  "player_stats": [{ "keys": [["updatedAt", "asc"]], "for": "cleanup retention" }],
+  "challenges": [{ "keys": [["createdAt", "asc"]], "for": "cleanup retention" }],
+  "events": [{ "keys": [["ts", "asc"]], "for": "cleanup retention; KPI queries" }],
+  "anomalies": [{ "keys": [["ts", "asc"]], "for": "cleanup retention; daily roll-up" }],
+  "group_members": [
+    { "keys": [["groupRef", "asc"]], "for": "getBoard group mode: members of a group" },
+    { "keys": [["openid", "asc"], ["groupRef", "asc"]], "for": "getBoard membership check" },
+    { "keys": [["lastSeen", "asc"]], "for": "cleanup retention" }
+  ],
+  "rate_limits": [{ "keys": [["expireAt", "asc"]], "for": "cleanup" }]
+}

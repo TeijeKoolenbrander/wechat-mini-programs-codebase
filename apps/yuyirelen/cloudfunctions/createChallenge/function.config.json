@@ -1,0 +1,7 @@
+{
+  "timeout": 5,
+  "memorySize": 128,
+  "envVariables": {
+    "TZ": "Asia/Shanghai"
+  }
+}

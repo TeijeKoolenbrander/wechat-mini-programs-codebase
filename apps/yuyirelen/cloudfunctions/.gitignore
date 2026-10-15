@@ -1,0 +1,7 @@
+# generated copies (sources: apps/yuyirelen/game/core and cloudfunctions/data). Run: npm run sync
+*/core/
+*/data/
+node_modules/
+# answer-bank import files contain FUTURE answers (spoilers): never commit
+*.import.jsonl
+bank.import*
