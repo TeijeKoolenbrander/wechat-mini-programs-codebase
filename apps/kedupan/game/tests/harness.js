@@ -26,16 +26,20 @@ function fakeContext(log) {
   return new Proxy(target, { get: (t, k) => (k in t ? t[k] : () => {}), set: (t, k, v) => ((t[k] = v), true) });
 }
 
+/** Freeze the fake clock BEFORE creating server data in a test (boot() does it too if you have not). */
+function initTime(t, now) {
+  if (t.__timers) return;
+  t.__timers = true;
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: now || DEFAULT_NOW });
+}
+
 /**
  * opts: { enter, storage, privacy:{state, refuse, scope, refuseScope, markerRefuse, settingTo}, groupData, groupEnterFail,
  *         mockServer, openid, population, launchDateKey, forceStub, subscribe, now, ad }
  */
 function boot(t, opts) {
   opts = opts || {};
-  if (!t.__timers) {
-    t.__timers = true;
-    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: opts.now || DEFAULT_NOW });
-  }
+  initTime(t, opts.now);
 
   const log = { text: [], calls: [], storageWrites: 0, cloudWrites: [], shares: [], ads: [], menu: [], console: [], subscribe: [], banners: [] };
   const storage = opts.storage || {};
@@ -48,7 +52,7 @@ function boot(t, opts) {
 
   global.requestAnimationFrame = (cb) => (raf = cb);
   const wx = {
-    __kdTest: { mockServer: server, openid: opts.openid, population: opts.population, launchDateKey: opts.launchDateKey, forceStub: opts.forceStub !== false },
+    __kdTest: { mockServer: server, openid: opts.openid, population: opts.population, launchDateKey: opts.launchDateKey, forceStub: opts.forceStub !== false, realRenderer: opts.realRenderer },
     getWindowInfo: () => ({ ...SCREEN, safeArea: { bottom: 778 }, platform: 'ios' }),
     getMenuButtonBoundingClientRect: () => CAPSULE,
     createCanvas: () => ({ width: 0, height: 0, getContext: () => fakeContext(log), toTempFilePath: (o) => o.success({ tempFilePath: 'tmp://card.png' }) }),
@@ -246,4 +250,4 @@ async function playDaily(g, positions) {
   }
 }
 
-module.exports = { boot, playDaily, SCREEN, CAPSULE, DEFAULT_NOW };
+module.exports = { boot, initTime, playDaily, SCREEN, CAPSULE, DEFAULT_NOW };

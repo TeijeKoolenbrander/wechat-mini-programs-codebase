@@ -354,7 +354,7 @@ module.exports = function createRound(c) {
     const d = s.data || {};
     const late = !!(d.myGuess && d.myGuess.late);
     let markers;
-    let reveal = s.reveal;
+    let reveal = s.status === 'revealed' ? s.reveal : null; // nothing shows before 先猜再看 / 直接看答案
     if (reveal) markers = reveal.markers;
     const phase = s.status === 'open' || s.lateMode ? (s.needle === null && s.phase !== 'submitting' ? 'empty' : s.phase) : s.phase;
     return V.roundVm(

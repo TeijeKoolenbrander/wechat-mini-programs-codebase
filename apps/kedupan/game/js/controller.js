@@ -99,7 +99,7 @@ function createController(deps) {
 
   c.back = () => {
     const prev = c.stack.pop();
-    if (!prev || prev === 'card' || prev === 'result' || prev === 'create') return c.goHome();
+    if (!prev || prev === 'card' || prev === 'create') return c.goHome();
     c.screen = prev;
     if (prev === 'home') c.flows.home.onEnter();
     invalidate();

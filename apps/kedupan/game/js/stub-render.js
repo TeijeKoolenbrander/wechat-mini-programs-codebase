@@ -288,7 +288,7 @@ const drawers = {
     p.text(vm.notice);
     p.text(vm.trend.map((t) => (t.value === null ? '—' : t.value)).join(' '));
     vm.rounds.forEach((r) => p.button('group:round:' + r.roundId, r.title + ' ' + (r.mqText || '') + ' ' + r.statusText));
-    if (vm.state === 'ready' || vm.state === 'small') p.hits.push({ id: 'board:list', x: p.L.odcRect.x, y: p.L.odcRect.y, w: p.L.odcRect.w, h: p.L.odcRect.h });
+    if (vm.state === 'ready' || vm.state === 'small') p.hits.unshift({ id: 'board:list', x: p.L.odcRect.x, y: p.L.odcRect.y, w: p.L.odcRect.w, h: p.L.odcRect.h });
     if (vm.state === 'serverError') p.button('group:retry', '重试');
     if (vm.state === 'empty' || vm.state === 'notPlayed') p.button('group:play', '去答题');
     if (vm.state === 'privacyDenied') {
@@ -303,7 +303,7 @@ const drawers = {
     p.text(vm.title + ' 第 ' + vm.issueNo + ' 期');
     p.text(vm.stateText);
     p.text(vm.selfText);
-    if (vm.state === 'ready') p.hits.push({ id: 'board:list', x: p.L.odcRect.x, y: p.L.odcRect.y, w: p.L.odcRect.w, h: p.L.odcRect.h });
+    if (vm.state === 'ready') p.hits.unshift({ id: 'board:list', x: p.L.odcRect.x, y: p.L.odcRect.y, w: p.L.odcRect.w, h: p.L.odcRect.h });
     if (vm.state === 'serverError') p.button('friend:retry', '重试');
     if (vm.state === 'empty') p.button('friend:play', '去答题');
     if (vm.state === 'privacyDenied') {

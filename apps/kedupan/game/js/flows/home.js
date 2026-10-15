@@ -81,6 +81,8 @@ module.exports = function createHome(c) {
 
   h.onEnter = function () {
     h.sheet = null;
+    // the server day moved on while we were on another screen
+    if (S.daily && c.todayKey() !== S.daily.dateKey) h.refreshDaily();
   };
 
   h.onShow = function () {
