@@ -33,25 +33,29 @@ async function purge(col, cond, deadline) {
   return total;
 }
 
-/** Delete the storage objects referenced by old docs, 50 per call, then the docs themselves. */
+/**
+ * Docs that reference a storage object carry `hasFile: true`. Delete the objects (50 per call), then
+ * the doc, only when the object is gone: a storage error keeps the doc (and its reference) for the
+ * next night instead of orphaning a file.
+ */
 async function purgeWithFiles(col, cond, deadline) {
-  const _ = store._();
   let files = 0;
   while (now() < deadline) {
-    const r = await store.db().collection(col).where({ ...cond, fileID: _.neq(null) }).limit(50).get();
+    const r = await store.db().collection(col).where({ ...cond, hasFile: true }).limit(50).get();
     if (!r.data.length) break;
-    const res = await store.sdk().deleteFile({ fileList: r.data.map((d) => d.fileID) });
+    const withId = r.data.filter((d) => d.fileID);
+    const res = withId.length ? await store.sdk().deleteFile({ fileList: withId.map((d) => d.fileID) }) : { fileList: [] };
     const status = new Map((res.fileList || []).map((f) => [f.fileID, f]));
     let removed = 0;
     for (const d of r.data) {
-      const f = status.get(d.fileID);
-      const ok = !f || f.status === 0 || /not exist|not found|-502002|STORAGE_FILE_NONEXIST/i.test(f.errMsg || '');
+      const f = d.fileID ? status.get(d.fileID) : null;
+      const ok = !d.fileID || !f || f.status === 0 || /not exist|not found|-502002|STORAGE_FILE_NONEXIST/i.test(f.errMsg || '');
       if (!ok) continue;
-      await store.db().collection(col).doc(d._id).update({ data: { fileID: null } }); // keep the doc until the bulk remove below
+      await store.db().collection(col).doc(d._id).remove();
       removed += 1;
     }
     files += removed;
-    if (removed === 0) break; // storage errors: leave for tomorrow rather than orphan files
+    if (removed === 0) break; // storage errors: leave for tomorrow
   }
   return files;
 }
@@ -67,8 +71,12 @@ exports.main = store.handler(async (event, { startedAt }) => {
   const filesDeleted = {};
   for (const t of TARGETS) {
     const cond = { [t.field]: _.lt(cutoffMs) };
-    if (t.files) filesDeleted[t.col] = await purgeWithFiles(t.col, cond, deadline);
-    removed[t.col] = await purge(t.col, cond, deadline);
+    if (t.files) {
+      filesDeleted[t.col] = await purgeWithFiles(t.col, cond, deadline);
+      removed[t.col] = filesDeleted[t.col] + await purge(t.col, { ...cond, hasFile: _.neq(true) }, deadline);
+    } else {
+      removed[t.col] = await purge(t.col, cond, deadline);
+    }
   }
   removed.abandoned = await purge('chains', { state: 'abandoned', lastActivityAt: _.lt(nowMs - DAY_MS) }, deadline);
   removed.group_members = await purge('group_members', { lastSeen: _.lt(cutoffKey) }, deadline);

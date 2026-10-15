@@ -123,7 +123,7 @@ async function ensurePng(step) {
   const up = await store.sdk().uploadFile({ cloudPath: pngPathFor(step), fileContent: png });
   if (!up || !up.fileID) throw new Error('uploadFile returned no fileID');
   step.fileID = up.fileID;
-  await store.db().collection('steps').doc(step._id).update({ data: { fileID: up.fileID } });
+  await store.db().collection('steps').doc(step._id).update({ data: { fileID: up.fileID, hasFile: true } });
   return up.fileID;
 }
 
@@ -263,7 +263,7 @@ async function resolveVerdict({ traceId, suggest, label, source = 'api' }) {
     const pc = lifecycle.makePlayerCache(t, nowMs);
     const k = (step.mod.traceIds || []).indexOf(traceId) + 1;
     await t.collection('mod_log').add({
-      data: { _id: `${step._id}_${k}`, stepId: step._id, author: step.author, kind: 'image', fileID: step.fileID || null, suggest, label: label === undefined ? null : label, source, ts: nowMs },
+      data: { _id: `${step._id}_${k}`, stepId: step._id, author: step.author, kind: 'image', fileID: step.fileID || null, hasFile: !!step.fileID, suggest, label: label === undefined ? null : label, source, ts: nowMs },
     }).catch((e) => { if (!store.isDup(e)) throw e; });
     if (step.state !== 'pending') {
       outcome.ignored = 'late';
