@@ -65,12 +65,15 @@ function draw(ctx, vm, L) {
   const titleY = L.navBottom + L.u(18);
   let tw = L.contentW;
   let pw = 0;
-  if (vm.variantLabel) {
+  if (vm.variantLabel && large) {
+    // large text: the badge sits in the back-button row (left of the capsule), the title keeps the full width
+    W.pill(ctx, L, L.x0 + L.back.w + L.u(8), L.back.y + L.back.h / 2, vm.variantLabel, { size: T.FS.body });
+  } else if (vm.variantLabel) {
     pw = W.measure(ctx, vm.variantLabel, T.FS.body, 800, true) + L.u(16);
     tw = L.contentW - pw - L.u(8);
   }
   W.text(ctx, titleOf(vm), L.x0, titleY, { size: large ? T.FS.bodyL : T.FS.bodyL + 2, weight: 800, serif: true, maxW: tw, minSize: T.FS.body });
-  if (vm.variantLabel) W.pill(ctx, L, L.x0 + L.contentW, titleY, vm.variantLabel, { size: T.FS.body, align: 'right' });
+  if (vm.variantLabel && !large) W.pill(ctx, L, L.x0 + L.contentW, titleY, vm.variantLabel, { size: T.FS.body, align: 'right' });
 
   const bannerOn = (vm.state === 'ready' || vm.state === 'empty') && vm.banner && vm.banner.show && vm.banner.reservedHeight > 0;
   const banner = bannerOn ? vm.banner : null;

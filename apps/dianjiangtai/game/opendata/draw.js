@@ -144,8 +144,8 @@ function drawBoard(ctx, model, opts) {
   const fs = large ? 1.25 : 1; // type scale
   ctx.clearRect(0, 0, W, H);
 
-  const footerH = (large ? 46 : 34) * u;
-  const rowH = (large ? 100 : 66) * u;
+  const footerH = (large ? 64 : 34) * u;
+  const rowH = (large ? 108 : 66) * u;
   const dividerH = (large ? 44 : 36) * u;
 
   if (opts.message) {
@@ -202,14 +202,22 @@ function drawBoard(ctx, model, opts) {
 
   // footer note
   const note = model.selfOnly ? '今日出征人数较多，好友战绩暂未校验' : '已出征 ' + model.ranked.length + ' 人 · 战绩经服务器校验';
-  if (large && W < 400) {
-    // two short lines instead of one shrunken line
-    const parts = note.split(' · ');
-    if (parts.length === 2) {
-      txt(ctx, parts[0] + ' · ' + parts[1], W / 2, H - footerH / 2, 20, 500, P.sub, 'center', false, W - 8, 20);
-    } else txt(ctx, note, W / 2, H - footerH / 2, 20, 500, P.sub, 'center', false, W - 8, 20);
+  if (large) {
+    // greedy two-line wrap at 20px instead of one shrunken or truncated line
+    ctx.font = font(20, 500, false);
+    const chars = Array.from(note);
+    const lines = [];
+    let line = '';
+    chars.forEach((ch) => {
+      if (line && ctx.measureText(line + ch).width > W - 8) {
+        lines.push(line);
+        line = ch;
+      } else line += ch;
+    });
+    if (line) lines.push(line);
+    lines.slice(0, 2).forEach((ln, i, arr) => txt(ctx, ln, W / 2, H - footerH / 2 + (i - (arr.length - 1) / 2) * 26, 20, 500, P.sub, 'center', false, W - 8, 20));
   } else {
-    txt(ctx, note, W / 2, H - footerH / 2, 16 * u * fs, 500, P.sub, 'center', false, W - 8, large ? 20 : 16);
+    txt(ctx, note, W / 2, H - footerH / 2, 16 * u * fs, 500, P.sub, 'center', false, W - 8, 16);
   }
   if (maxScroll > 0) {
     const bh = Math.max(24, listH * (listH / contentH));

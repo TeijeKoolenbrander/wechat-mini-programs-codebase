@@ -118,9 +118,12 @@ function wrap(ctx, str, maxW, size, weight, serif) {
       if (punctNoStart.indexOf(ch) >= 0 && line.length > 1) {
         // closing punctuation may not start a line: carry the last character down with it
         const chars = Array.from(line);
-        const last = chars.pop();
+        let carry = '';
+        // carry trailing no-start punctuation plus one ordinary character down with it
+        while (chars.length > 1 && punctNoStart.indexOf(chars[chars.length - 1]) >= 0) carry = chars.pop() + carry;
+        carry = chars.pop() + carry;
         lines.push(chars.join(''));
-        line = last + ch;
+        line = carry + ch;
         return;
       }
       lines.push(line);

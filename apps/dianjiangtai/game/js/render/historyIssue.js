@@ -144,7 +144,10 @@ function draw(ctx, vm, L) {
   if (mine) contentH += mine.lineup.reduce((a, e) => a + lineupRowH(L, e) + gap, 0);
   contentH += L.u(12);
   if (vm.stats) contentH += secH + vm.stats.bands.length * bandRowH(L) + L.u(12);
-  const bestHead = secH + (large ? L.u(34) : 0);
+  const bestTitle = '本期最佳阵容' + (vm.best ? ' ' + recordDash(vm.best.record) : '');
+  const noteStr = '首轮令牌，不换令';
+  const stackNote = large || W.measure(ctx, bestTitle, T.FS.bodyL, 800, true) + W.measure(ctx, noteStr, T.FS.body, 400, false) + L.u(16) > cw;
+  const bestHead = secH + (stackNote ? L.u(34) : 0);
   contentH += bestHead;
   if (vm.best) contentH += vm.best.lineup.reduce((a) => a + bestRowH(L) + gap, 0);
   else contentH += L.u(36);
@@ -172,10 +175,9 @@ function draw(ctx, vm, L) {
       });
       cy += L.u(12);
     }
-    const bestTitle = '本期最佳阵容' + (vm.best ? ' ' + recordDash(vm.best.record) : '');
     W.text(ctx, bestTitle, x, cy + secH / 2, { size: T.FS.bodyL, weight: 800, serif: true, maxW: cw });
-    if (large) W.text(ctx, '首轮令牌，不换令', x, cy + secH + L.u(14), { size: T.FS.body, color: C.sub, maxW: cw });
-    else if (vm.best) W.text(ctx, '首轮令牌，不换令', x + cw, cy + secH / 2, { size: T.FS.body, color: C.sub, align: 'right', maxW: cw * 0.4 });
+    if (stackNote) W.text(ctx, noteStr, x, cy + secH + L.u(14), { size: T.FS.body, color: C.sub, maxW: cw });
+    else if (vm.best) W.text(ctx, noteStr, x + cw, cy + secH / 2, { size: T.FS.body, color: C.sub, align: 'right' });
     cy += bestHead;
     if (vm.best) {
       vm.best.lineup.forEach((e) => {

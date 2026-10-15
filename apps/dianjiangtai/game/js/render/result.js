@@ -152,7 +152,7 @@ function drawReveal(ctx, vm, L, hits) {
   }
   W.text(ctx, '已战 ' + Math.min(n, battles.length) + ' / ' + battles.length, L.x0, areaBottom + L.u(22), { size: T.FS.bodyL, weight: 800, serif: true });
   if (T.isLarge()) W.text(ctx, '轻点任意处，直接看结果', L.x0, areaBottom + L.u(52), { size: T.FS.body, color: C.sub, maxW: L.contentW });
-  else W.text(ctx, '轻点任意处，直接看结果', L.x0 + L.contentW, areaBottom + L.u(22), { size: T.FS.body, color: C.sub, align: 'right', maxW: L.contentW * 0.55 });
+  else W.text(ctx, '轻点任意处，直接看结果', L.x0 + L.contentW, areaBottom + L.u(22), { size: T.FS.body, color: C.sub, align: 'right', maxW: L.contentW - L.u(100) });
   hits.add('result:skip', 0, L.navBottom, L.W, L.H - L.navBottom);
 }
 
@@ -189,7 +189,7 @@ function lineupRowH(L, e, vm, i) {
   const show = revealed(vm, i);
   const hasStats = !!e.stats || !!(vm.reveal && vm.reveal.pending);
   if (large) return L.u(8 + 48 + 8 + (hasStats ? 30 : 0) + 36 + 8);
-  return L.u(hasStats && show ? 64 : 60);
+  return L.u(hasStats ? 92 : 60);
 }
 
 /** Standard runs: five compact chips (seal, slot, name, score + fit icon). Large text and 识人 reveals use the taller rows. */
@@ -271,17 +271,20 @@ function drawLineupRow(ctx, L, x, y, w, e, vm, i) {
     W.text(ctx, scoreStr, x + L.u(12), ly + L.u(15), { size: T.FS.bodyL, weight: 800, color: show ? col : C.sub });
     if (show && e.fit) W.fitChip(ctx, x + L.u(70), ly + L.u(2), e.fit);
   } else {
-    const cy = statStr ? y + L.u(20) : y + h / 2 - L.u(9);
-    const rightW = L.u(72);
+    const cy = statStr ? y + L.u(21) : y + h / 2 - L.u(9);
+    const rightW = L.u(statStr ? 48 : 72);
     const maxW = x + w - rightW - tx - L.u(4);
     const sw = W.text(ctx, slot, tx, cy, { size: T.FS.body, color: C.sub, weight: 600 });
     const nw = W.text(ctx, e.name, tx + sw + L.u(6), cy, { size: T.FS.bodyL, weight: 800, serif: true, maxW: maxW - sw - L.u(6) - (show && e.tier ? L.u(26) : 0) });
     if (show && e.tier) W.tierBadge(ctx, tx + sw + L.u(6) + nw + L.u(4), cy - L.u(11), L.u(22), e.tier);
-    if (statStr) W.text(ctx, statStr, tx, y + L.u(43), { size: T.FS.body, color: C.sub, maxW: maxW + rightW - L.u(8), minSize: T.FS.body });
-    W.text(ctx, scoreStr, x + w - rightW / 2 - L.u(6), y + L.u(statStr ? 18 : 16), { size: T.FS.bodyL, weight: 800, color: show ? col : C.sub, align: 'center' });
+    if (statStr) W.text(ctx, statStr, tx, y + L.u(46), { size: T.FS.body, color: C.sub, maxW: x + w - tx - L.u(8), minSize: T.FS.body });
+    W.text(ctx, scoreStr, x + w - rightW / 2 - L.u(6), y + L.u(statStr ? 21 : 16), { size: T.FS.bodyL, weight: 800, color: show ? col : C.sub, align: 'center' });
     if (show && e.fit) {
-      const cw2 = W.fitChipSize(ctx, e.fit).w;
-      W.fitChip(ctx, x + w - rightW / 2 - L.u(6) - cw2 / 2, y + h - L.u(32), e.fit);
+      if (statStr) W.fitChip(ctx, tx, y + h - L.u(32), e.fit);
+      else {
+        const cw2 = W.fitChipSize(ctx, e.fit).w;
+        W.fitChip(ctx, x + w - rightW / 2 - L.u(6) - cw2 / 2, y + h - L.u(32), e.fit);
+      }
     }
   }
   return h;
