@@ -35,11 +35,17 @@ async function updateCard(chain) {
     const cfg = await cfgLib.getConfig();
     if (!cfg.features.updatableCard) return;
     const closed = chain.state === 'revealed' || chain.state === 'removed' || chain.state === 'expired';
+    if (closed) {
+      // a closed card is frozen: never updated again (spec 9.4, AC 64)
+      const fresh = await store.getDoc('chains', chain._id);
+      if (fresh && fresh.activityClosed) return;
+    }
     await api().setUpdatableMsg({
       activityId: chain.activityId,
       targetState: closed ? 1 : 0,
       templateInfo: { parameterList: [{ name: 'member_count', value: String(chain.passed) }, { name: 'room_limit', value: '6' }] },
     });
+    if (closed) await store.db().collection('chains').doc(chain._id).update({ data: { activityClosed: true } });
     await store.writeEvent(null, 'share_update', { result: 'ok' });
   } catch (e) {
     await store.writeEvent(null, 'share_update', { result: 'fail', errCode: e && e.errCode });

@@ -72,6 +72,46 @@ async function completeChain(h, a, b, groupRef, o = {}) {
   return chainId;
 }
 
+let seedSeq = 0;
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+/**
+ * Insert a ready-made open chain: steps 1..passed already `passed`, authored by o.authors[0..].
+ * Bypasses the API on purpose (fast fixtures for lock races, expiry, caps).
+ */
+function seedChain(h, o) {
+  const chainLib = h.mod('common/chain.js');
+  seedSeq += 1;
+  const id = o.id || `SEED${B32[(seedSeq >> 5) & 31]}${B32[seedSeq & 31]}AAAA`;
+  const nowMs = o.nowMs || h.now();
+  const chain = chainLib.newChain({
+    id, starter: o.authors[0], openGId: o.openGId === undefined ? GROUP_A : o.openGId, groupRef: o.groupRef || null,
+    promptId: 'A01', promptText: '题目1号', custom: false, nowMs, dateKey: '20261103', claimId: 'CLAIMSEED000',
+  });
+  const passed = o.passed === undefined ? o.authors.length : o.passed;
+  chain.claim = null;
+  chain.state = passed ? 'open' : 'starting';
+  chain.passed = passed;
+  chain.nextStep = passed + 1;
+  chain.attempts = passed;
+  for (let n = 1; n <= passed; n++) {
+    const author = o.authors[n - 1];
+    const stepId = `${id}_${n}_1`;
+    chain.stepIds[n] = stepId;
+    chain.authors[n] = author;
+    chain.perPersonCount[author] = (chain.perPersonCount[author] || 0) + 1;
+    if (!chain.involved.includes(author)) chain.involved.push(author);
+    h.db.put('steps', {
+      _id: stepId, chainId: id, n, attempt: 1, kind: n % 2 ? 'draw' : 'describe', author, laughs: 0, state: 'passed', createdAt: nowMs, dateKey: '20261103',
+      ...(n % 2 ? { strokes: strokes(2 + n), fileID: null } : { text: `猜测${n}号` }), mod: { kind: n % 2 ? 'image' : 'text', suggest: 'pass', traceIds: [] },
+    });
+  }
+  const set = new Set([chain.starter, ...chain.authors.filter(Boolean)]);
+  chain.participants = [...set];
+  Object.assign(chain, o.patch || {});
+  h.db.put('chains', chain);
+  return id;
+}
+
 function allStrings(v, out = []) {
   if (typeof v === 'string') out.push(v);
   else if (Array.isArray(v)) v.forEach((x) => allStrings(x, out));
@@ -85,5 +125,5 @@ function allKeys(v, out = []) {
 }
 
 module.exports = {
-  PEOPLE, GROUP_A, GROUP_B, strokes, agree, join, player, create, claim, submit, sweep, startAndPassFirst, play, completeChain, allStrings, allKeys,
+  PEOPLE, GROUP_A, GROUP_B, seedChain, strokes, agree, join, player, create, claim, submit, sweep, startAndPassFirst, play, completeChain, allStrings, allKeys,
 };
