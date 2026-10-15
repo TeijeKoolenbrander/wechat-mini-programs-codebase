@@ -1,0 +1,9 @@
+{
+  "triggers": [
+    {
+      "name": "finalizeDayTimer",
+      "type": "timer",
+      "config": "0 40 0 * * * *"
+    }
+  ]
+}
