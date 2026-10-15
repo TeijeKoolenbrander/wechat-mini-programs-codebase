@@ -82,4 +82,10 @@ Unchanged by v1.
 
 ## Tuning (configVersion 2)
 
-TUNING_PLACEHOLDER
+`config 2` = `config 1` with three changes (`V2_TUNING` in `config.js`): the opponent `curve` shifted down by 0.05, `search.heavySets` 5000 (was 2000), and a new `freeRarity` table. Formula weights, role weights, morale constants, `tau` 0.7, `jitter` 0.35, event `pMin` 0.672 and the gate windows are unchanged. The 120-general roster, the pool cap and the 16 bonds moved the sensible-player 12-0 rate from 0.33% (config 1, 32 generals) to 0.28% (config 1 on content 2); the -0.05 shift centres it again.
+
+Measured with `tools/simstats.js` (two independent 100,000-seed runs, `tools/simstats-report-cv2.md` and `tools/simstats-run2-cv2.md`): sensible 12-0 0.33% / 0.39%, greedy 0.56% / 0.61%, naive 0.17% / 0.19%, random 0.00%, sensible median 7, 10-11 wins 8.9% / 9.1%, 0-1 wins 0.55% / 0.54%, events in 24% of runs, most frequent general in optimal lineups 刘备 at 34.5% (limit 60%).
+
+复盘 (spec 7.4, AC 75): with the pool cap a typical search has about 14,000 distinct (general, faction) sets (content 1: about 2,000), so the client only runs the search itself for token sets up to `search.heavySets` (5000, about 14% of free runs); the rest ask `getReplay` first. Search speed in node: p50 38 ms and p99 about 360 ms over all searches, up to about 1.2 s for the worst token sets (server side, limit 10 s); client-side (<= 5000 sets) p99 about 80 ms, max under 150 ms (sampled 4000).
+
+Daily gate for content 2: perfect play reaches 12-0 on about 2% of seeds, the strict gate accepts about 0.55% (about 180 candidates per seed); a 60-day bank takes a few minutes on 8 cores (`apps/dianjiangtai/seed-bank/README.md`).

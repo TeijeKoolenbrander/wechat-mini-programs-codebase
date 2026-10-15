@@ -129,7 +129,17 @@ const V2 = JSON.parse(JSON.stringify(V1));
 V2.configVersion = 2;
 V1.contentVersion = 1;
 V2.contentVersion = 2;
-const V2_TUNING = {};
+const V2_TUNING = {
+  // v1 curve shifted down by 0.05 (the only lever needed): the 120-general roster, the pool cap and the 16 bonds
+  // kept sensible 12-0 at 0.28% with configVersion 1's curve; -0.05 centres it on 0.33% and keeps naive < 0.2%.
+  curve: [7.36, 7.624, 7.887, 8.151, 8.415, 8.678, 8.942, 9.205, 9.469, 9.733, 9.996, 10.26],
+  // 复盘 (spec 7.4): the pool cap leaves about 14,000 distinct sets in a typical search (v1: about 2,000). Searches up to this
+  // many sets took p99 about 80 ms and at most about 150 ms in node (4000 sampled), which leaves room on a slower phone; larger
+  // ones are asked of getReplay first (the client falls back to its own search when the server fails).
+  search: { heavySets: 5000 },
+  // sensible-player cumulative shares (tools/simstats-report-cv2.md, run 1)
+  freeRarity: [1, 0.9993, 0.9945, 0.9784, 0.9402, 0.8665, 0.7494, 0.5875, 0.399, 0.2205, 0.0924, 0.0256, 0.0033],
+};
 Object.assign(V2, V2_TUNING);
 
 const CONFIGS = { 1: V1, 2: V2 };

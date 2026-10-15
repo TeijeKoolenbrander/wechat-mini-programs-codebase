@@ -11,14 +11,15 @@
  * generals of the cell in the round's seeded pool order, so a pool depends on
  * who was drafted in earlier rounds), times all 120 slot permutations,
  * scored with the exact simulator rules (events included; cohesion uses the
- * faction of the cell each general was drafted from). Tie-break: highest sum
- * of win chances (natural battle outcomes), then first found. Returns null
- * when no five distinct generals can be drafted from the tokens.
+ * faction of the cell each general was drafted from, which is the round's
+ * token faction whoever is picked). Tie-break: highest sum of win chances
+ * (natural battle outcomes), then first found. Returns null when no five
+ * distinct generals can be drafted from the tokens.
  *
  * Speed (all exact, none changes the answer):
  *  - picks are deduplicated by (general, drafted faction) SET: slot
  *    assignment is free, so a set reachable through several round orders is
- *    scored once;
+ *    scored once (numeric keys, no allocation per path);
  *  - per set, slots are filled depth-first and the 12 partial team-power
  *    sums are reused across permutations;
  *  - wins are decided by precomputed thresholds (no exp in the hot loop);
@@ -26,6 +27,9 @@
  *    per-battle upper bound cannot beat the best record (or the best
  *    tie-break) found so far. The bound never undercuts a reachable lineup,
  *    so the optimum is never skipped;
+ *  - inside a set, once the lord is placed (M is then exact) a partial
+ *    assignment is dropped when even the best remaining members of the open
+ *    slots cannot reach the best record;
  *  - a leaf is abandoned as soon as it has lost too many battles to tie the
  *    best record.
  *
@@ -55,34 +59,42 @@ function ordersFor(seed, content, finalTokens, cap, rounds) {
 }
 
 /**
- * All distinct (general, faction) sets draftable from the tokens, honouring the pool cap.
- * Returns [{g:[5 roster indexes ascending], f:[5 faction indexes aligned with g]}].
+ * Distinct (general, faction) sets as flat codes: 5 ascending codes per set, code = general * 8 + factionIndex.
  */
-function enumerateSets(content, finalTokens, cap, orders) {
-  // old two-argument form: cap 8, pool orders = roster order (a size estimate; pass orders for the exact sets)
-  if (cap === undefined) cap = 8;
-  if (!orders) orders = finalTokens.map((t) => content.cells[cellKey(t.faction, t.era)] || []);
+function enumerateCodes(content, finalTokens, cap, orders) {
   const facIdx = {};
   content.factions.forEach((f, i) => (facIdx[f.key] = i));
   const nR = content.generals.length;
   const seen = new Set();
-  const sets = [];
-  const pickG = [0, 0, 0, 0, 0];
-  const pickF = [0, 0, 0, 0, 0];
+  const out = [];
   const taken = new Uint8Array(nR);
+  const code = [0, 0, 0, 0, 0];
+  const buf = new Int32Array(NS);
   const tokF = finalTokens.map((t) => facIdx[t.faction]);
-  (function rec(r) {
-    if (r === NS) {
-      const idx = [0, 1, 2, 3, 4].sort((a, b) => pickG[a] - pickG[b]);
-      const g = idx.map((i) => pickG[i]);
-      const f = idx.map((i) => pickF[i]);
-      const k = g.map((x, i) => x * 8 + f[i]).join(',');
-      if (!seen.has(k)) {
-        seen.add(k);
-        sets.push({ g, f });
+  function leaf() {
+    // insertion sort of 5 codes (general-major, so ascending codes = ascending generals)
+    for (let i = 0; i < NS; i++) buf[i] = code[i];
+    for (let i = 1; i < NS; i++) {
+      const v = buf[i];
+      let j = i - 1;
+      while (j >= 0 && buf[j] > v) {
+        buf[j + 1] = buf[j];
+        j--;
       }
-      return;
+      buf[j + 1] = v;
     }
+    const c0 = buf[0];
+    const c1 = buf[1];
+    const c2 = buf[2];
+    const c3 = buf[3];
+    const c4 = buf[4];
+    const key = (((c0 * 1024 + c1) * 1024 + c2) * 1024 + c3) * 1024 + c4;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(c0, c1, c2, c3, c4);
+  }
+  (function rec(r) {
+    if (r === NS) return leaf();
     const order = orders[r];
     let n = 0;
     for (let i = 0; i < order.length && n < cap; i++) {
@@ -90,12 +102,33 @@ function enumerateSets(content, finalTokens, cap, orders) {
       if (taken[g]) continue;
       n++;
       taken[g] = 1;
-      pickG[r] = g;
-      pickF[r] = tokF[r];
+      code[r] = g * 8 + tokF[r];
       rec(r + 1);
       taken[g] = 0;
     }
   })(0);
+  return out;
+}
+
+/**
+ * All distinct (general, faction) sets draftable from the tokens, honouring the pool cap.
+ * Returns [{g:[5 roster indexes ascending], f:[5 faction indexes aligned with g]}].
+ */
+function enumerateSets(content, finalTokens, cap, orders) {
+  // old two-argument form: cap 8, pool orders = roster order (a size estimate; pass orders for the exact sets)
+  if (cap === undefined) cap = 8;
+  if (!orders) orders = finalTokens.map((t) => content.cells[cellKey(t.faction, t.era)] || []);
+  const flat = enumerateCodes(content, finalTokens, cap, orders);
+  const sets = [];
+  for (let i = 0; i < flat.length; i += 5) {
+    const g = [];
+    const f = [];
+    for (let j = 0; j < 5; j++) {
+      g.push(flat[i + j] >> 3);
+      f.push(flat[i + j] & 7);
+    }
+    sets.push({ g, f });
+  }
   return sets;
 }
 
@@ -114,8 +147,9 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
   const cap = config.poolCap;
 
   const orders = ordersFor(seed, content, finalTokens, cap, opts.rounds);
-  const rawSets = enumerateSets(content, finalTokens, cap, orders);
-  if (rawSets.length === 0) return null;
+  const flat = enumerateCodes(content, finalTokens, cap, orders);
+  const nSets = flat.length / 5;
+  if (nSets === 0) return null;
 
   // --- per-set constants and upper bounds ------------------------------------
   const nR = roster.length;
@@ -128,47 +162,54 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
     stratG[g] = roster[g].stats.zhi >= ev.stratagem.minZhi ? 1 : 0;
     unstG[g] = roster[g].stats.yong >= ev.unstoppable.yong ? 1 : 0;
   }
-  const bondIdx = content.bonds.map((b) => ({ members: b.members.map((id) => content.indexOf[id]), bonus: b.bonus === undefined ? m.perBond : b.bonus }));
+  // bonds per general; the faction of each pick is the round's token faction whoever is picked, so cohesion is
+  // the same for every set
+  const nBonds = content.bonds.length;
+  const bondsOf = roster.map(() => []);
+  const bondSize = new Int8Array(nBonds);
+  const bondBonusOf = new Float64Array(nBonds);
+  content.bonds.forEach((b, bi) => {
+    bondSize[bi] = b.members.length;
+    bondBonusOf[bi] = b.bonus === undefined ? m.perBond : b.bonus;
+    for (const id of b.members) bondsOf[content.indexOf[id]].push(bi);
+  });
+  const bondCnt = new Int8Array(nBonds);
   const facCount = new Int8Array(factionKeys.length);
+  let top = 0;
+  for (const t of finalTokens) {
+    const c = ++facCount[factionKeys.indexOf(t.faction)];
+    if (c > top) top = c;
+  }
+  const cohesion = top >= 5 ? m.cohesion5 : top >= 4 ? m.cohesion4 : 0;
 
-  const infos = [];
-  for (let si = 0; si < rawSets.length; si++) {
-    const set = rawSets[si].g;
-    const setF = rawSets[si].f;
+  const M0s = new Float64Array(nSets);
+  const gains = new Int8Array(nSets);
+  const plains = new Uint8Array(nSets);
+  const ubCounts = new Int8Array(nSets);
+  const ubMetrics = new Float64Array(nSets);
+  const maxRS = [0, 0, 0, 0, 0];
+  for (let si = 0; si < nSets; si++) {
+    const o = si * 5;
     let bondBonus = 0;
-    for (let bi = 0; bi < bondIdx.length; bi++) {
-      const mem = bondIdx[bi].members;
-      let all = true;
-      for (let k = 0; k < mem.length; k++) {
-        let found = false;
-        for (let j = 0; j < NS; j++) if (set[j] === mem[k]) found = true;
-        if (!found) {
-          all = false;
-          break;
-        }
-      }
-      if (all) bondBonus += bondIdx[bi].bonus;
-    }
-    facCount.fill(0);
-    let top = 0;
-    for (let j = 0; j < NS; j++) {
-      const c = ++facCount[setF[j]];
-      if (c > top) top = c;
-    }
-    const cohesion = top >= 5 ? m.cohesion5 : top >= 4 ? m.cohesion4 : 0;
-    const M0 = m.base + bondBonus + cohesion;
+    maxRS[0] = maxRS[1] = maxRS[2] = maxRS[3] = maxRS[4] = 0;
     let canWaver = false;
     let canStrat = 0;
     let canUnst = 0;
-    const maxRS = [0, 0, 0, 0, 0];
     for (let j = 0; j < NS; j++) {
-      const g = set[j];
+      const g = flat[o + j] >> 3;
+      const bl = bondsOf[g];
+      for (let k = 0; k < bl.length; k++) if (++bondCnt[bl[k]] === bondSize[bl[k]]) bondBonus += bondBonusOf[bl[k]];
       if (waverG[g]) canWaver = true;
       if (stratG[g]) canStrat = 1;
       if (unstG[g]) canUnst = 1;
       const row = rs[g];
       for (let s = 0; s < NS; s++) if (row[s] > maxRS[s]) maxRS[s] = row[s];
     }
+    for (let j = 0; j < NS; j++) {
+      const bl = bondsOf[flat[o + j] >> 3];
+      for (let k = 0; k < bl.length; k++) bondCnt[bl[k]] = 0;
+    }
+    const M0 = m.base + bondBonus + cohesion;
     const Mub = Math.min(m.cap, M0 + m.perLord * maxRS[0]);
     let ubCount = 0;
     let ubMetric = 0;
@@ -179,9 +220,15 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
       ubMetric += 1 / (1 + Math.exp(-(p - D[i]) / tau));
     }
     const gain = canStrat + canUnst;
-    infos.push({ set, setF, M0, canWaver, gain, plain: !canWaver && gain === 0, ubCount: ubCount + gain, ubMetric });
+    M0s[si] = M0;
+    gains[si] = gain;
+    plains[si] = !canWaver && gain === 0 ? 1 : 0;
+    ubCounts[si] = ubCount + gain;
+    ubMetrics[si] = ubMetric;
   }
-  infos.sort((a, b) => b.ubCount - a.ubCount || b.ubMetric - a.ubMetric);
+  const orderIdx = new Uint32Array(nSets);
+  for (let i = 0; i < nSets; i++) orderIdx[i] = i;
+  orderIdx.sort((a, b) => ubCounts[b] - ubCounts[a] || ubMetrics[b] - ubMetrics[a]);
 
   // --- search state ---------------------------------------------------------
   const T = [];
@@ -195,6 +242,9 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
   const used = [false, false, false, false, false];
   const assign = [0, 0, 0, 0, 0];
   const assignA = [0, 0, 0, 0, 0];
+  const mr = [0, 0, 0, 0, 0];
+  const set = [0, 0, 0, 0, 0];
+  const setF = [0, 0, 0, 0, 0];
 
   let bestCount = -1;
   let bestMetric = -Infinity;
@@ -202,21 +252,18 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
   const bestFac = [0, 0, 0, 0, 0];
   let evaluated = 0;
   let done = false;
-  let info = null;
-  let set = null;
-
-  function beats(count, metric) {
-    return count > bestCount || (count === bestCount && metric > bestMetric);
-  }
+  let M0 = 0;
+  let gain = 0;
+  let plain = true;
 
   function dfs(s) {
     if (done) return;
     if (s === NS) {
       evaluated++;
-      const M = Math.min(m.cap, info.M0 + m.perLord * S[0]);
+      const M = Math.min(m.cap, M0 + m.perLord * S[0]);
       const T5 = T[NS];
       // abandon the leaf once it has lost too many battles to tie the best record
-      const allowed = bestCount < 0 ? nb : nb - (bestCount - info.gain);
+      const allowed = bestCount < 0 ? nb : nb - (bestCount - gain);
       let losses = 0;
       for (let i = 0; i < nb; i++) {
         const p = M * T5[i];
@@ -228,7 +275,7 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
         }
       }
       let count = nb - losses;
-      if (!info.plain) {
+      if (!plain) {
         for (let k = 0; k < NS; k++) xin[k] = roster[assign[k]].stats.xin;
         applyEvents(scn, S, P, win, fin, xin, roster[assign[1]].stats.zhi, roster[assign[3]].stats.yong);
         count = 0;
@@ -245,12 +292,12 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
       } else {
         for (let i = 0; i < nb; i++) metric += 1 / (1 + Math.exp(-(P[i] - D[i]) / tau));
       }
-      if (beats(count, metric)) {
+      if (count > bestCount || (count === bestCount && metric > bestMetric)) {
         bestCount = count;
         bestMetric = metric;
         for (let k = 0; k < NS; k++) {
           bestAssign[k] = assign[k];
-          bestFac[k] = info.setF[assignA[k]];
+          bestFac[k] = setF[assignA[k]];
         }
         if (opts.stopAt12 && count === nb) done = true;
       }
@@ -268,27 +315,56 @@ function bestLineup(seed, contentVersion, finalTokens, opts) {
       S[s] = sc;
       const col = bwCol[s];
       for (let i = 0; i < nb; i++) cur[i] = prev[i] + col[i] * sc;
+      if (s + 1 < NS && bestCount >= 0) {
+        // branch-and-bound: M is exact once the lord is placed; the best the open slots can still add is bounded by
+        // the best remaining set member per slot. Events add at most `gain` wins. Never prunes a tie.
+        const Mx = Math.min(m.cap, M0 + m.perLord * S[0]);
+        for (let t = s + 1; t < NS; t++) {
+          let mx = 0;
+          for (let b = 0; b < NS; b++) {
+            if (!used[b]) {
+              const v = rs[set[b]][t];
+              if (v > mx) mx = v;
+            }
+          }
+          mr[t] = mx;
+        }
+        let cnt = gain;
+        for (let i = 0; i < nb; i++) {
+          let ub = cur[i];
+          for (let t = s + 1; t < NS; t++) ub += bwCol[t][i] * mr[t];
+          if (Mx * ub > need[i]) cnt++;
+        }
+        if (cnt < bestCount) {
+          used[a] = false;
+          continue;
+        }
+      }
       dfs(s + 1);
       used[a] = false;
       if (done) return;
     }
   }
 
-  for (let k = 0; k < infos.length && !done; k++) {
-    info = infos[k];
+  for (let k = 0; k < nSets && !done; k++) {
+    const si = orderIdx[k];
     // a set whose bound cannot beat the best record (or tie-break) is skipped
-    if (info.ubCount < bestCount) continue;
-    if (info.ubCount === bestCount) {
-      // sets are sorted by ubCount desc, so only the metric bound is left to check
-      if (info.ubMetric <= bestMetric) continue;
+    if (ubCounts[si] < bestCount) continue;
+    if (ubCounts[si] === bestCount && ubMetrics[si] <= bestMetric) continue; // sorted by ubCount desc: only the metric is left
+    const o = si * 5;
+    for (let j = 0; j < NS; j++) {
+      set[j] = flat[o + j] >> 3;
+      setF[j] = flat[o + j] & 7;
     }
-    set = info.set;
+    M0 = M0s[si];
+    gain = gains[si];
+    plain = plains[si] === 1;
     dfs(0);
   }
 
   const lineup = SLOTS.map((slot, k) => ({ slot, generalId: roster[bestAssign[k]].id, faction: factionKeys[bestFac[k]] }));
   const res = simulateScenario(scn, lineup);
-  return { lineup, record: res.record, evaluated, sets: rawSets.length };
+  return { lineup, record: res.record, evaluated, sets: nSets };
 }
 
 module.exports = { bestLineup, enumerateSets, ordersFor };
