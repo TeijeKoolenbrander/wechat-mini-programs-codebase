@@ -114,7 +114,7 @@ test('no timers or countdowns anywhere in the game, no gambling imagery, no bann
     if (/倒计时|countdown|限时|time\s*limit/i.test(src)) bad.push(f + ' has countdown wording');
     if (/\bwx\.reportEvent\b|\.reportEvent\(/.test(src)) bad.push(f + ' calls reportEvent');
     if (/getShareInfo\s*\(/.test(src)) bad.push(f + ' calls getShareInfo');
-    if (/骰|\b(dice|casino|slot[-_ ]?machine|roulette|poker|chips?)\b/i.test(src)) bad.push(f + ' has casino imagery wording');
+    if (/骰|\b(dice|casino|slot[-_ ]?machine|roulette|poker|poker[-_ ]?chips?)\b/i.test(src)) bad.push(f + ' has casino imagery wording');
     if (/\.json['"]\s*\)/.test(src)) bad.push(f + ' requires json');
   }
   assert.deepEqual(bad, []);

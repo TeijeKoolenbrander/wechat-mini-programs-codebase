@@ -219,6 +219,8 @@ test('issuing a challenge: query carries the id only, share grants nothing, own-
   const mock = createMockServer({ now: () => Date.now() });
   const g = await startUp(t, { mockServer: mock });
   await closeHowto(g);
+  const realCard = g.app.share.cardRenderer;
+  g.app.share.cardRenderer = null; // simulate a card renderer that is missing
   g.tapId('home:free');
   await rights(g, 3);
   await miss(g);
@@ -232,6 +234,7 @@ test('issuing a challenge: query carries the id only, share grants nothing, own-
   assert.ok(/^c=[0-9A-Z]{8}$/.test(s.query), s.query);
   assert.strictEqual(s.title, '同一套题，我连对 3，你来试试？');
   assert.strictEqual(s.imageUrl, 'assets/share-fallback.png', 'the static image when no card renderer exists');
+  assert.ok(typeof realCard === 'function', 'the real renderer provides the share card');
   assert.strictEqual(count(g, 'challenge_created'), 1);
   assert.strictEqual(count(g, 'share_tap'), 1);
   const id = s.query.slice(2);
@@ -572,12 +575,15 @@ test('save image and subscribe offers appear only after their taps and degrade w
   await g.settle();
   assert.ok(!g.log.calls.some((c) => /saveImage|requestSubscribe/.test(c)), 'nothing album-related before the tap');
   assert.strictEqual(g.view().vm.subscribe.state, 'hidden');
-  // no card renderer (stub): saving reports an error and grants nothing
+  // no card renderer: saving reports an error and grants nothing
+  const realCard = g.app.share.cardRenderer;
+  g.app.share.cardRenderer = null;
   g.tapId('result:save');
   await g.settle();
   assert.strictEqual(g.view().vm.saveImage.state, 'error');
   assert.ok(!g.log.calls.some((c) => /saveImage/.test(c)));
   // with a renderer the card is saved
+  assert.ok(typeof realCard === 'function');
   g.app.share.cardRenderer = (card, scale) => Promise.resolve('tmp://card@' + scale + '.png');
   g.tapId('result:save');
   await g.settle();

@@ -8,7 +8,7 @@
  *
  * Hit ids: home:daily (开始 / 继续 / 查看结果, logic decides by daily.state),
  *   home:retry, home:free, home:category, home:groupBoard, home:friendBoard,
- *   home:history, home:howto, home:sound, home:settings, home:groupBanner,
+ *   home:freeResume (only when vm.free.resumeText), home:history, home:howto, home:sound, home:settings, home:groupBanner,
  *   home:scroll (large text overflow only).
  */
 
@@ -154,7 +154,8 @@ function draw(ctx, vm, L) {
   const cardH = dailyCardH(ctx, L, d, cw);
   const freeH = L.btnH2;
   const bestText = vm.free && vm.free.bestText;
-  const bestH = bestText ? L.u(26) * k : 0;
+  const resumeText = vm.free && vm.free.resumeText;
+  const bestH = resumeText ? Math.max(T.MIN_TAP, L.u(26) * k) : bestText ? L.u(26) * k : 0;
   const rowH = L.u(48) * (L.large ? 1.25 : 1);
   const footH = L.u(48) * (L.large ? 1.25 : 1);
   const fixedH = (showBanner ? bannerH + gap : 0) + cardH + gap + freeH + bestH + gap + rowH + L.u(4) + footH;
@@ -198,7 +199,16 @@ function draw(ctx, vm, L) {
   W.button(ctx, L, hits, { id: 'home:category', x: catX, y, w: catW, h: freeH, label: catLabel, size: T.FS.body, kind: 'ghost' });
   W.iconTri(ctx, catX + catW - L.u(16), y + freeH / 2, L.u(9), C.ink, 'down');
   y += freeH;
-  if (bestText) {
+  if (resumeText) {
+    // a text link under 随便比比: pick up the run that was left half way
+    const used = W.text(ctx, resumeText, L.cx, y + bestH / 2, { size: T.FS.body, weight: 700, color: C.seal, align: 'center', maxW: cw });
+    ctx.fillStyle = C.seal;
+    ctx.globalAlpha = 0.55;
+    ctx.fillRect(L.cx - used / 2, y + bestH / 2 + T.FS.body * 0.6, used, 1);
+    ctx.globalAlpha = 1;
+    hits.add('home:freeResume', x, y, cw, bestH);
+    y += bestH;
+  } else if (bestText) {
     W.text(ctx, bestText, L.cx, y + bestH / 2 + L.u(2), { size: T.FS.body, color: C.sub, align: 'center', maxW: cw });
     y += bestH;
   }
