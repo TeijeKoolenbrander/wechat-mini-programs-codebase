@@ -244,7 +244,7 @@ function main() {
     process.exit(1);
   }
   if (argv.indexOf('--check') >= 0) {
-    const onDisk = fs.existsSync(OUT_FREE) ? fs.readFileSync(OUT_FREE, 'utf8') : '';
+    const onDisk = fs.existsSync(OUT_FREE) ? fs.readFileSync(OUT_FREE, 'utf8').split(String.fromCharCode(13)).join('') : '';
     if (onDisk !== r.freeText) {
       console.error('drift: core/content/facts.free.js is out of date, run tools/build-content.js');
       process.exit(1);

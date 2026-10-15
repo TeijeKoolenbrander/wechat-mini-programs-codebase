@@ -97,6 +97,8 @@ function partition(rng, total, lo, hi) {
 /** Search budget (nodes) for one segment: a depth-first search with backtracking, so a tight pool still chains. */
 const SEGMENT_BUDGET = 600;
 const TOP_TRIES = 6;
+/** The first (all gaps in band) pass of a free deck gives up sooner, so a phone never stalls on starting a run. */
+const STRICT_BUDGET = 300;
 
 /**
  * Build one segment (a chain of `len` questions of measure m starting at
@@ -104,7 +106,7 @@ const TOP_TRIES = 6;
  * `S.lastPos` (free: fact id -> last question position) or `S.used` (daily).
  * Depth-first with a node budget, so dead ends back up instead of failing the deck.
  */
-function buildSegment(S, m, len, k0, segIdx, relax) {
+function buildSegment(S, m, len, k0, segIdx, relax, strict) {
   const config = S.config;
   const facts = S.byMeasure[m.key];
   const free = S.kind === 'free';
@@ -130,7 +132,7 @@ function buildSegment(S, m, len, k0, segIdx, relax) {
       if (!pairLegal(config, a, b, S)) continue;
       const d = bandDistance(m, gapOf(m, a, b), bandRange(config, m, k, a, b));
       if (d === 0) inBand.push(b);
-      else if (free) outBand.push({ b, d });
+      else if (free && !strict) outBand.push({ b, d });
     }
     if (inBand.length) return shuffle(S.rng, inBand);
     if (!outBand.length) return [];
@@ -147,7 +149,7 @@ function buildSegment(S, m, len, k0, segIdx, relax) {
     local = {};
     local[tops[t].id] = k0;
     const path = [];
-    let budget = SEGMENT_BUDGET;
+    let budget = strict ? STRICT_BUDGET : SEGMENT_BUDGET;
     const dfs = (a, i) => {
       if (i === len) return true;
       if (--budget < 0) return false;
@@ -206,10 +208,10 @@ function buildFreeDeck(seed, contentVersion, configVersion, group, source) {
     let order = shuffle(rng, measures.slice());
     if (order.length > 1 && prev) order = order.filter((x) => x !== prev).concat([prev]);
     let seg = null;
-    for (let pass = 0; pass < 2 && !seg; pass++) {
+    // pass 0: every gap inside its band; pass 1: nearest legal gap; pass 2: also allow nearby repeats
+    for (let pass = 0; pass < 3 && !seg; pass++) {
       for (let oi = 0; oi < order.length && !seg; oi++) {
-        const m = BY_KEY[order[oi]];
-        seg = buildSegment(S, m, lens[si], k, si, pass === 1);
+        seg = buildSegment(S, BY_KEY[order[oi]], lens[si], k, si, pass === 2, pass === 0);
       }
     }
     if (!seg) {
