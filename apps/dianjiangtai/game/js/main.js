@@ -10,6 +10,8 @@ const { createAnalytics } = require('./analytics');
 const { createAds } = require('./ads');
 const { createShare } = require('./share');
 const { createPrivacy } = require('./privacy');
+const { createSubscribe } = require('./subscribe');
+const { createAlbum } = require('./album');
 const { createOdc } = require('./odc');
 const { createAudio } = require('./audio');
 const { createController } = require('./controller');
@@ -47,9 +49,11 @@ function boot() {
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
 
+  // display settings (spec 8.10) travel to the renderer in the layout info as well as in every vm
+  let displayNow = () => ({ largeText: false, highContrast: false, scale: 1, palette: 'standard' });
   const sys = () => {
     const w = windowInfo();
-    return { windowWidth: w.windowWidth, windowHeight: w.windowHeight, pixelRatio: w.pixelRatio || 1, statusBarHeight: w.statusBarHeight, safeArea: w.safeArea, menuRect: menuRect() };
+    return { windowWidth: w.windowWidth, windowHeight: w.windowHeight, pixelRatio: w.pixelRatio || 1, statusBarHeight: w.statusBarHeight, safeArea: w.safeArea, menuRect: menuRect(), display: displayNow() };
   };
   let layout = R.makeLayout(sys());
 
@@ -67,15 +71,22 @@ function boot() {
   const ads = createAds({ wx, config, store, analytics, adUnits: build.adUnits, stub: { enabled: build.stubAds }, onChange: invalidate });
   const share = createShare({ wx, api, analytics });
   const privacy = createPrivacy({ wx, store, analytics });
+  const subscribe = createSubscribe({ wx, api, store, analytics });
+  const album = createAlbum({ wx, share, analytics });
+  displayNow = () => {
+    const d = store.state.display || {};
+    return { largeText: !!d.largeText, highContrast: !!d.highContrast, scale: d.largeText ? 1.25 : 1, palette: d.highContrast ? 'highContrast' : 'standard' };
+  };
   const odc = createOdc(wx);
   const audio = createAudio(wx, store.state.muted);
 
   if (R.shareCard) {
-    share.cardRenderer = (card) =>
+    // always the standard look, whatever the display mode: one consistent card for a group (spec 8.10)
+    share.cardRenderer = (card, opts) =>
       new Promise((resolve) => {
         try {
           const cv = wx.createCanvas();
-          R.shareCard.render(cv, card, { pixelScale: 1 });
+          R.shareCard.render(cv, card, { pixelScale: (opts && opts.pixelScale) || 1 });
           cv.toTempFilePath({ success: (r) => resolve(r.tempFilePath), fail: () => resolve(null) });
         } catch (e) {
           resolve(null);
@@ -83,7 +94,13 @@ function boot() {
       });
   }
 
-  const ctl = createController({ wx, api, store, analytics, ads, share, privacy, odc, audio, config, content, invalidate, getLayout: () => layout });
+  const ctl = createController({
+    wx, api, store, analytics, ads, share, privacy, odc, audio, config, content, invalidate, subscribe, album, build,
+    getLayout: () => layout,
+    relayout: () => {
+      layout = R.makeLayout(sys());
+    },
+  });
   const app = { ctl, api, ads, analytics, share, privacy, odc, store, renderer: R, invalidate, get layout() { return layout; }, get hits() { return hits; } };
 
   // --- frame loop ---

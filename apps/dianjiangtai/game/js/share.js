@@ -20,7 +20,8 @@ const { recordDigits } = require('./util');
 
 const FALLBACK_IMAGE = 'assets/share-fallback.png';
 
-function dailyTitle(record) {
+function dailyTitle(record, variant) {
+  if (variant === 'shiren') return '识人军令，我 ' + recordDigits(record) + '，你认得几员将？';
   return '我今日 ' + recordDigits(record) + '，同一手令牌，你敢来吗？';
 }
 
@@ -81,21 +82,27 @@ function createShare(opts) {
   const share = { cardRenderer: null, FALLBACK_IMAGE };
   let ctxGetter = null;
 
-  async function cardImage(card) {
+  /** Render the card to a temp file. opts.pixelScale 2 -> 1000 x 800 (save to album, 8.12). Resolves { path, fallback }. */
+  async function cardFile(card, opts) {
     if (share.cardRenderer) {
       try {
-        const p = await share.cardRenderer(card);
-        if (p) return p;
+        const p = await share.cardRenderer(card, opts);
+        if (p) return { path: p, fallback: false };
       } catch (e) {
         analytics.track('error', { where: 'share_card', code: 'render' });
       }
     }
-    return FALLBACK_IMAGE;
+    return { path: FALLBACK_IMAGE, fallback: true };
+  }
+  share.cardFile = cardFile;
+
+  async function cardImage(card) {
+    return (await cardFile(card)).path;
   }
 
   function titleFor(r, kind) {
     if (kind === 'challenge') return challengeTitle(r.record);
-    if (r.mode === 'daily') return dailyTitle(r.record);
+    if (r.mode === 'daily') return dailyTitle(r.record, r.variant);
     return freeTitle(r.record, r.shareNames);
   }
 

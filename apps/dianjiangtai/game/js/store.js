@@ -24,6 +24,9 @@ function fresh() {
     interstitial: { day: '', count: 0, lastAt: 0 },
     privacy: { privacy: 'unknown', friendScope: 'unknown', markerPending: [] },
     markerKeys: [], // dateKeys written to cloud storage (to remove after 7 days)
+    display: null, // { largeText, highContrast }; null until the first launch decides (spec 8.10)
+    shirenCoachSeen: false,
+    subscribe: { banned: false, granted: {}, declined: {} }, // spec 8.13, local flags only
   };
 }
 
@@ -34,6 +37,7 @@ function createStore(wx) {
     if (raw) {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
       if (parsed && parsed.v === 1) state = Object.assign(fresh(), parsed);
+      if (!state.subscribe || !state.subscribe.granted) state.subscribe = fresh().subscribe;
     }
   } catch (e) {
     state = fresh();

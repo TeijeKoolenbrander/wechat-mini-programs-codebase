@@ -149,8 +149,8 @@ test('daily: offline at the end saves the lineup as pendingSubmit and retries', 
   const g = await startUp(t);
   g.tapId('sheet:close');
   g.tapId('home:daily');
-  g.app.api.mock.offline = true;
-  await playDraft(g);
+  // the tokens arrive round by round, so the network can only drop after the last 翻令
+  await playDraft(g, { beforeMarch: () => (g.app.api.mock.offline = true) });
   await g.settle();
   let v = g.app.ctl.view();
   assert.strictEqual(v.vm.status, 'pendingSubmit');
@@ -168,13 +168,15 @@ test('daily: in-progress run survives relaunch at the same round with the same t
   g.tapId('sheet:close');
   g.tapId('home:daily');
   g.tapId('primary');
+  await g.settle(); // startRun delivers round 1
   g.wait(1300);
   g.tapId((h) => h.id.indexOf('pool:') === 0 && h.id !== 'pool:list');
   g.tapId((h) => h.id.indexOf('slot:') === 0);
   g.wait(400);
   g.tapId('primary'); // next round
   g.wait(400);
-  g.tapId('primary'); // flip round 2
+  g.tapId('primary'); // flip round 2: getRound
+  await g.settle();
   g.wait(1300);
   const tokens = g.app.ctl.view().vm.tokens;
   const round = g.app.ctl.view().vm.round;
@@ -207,6 +209,7 @@ test('leaving a started daily keeps progress; leaving a started free run asks fi
   assert.strictEqual(count(g, 'run_abandon'), 1);
   g.tapId('home:daily');
   g.tapId('primary');
+  await g.settle();
   g.wait(1300);
   g.tapId('back');
   o = g.app.ctl.view().overlay;
@@ -409,9 +412,10 @@ test('daily and challenge never offer ad re-spins (AC 9)', async (t) => {
   g.tapId('sheet:close');
   g.tapId('home:daily');
   g.tapId('primary');
+  await g.settle();
   g.wait(1300);
-  g.tapId('respin:faction');
-  g.tapId('respin:era');
+  if (g.has('respin:faction')) g.tapId('respin:faction'); // a re-spin may be unavailable on this token set
+  if (g.has('respin:era')) g.tapId('respin:era');
   const v = g.app.ctl.view().vm;
   assert.strictEqual(v.respin.adAllowed, false);
   assert.ok(!g.has('respinAd:faction'));

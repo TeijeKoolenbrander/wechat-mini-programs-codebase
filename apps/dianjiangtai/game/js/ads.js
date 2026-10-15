@@ -22,6 +22,7 @@
  */
 
 const { beijingDateKey } = require('../core/date');
+const { interstitialDefaults } = require('./features');
 
 function createAds(opts) {
   const { config, store, analytics } = opts;
@@ -179,19 +180,29 @@ function createAds(opts) {
 
   // ---------------- interstitial ----------------
 
+  let remoteInterstitial = null;
+  /** Remote caps (spec 12, already clamped by features.js). null -> core defaults. */
+  ads.setInterstitialConfig = function (cfg) {
+    remoteInterstitial = cfg || null;
+  };
+  ads.interstitialConfig = function () {
+    return remoteInterstitial || interstitialDefaults(config);
+  };
+
   /**
    * Is an interstitial due on 再来一局? ctx = { mode, sessionFreeRuns, lifetimeRuns }
    * (sessionFreeRuns counts the run that just completed). Pure.
    */
   ads.interstitialDue = function (ctx) {
-    const c = config.ads.interstitial;
+    const c = ads.interstitialConfig();
+    if (!c.enabled) return false;
     if (!ctx || ctx.mode !== 'free') return false;
     if (ctx.lifetimeRuns < c.minLifetimeRuns) return false;
-    if (ctx.sessionFreeRuns <= 0 || ctx.sessionFreeRuns % c.everyNthRun !== 0) return false;
+    if (ctx.sessionFreeRuns <= 0 || ctx.sessionFreeRuns % c.everyNRuns !== 0) return false;
     const st = store.state.interstitial;
     const today = beijingDateKey(now());
     if (st.day === today && st.count >= c.maxPerDay) return false;
-    if (st.lastAt && now() - st.lastAt < c.minGapMs) return false;
+    if (st.lastAt && now() - st.lastAt < c.minGapSec * 1000) return false;
     return true;
   };
 
@@ -242,6 +253,66 @@ function createAds(opts) {
     } catch (e) {
       return Promise.resolve(reject(2004));
     }
+  };
+
+  // ---------------- banner (v1, spec 12, PO-14) ----------------
+  // Board footer only, behind remote config (default off). Errors are silent (ad_error, placement banner).
+  // In stub mode nothing is created: the board view model asks the renderer for a grey test bar instead.
+
+  let bannerAd = null;
+  let bannerInfo = null; // { unitId, left, width, bottomEdge }
+  ads.bannerHeight = 0;
+  ads.bannerActive = false;
+
+  function placeBanner() {
+    if (!bannerAd || !bannerInfo) return;
+    const h = ads.bannerHeight || Math.round(bannerInfo.width * 0.29);
+    bannerAd.style = bannerAd.style || {};
+    bannerAd.style.left = bannerInfo.left;
+    bannerAd.style.top = bannerInfo.bottomEdge - h - 8;
+    bannerAd.style.width = bannerInfo.width;
+  }
+
+  /** info = { unitId, left, width, bottomEdge }. No-op in stub mode or when the platform has no banner API. */
+  ads.bannerShow = function (info) {
+    if (stub || !wx || !wx.createBannerAd || !info || !info.unitId) return false;
+    bannerInfo = info;
+    try {
+      if (!bannerAd) {
+        log('ad_request', { placement: 'banner', stub });
+        bannerAd = wx.createBannerAd({ adUnitId: info.unitId, adIntervals: 30, style: { left: info.left, top: info.bottomEdge - 80, width: info.width } });
+        if (bannerAd.onError) bannerAd.onError((e) => log('ad_error', { placement: 'banner', stub, errCode: e && e.errCode }));
+        if (bannerAd.onLoad) bannerAd.onLoad(() => log('ad_show', { placement: 'banner', stub }));
+        if (bannerAd.onResize)
+          bannerAd.onResize((r) => {
+            if (r && r.height) ads.bannerHeight = r.height;
+            placeBanner();
+            invalidate();
+          });
+      }
+      placeBanner();
+      if (bannerAd.show) {
+        const p = bannerAd.show();
+        if (p && p.catch) p.catch((e) => log('ad_error', { placement: 'banner', stub, errCode: e && e.errCode }));
+      }
+      ads.bannerActive = true;
+      return true;
+    } catch (e) {
+      log('ad_error', { placement: 'banner', stub, errCode: e && e.errCode });
+      return false;
+    }
+  };
+  /** Hidden while a sheet, dialog or authorization flow is open. */
+  ads.bannerHide = function () {
+    if (bannerAd && bannerAd.hide) bannerAd.hide();
+    ads.bannerActive = false;
+  };
+  /** Destroyed when leaving the board. */
+  ads.bannerDestroy = function () {
+    if (bannerAd && bannerAd.destroy) bannerAd.destroy();
+    bannerAd = null;
+    bannerInfo = null;
+    ads.bannerActive = false;
   };
 
   return ads;

@@ -14,6 +14,9 @@ const EVENTS = [
   'reveal_skip', 'share_tap', 'challenge_created', 'challenge_answered', 'board_view', 'group_join', 'privacy_result',
   'friend_scope_result', 'ad_request', 'ad_show', 'ad_reward', 'ad_close_early', 'ad_error', 'interstitial_show',
   'board_write', 'error',
+  // v1
+  'round_fetch', 'shiren_reveal', 'streak_shown', 'history_view', 'history_issue_view', 'save_image',
+  'subscribe_offer', 'subscribe_result', 'display_setting',
 ];
 const FORBIDDEN_PROPS = ['openid', 'opengid', 'openGId', 'groupRef', 'groupid'];
 const MAX_QUEUE = 500;

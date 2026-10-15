@@ -60,32 +60,33 @@ test('api cloud mode: resolves ok results, never rejects, maps failures and time
   const p = api.submitRun({});
   timerCb();
   assert.strictEqual((await p).code, 'TIMEOUT');
-  assert.deepStrictEqual(api.NAMES.sort(), ['createChallenge', 'getBoard', 'getChallenge', 'getDaily', 'getReplay', 'joinGroup', 'startRun', 'submitRun', 'track']);
+  assert.deepStrictEqual(api.NAMES.sort(), ['createChallenge', 'getBoard', 'getChallenge', 'getDaily', 'getHistory', 'getReplay', 'getRound', 'joinGroup', 'startRun', 'submitRun', 'subscribeChallenge', 'track']);
 });
 
-test('api mock: the daily client gets rounds and no seed, no battle stream, no best lineup (AC 19)', async () => {
+test('api mock: the daily client gets status only, then one round at a time; never the seed, battles or best lineup (AC 19, 86)', async () => {
   const api = createApi({ mode: 'mock' });
   const d = await api.getDaily({});
-  assert.strictEqual(d.rounds.length, 5);
+  assert.strictEqual(d.rounds, undefined, 'getDaily carries no rounds');
   const s = JSON.stringify(d);
-  for (const k of ['seed', 'best', 'battle', 'lineup', 'salt']) assert.ok(s.indexOf('"' + k) < 0, k);
+  for (const k of ['seed', 'bestLineup', 'battle', 'lineup', 'salt', 'rounds']) assert.ok(s.indexOf('"' + k) < 0, k);
+  assert.ok(['standard', 'shiren'].includes(d.variant));
+  const st = await api.startRun({ mode: 'daily', clientRunId: 'a', dateKey: d.dateKey });
+  assert.strictEqual(st.rounds.length, 1, 'startRun returns round 1 only');
+  const again = await api.startRun({ mode: 'daily', clientRunId: 'a', dateKey: d.dateKey });
+  assert.strictEqual(again.resumed, true);
+  assert.deepStrictEqual(again.rounds, st.rounds);
+  // getRound refuses to run ahead: no picks yet -> not round 2
+  assert.strictEqual((await api.getRound({ clientRunId: 'a', dateKey: d.dateKey, actions: [] })).code, 'INVALID_ACTIONS');
   const d2 = await api.getDaily({});
-  assert.deepStrictEqual(d.rounds, d2.rounds);
   assert.strictEqual(d.issueNo, d2.issueNo);
 });
 
 test('api mock: one ranked daily result per date; duplicate submit is idempotent; rejects bad actions', async () => {
   const api = createApi({ mode: 'mock' });
   const d = await api.getDaily({});
-  const run = draft.createRun({ seed: 0, contentVersion: 1, mode: 'daily', rounds: d.rounds });
-  const content = run.content;
-  for (let r = 1; r <= 5; r++) {
-    if (r > 1) draft.nextRound(run);
-    draft.apply(run, { round: r, type: 'flip' });
-    const pool = draft.currentPool(run);
-    draft.apply(run, { round: r, type: 'pick', generalId: content.roster[pool[0]], slot: content.slots[r - 1] });
-  }
-  await api.startRun({ mode: 'daily', clientRunId: 'a', dateKey: d.dateKey });
+  const played = await require('./harness').driveProgressive(api, { clientRunId: 'a', dateKey: d.dateKey });
+  assert.ok(!played.error, JSON.stringify(played.error));
+  const run = { actions: played.actions };
   const r1 = await api.submitRun({ clientRunId: 'a', mode: 'daily', dateKey: d.dateKey, actions: run.actions });
   assert.ok(r1.ok && r1.ranked);
   assert.deepStrictEqual(await api.submitRun({ clientRunId: 'a', mode: 'daily', dateKey: d.dateKey, actions: run.actions }), r1);

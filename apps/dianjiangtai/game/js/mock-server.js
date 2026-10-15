@@ -2,10 +2,17 @@
  * In-memory stand-in for the cloud functions (spec 14.2), so the whole game
  * runs before the backend and an AppID exist. It uses the same core/ code the
  * real functions use, and follows the same contracts, including the rules:
- * the daily client gets rounds only (never the seed), one ranked result per
- * date, lineups withheld until the caller has a ranked result, no openids.
+ * the daily client gets rounds one at a time (progressive delivery, PO-8) and
+ * never the seed, one ranked result per date, lineups withheld until the
+ * caller has a ranked result, streaks and history, no openids.
+ *
+ * Functions: getDaily, startRun, getRound, submitRun, getHistory,
+ * subscribeChallenge, joinGroup, getBoard, getReplay, createChallenge,
+ * getChallenge, track.
  *
  * NOT a security boundary. Real mode (js/api.js) calls wx.cloud.callFunction.
+ * Test hooks: srv.appConfig (the remote app_config document), srv.offline,
+ * srv.db.unpublished[dateKey] = true (a date with no published seed).
  */
 
 const { hash32 } = require('../core/rng');
@@ -15,9 +22,12 @@ const { buildSheet } = require('../core/sheet');
 const { replay } = require('../core/validate');
 const { simulate } = require('../core/sim');
 const { bestLineup } = require('../core/search');
-const { dateKeyToMs, beijingDateKey, issueNo, secondsSinceBeijingMidnight, beijingMidnightMs, DAY_MS } = require('../core/date');
+const { dateKeyToMs, beijingDateKey, issueNo, secondsSinceBeijingMidnight, beijingMidnightMs, addDays, DAY_MS } = require('../core/date');
+const draft = require('../core/draft');
+const adapter = require('./core-adapter');
 
 const ME = 'mock-openid-me';
+const HISTORY_MAX = 30;
 
 function err(code, msg) {
   return { ok: false, code, msg: msg || code };
@@ -31,15 +41,25 @@ function createMockServer(opts) {
   const db = {
     seeds: {},
     starts: {},
+    progress: {}, // dateKey_ME -> { clientRunId, mode, challengeId, actions, released }
     runs: {},
     results: {},
     stats: {},
+    playerStats: {}, // ME -> { cur, best, last, total }
     challenges: {},
+    grants: {}, // challengeId -> { tmplId }
     groups: {},
     events: [],
     members: {},
+    anomalies: [],
+    bests: {},
+    unpublished: {},
   };
-  const srv = { offline: false, db, calls: [] };
+  const srv = { offline: false, db, calls: [], appConfig: opts.appConfig || null };
+
+  function published(dateKey) {
+    return dateKey >= config.daily.launchDateKey && !db.unpublished[dateKey];
+  }
 
   function seedFor(dateKey) {
     if (!db.seeds[dateKey]) {
@@ -47,6 +67,7 @@ function createMockServer(opts) {
       db.seeds[dateKey] = {
         seed,
         issueNo: issueNo(dateKey, config.daily.launchDateKey),
+        variant: adapter.variantFor(config, dateKey),
         rounds: buildSheet(seed, cv, config.configVersion),
         salt: 'salt' + hash32('salt:' + dateKey).toString(16),
       };
@@ -74,6 +95,52 @@ function createMockServer(opts) {
     return now() < dateKeyToMs(dateKey) + DAY_MS + config.daily.graceMs;
   }
 
+  function windowClosed(dateKey) {
+    return now() > dateKeyToMs(dateKey) + DAY_MS + config.daily.graceMs;
+  }
+
+  function flag(kind, dateKey, detail) {
+    db.anomalies.push({ kind, dateKey, detail });
+  }
+
+  /** The remote feature document (PO-11): missing -> everything optional is off. */
+  function features() {
+    const c = srv.appConfig || {};
+    return {
+      subscribe: c.subscribe && c.subscribe.tmplId ? { tmplId: c.subscribe.tmplId } : null,
+      banner: (c.ads && c.ads.banner) || { enabled: false, adUnitId: '' },
+      interstitial: (c.ads && c.ads.interstitial) || {},
+    };
+  }
+
+  /** Latest published date before dateKey. */
+  function prevPublished(dateKey) {
+    let k = addDays(dateKey, -1);
+    for (let i = 0; i < 400 && k >= config.daily.launchDateKey; i++) {
+      if (published(k)) return k;
+      k = addDays(k, -1);
+    }
+    return null;
+  }
+
+  function streakNow(today) {
+    const ps = db.playerStats[ME];
+    if (!ps) return { current: 0, best: 0 };
+    const alive = ps.last === today || ps.last === prevPublished(today);
+    return { current: alive ? ps.cur : 0, best: ps.best };
+  }
+
+  /** Does this challenge run count as the caller's daily (spec 9.3 step 5)? */
+  function challengeCountsAsDaily(c, today) {
+    return c.mode === 'daily' && c.dateKey === today && !db.results[today + '_' + ME];
+  }
+
+  function actionsExtend(prefix, actions) {
+    if (actions.length < prefix.length) return false;
+    for (let i = 0; i < prefix.length; i++) if (JSON.stringify(prefix[i]) !== JSON.stringify(actions[i])) return false;
+    return true;
+  }
+
   const fns = {
     getDaily() {
       const t = now();
@@ -84,22 +151,70 @@ function createMockServer(opts) {
         ok: true,
         dateKey,
         issueNo: s.issueNo,
-        rounds: s.rounds,
+        variant: s.variant,
         serverNow: t,
         myStatus: res ? 'done' : db.starts[dateKey + '_' + ME] ? 'started' : 'none',
         myRecord: res ? { w: res.w, l: 12 - res.w } : undefined,
+        myStreak: streakNow(dateKey),
+        features: features(),
       };
     },
 
     startRun(d) {
-      if (d.mode === 'daily') {
-        const dateKey = d.dateKey || beijingDateKey(now());
-        const k = dateKey + '_' + ME;
-        const resumed = !!db.starts[k];
-        if (!resumed) db.starts[k] = { startedAt: now() };
-        return { ok: true, resumed };
+      const t = now();
+      let dateKey = d.dateKey || beijingDateKey(t);
+      let progressive = d.mode === 'daily';
+      let mode = 'daily';
+      if (d.challengeId) {
+        const ch = db.challenges[d.challengeId];
+        if (!ch) return err('SEED_NOT_FOUND');
+        mode = 'challenge';
+        dateKey = ch.dateKey;
+        progressive = challengeCountsAsDaily(ch, beijingDateKey(t));
       }
-      return { ok: true, resumed: false };
+      if (!progressive) return { ok: true, resumed: false };
+      const k = dateKey + '_' + ME;
+      if (db.results[k]) return err('ALREADY_PLAYED');
+      const rounds = seedFor(dateKey).rounds;
+      let p = db.progress[k];
+      const resumed = !!p;
+      if (!p) {
+        p = db.progress[k] = { clientRunId: d.clientRunId, mode, challengeId: d.challengeId || null, actions: [], released: 1 };
+        db.starts[k] = { startedAt: t };
+      }
+      return { ok: true, resumed, rounds: rounds.slice(0, p.released), actions: p.actions.slice(), clientRunId: p.clientRunId };
+    },
+
+    getRound(d) {
+      const dateKey = d.dateKey || beijingDateKey(now());
+      const k = dateKey + '_' + ME;
+      const p = db.progress[k];
+      if (!p) return err('NOT_STARTED');
+      const actions = d.actions;
+      if (!Array.isArray(actions)) return err('INVALID_ACTIONS');
+      const s = seedFor(dateKey);
+      const run = draft.createRun({ seed: s.seed, contentVersion: cv, configVersion: config.configVersion, mode: p.mode === 'challenge' ? 'challenge' : 'daily', rounds: s.rounds });
+      for (const a of actions) {
+        if (!draft.apply(run, a).ok) {
+          flag('invalid_ranked', dateKey);
+          return err('INVALID_ACTIONS');
+        }
+      }
+      const n = run.picks.length;
+      if (run.phase !== 'placed') return err('INVALID_ACTIONS');
+      // idempotent: the same frozen prefix again returns the same round
+      if (n === p.released - 1 && JSON.stringify(actions) === JSON.stringify(p.actions)) return { ok: true, round: p.released, data: s.rounds[p.released - 1] };
+      if (n !== p.released || n >= 5) {
+        flag('prefix', dateKey);
+        return err('INVALID_ACTIONS');
+      }
+      if (!actionsExtend(p.actions, actions)) {
+        flag('prefix', dateKey);
+        return err('INVALID_ACTIONS');
+      }
+      p.actions = actions.map((a) => Object.assign({}, a));
+      p.released = n + 1;
+      return { ok: true, round: p.released, data: s.rounds[p.released - 1] };
     },
 
     submitRun(d) {
@@ -124,11 +239,16 @@ function createMockServer(opts) {
         seed = d.seed >>> 0;
       }
       const rep = replay(seed, cv, d.actions, mode === 'free' ? 'free' : mode);
-      if (!rep.ok) return { ok: false, code: rep.error, reason: rep.reason, msg: rep.reason };
+      if (!rep.ok) {
+        if (mode === 'daily') flag('invalid_ranked', dateKey);
+        return { ok: false, code: rep.error, reason: rep.reason, msg: rep.reason };
+      }
       const sim = simulate(rep.lineup, seed, cv, config.configVersion);
+      if (d.clientRecord && (d.clientRecord.w !== sim.record.w || d.clientRecord.l !== sim.record.l)) flag('mismatch', dateKey, { client: d.clientRecord, server: sim.record });
       let ranked = false;
       const today = beijingDateKey(t);
       const countsAsDaily = (mode === 'daily' || (challenge && challenge.mode === 'daily' && challenge.dateKey === today)) && dateKey === today;
+      let streak = null;
       if (countsAsDaily) {
         const rk = dateKey + '_' + ME;
         if (db.results[rk]) {
@@ -138,6 +258,14 @@ function createMockServer(opts) {
         const startedDate = dateKey;
         const lateLimit = beijingMidnightMs(t) + config.daily.graceMs;
         if (startedDate !== today && t > lateLimit) return err('LATE_SUBMIT');
+        // progressive delivery (PO-8): all five rounds released, actions extend the frozen prefix exactly
+        const p = db.progress[rk];
+        if (!p) return err('NOT_STARTED');
+        if (p.released < 5 || !actionsExtend(p.actions, d.actions)) {
+          flag('prefix', dateKey);
+          flag('invalid_ranked', dateKey);
+          return Object.assign(err('INVALID_ACTIONS'), { reason: 'PREFIX' });
+        }
         ranked = true;
       } else if (mode === 'daily') {
         return err('LATE_SUBMIT');
@@ -155,7 +283,18 @@ function createMockServer(opts) {
         const st = db.stats[dateKey] || (db.stats[dateKey] = { hist: new Array(13).fill(0), total: 0 });
         st.hist[sim.record.w]++;
         st.total++;
-        db.results[dateKey + '_' + ME] = { w: sim.record.w, s: secondsSinceBeijingMidnight(t), lineup: rep.lineup, response };
+        // streak (PO-6): consecutive published dates; unpublished dates are skipped
+        const ps = db.playerStats[ME] || (db.playerStats[ME] = { cur: 0, best: 0, last: null, total: 0 });
+        ps.cur = ps.last && ps.last === prevPublished(dateKey) ? ps.cur + 1 : 1;
+        ps.best = Math.max(ps.best, ps.cur);
+        ps.last = dateKey;
+        ps.total++;
+        streak = { current: ps.cur, best: ps.best };
+        response.streak = streak;
+        // factions of the drafted cells (lineupFac), in slot order
+        const rr = adapter.replayInto({ seed, contentVersion: cv, configVersion: config.configVersion, mode: mode === 'challenge' ? 'challenge' : 'daily' }, d.actions).run;
+        const facBySlot = adapter.draftedFactions(rr);
+        db.results[dateKey + '_' + ME] = { w: sim.record.w, s: secondsSinceBeijingMidnight(t), lineup: rep.lineup, lineupFac: rep.lineup.map((e) => facBySlot[e.slot]), response, streak: streak.current };
       }
       if (challenge) {
         challenge.answers.push({ w: sim.record.w, lineup: rep.lineup, by: ME });
@@ -169,6 +308,48 @@ function createMockServer(opts) {
       }
       db.runs[runKey] = { response, seed, mode, dateKey, lineup: rep.lineup, tokens: rep.finalTokens, record: sim.record };
       return response;
+    },
+
+    getHistory(d) {
+      const limit = Math.max(1, Math.min(HISTORY_MAX, (d && d.limit) || HISTORY_MAX));
+      const t = now();
+      const today = beijingDateKey(t);
+      const items = [];
+      let k = today;
+      for (let i = 0; i < 400 && items.length < limit && k >= config.daily.launchDateKey; i++) {
+        if (published(k)) {
+          const s = seedFor(k);
+          const it = { dateKey: k, issueNo: s.issueNo, variant: s.variant };
+          const res = db.results[k + '_' + ME];
+          if (res) it.mine = { w: res.w, l: 12 - res.w, lineupIdx: res.lineup.map((e) => getContent(cv).indexOf[e.generalId]), lineupFac: res.lineupFac };
+          const st = db.stats[k];
+          if (st && st.total >= 30) {
+            it.total = st.total;
+            it.hist = st.hist.slice();
+          }
+          if (windowClosed(k)) {
+            if (!db.bests[k]) {
+              const b = bestLineup(s.seed, cv, s.rounds.map((r) => ({ faction: r.faction, era: r.era })), { configVersion: config.configVersion });
+              db.bests[k] = b ? { lineupIdx: b.lineup.map((e) => getContent(cv).indexOf[e.generalId]), record: b.record } : { none: true };
+            }
+            if (!db.bests[k].none) it.best = db.bests[k];
+          }
+          items.push(it);
+        }
+        k = addDays(k, -1);
+      }
+      const ps = db.playerStats[ME];
+      return { ok: true, items, bestStreak: ps ? ps.best : 0 };
+    },
+
+    subscribeChallenge(d) {
+      const tmplId = features().subscribe && features().subscribe.tmplId;
+      if (!tmplId) return err('NO_TEMPLATE');
+      const c = db.challenges[d.challengeId];
+      if (!c) return err('SEED_NOT_FOUND');
+      if (c.owner !== ME) return err('NOT_OWNER');
+      if (!db.grants[d.challengeId]) db.grants[d.challengeId] = { tmplId, used: false };
+      return { ok: true, granted: true };
     },
 
     joinGroup(d) {
@@ -194,7 +375,8 @@ function createMockServer(opts) {
         const r = db.results[k];
         const openid = k.slice(dateKey.length + 1);
         const row = [hashRow(openid, s.salt), r.w, r.s];
-        if (mine) row.push(r.lineup.map((e) => getContent(cv).indexOf[e.generalId]).join(','));
+        row.push(mine ? r.lineup.map((e) => getContent(cv).indexOf[e.generalId]).join(',') : null);
+        if (r.streak >= 2) row.push(r.streak);
         rows.push(row);
       }
       (db.fakeRows || []).forEach((f) => rows.push(f));
@@ -205,6 +387,7 @@ function createMockServer(opts) {
         ok: true,
         dateKey,
         issueNo: s.issueNo,
+        variant: s.variant,
         contentVersion: cv,
         salt: s.salt,
         selfHash: hashRow(ME, s.salt),
@@ -250,19 +433,22 @@ function createMockServer(opts) {
       if (t > c.expiresAt) return Object.assign(err('CHALLENGE_EXPIRED'), { status: 'expired' });
       const today = beijingDateKey(t);
       const answered = c.answers.some((a) => a.by === ME);
-      const dailyDone = !!db.results[today + '_' + ME];
       const dailyToday = c.mode === 'daily' && c.dateKey === today;
+      const counts = challengeCountsAsDaily(c, today);
       const out = {
         ok: true,
         status: c.owner === ME ? 'own' : answered ? 'answered' : 'ready',
         theirRecord: c.record,
         mode: c.mode,
-        countsAsDaily: dailyToday && !dailyDone,
-        isFriendly: !(dailyToday && !dailyDone),
+        variant: c.mode === 'daily' ? adapter.variantFor(config, c.dateKey) : 'standard',
+        countsAsDaily: dailyToday && counts,
+        isFriendly: !(dailyToday && counts),
         answerCount: c.answers.length,
-        rounds: c.rounds,
         dateKey: c.dateKey,
       };
+      // a run that counts as today's daily gets its tokens round by round (startRun / getRound)
+      if (!(dailyToday && counts)) out.rounds = c.rounds;
+      if (c.owner === ME) out.subscribe = { granted: !!db.grants[d.challengeId] };
       if (c.owner === ME && c.answers.length) out.bestAnswer = Math.max.apply(null, c.answers.map((a) => a.w));
       const locked = answered && dailyLocked(c.dateKey, c.seed);
       if (answered) {
