@@ -54,20 +54,22 @@ function drawHowto(ctx, L, hits, vm) {
 
 function row(ctx, L, hits, s, y, id, label, state, o) {
   o = o || {};
-  const h = Math.max(L.u(60), T.MIN_TAP + L.u(8));
+  const rh = o.sub ? L.u(T.MODE.large ? 88 : 74) : Math.max(L.u(60), T.MIN_TAP + L.u(8));
+  const h = rh;
   W.fillRR(ctx, s.x, y, s.w, h - L.u(8), L.u(12), C.card);
   W.strokeRR(ctx, s.x, y, s.w, h - L.u(8), L.u(12), T.MODE.hc ? C.ink : C.line, T.MODE.hc ? 2 : 1.5);
-  const cy = y + (h - L.u(8)) / 2;
-  W.text(ctx, label, s.x + L.u(14), o.sub ? cy - L.u(10) : cy, { size: W.fs(L, 'bodyL'), weight: 700, maxW: s.w - L.u(14) - L.u(100) });
-  if (o.sub) W.text(ctx, o.sub, s.x + L.u(14), cy + L.u(12), { size: T.FS.body * L.s, color: C.sub, maxW: s.w - L.u(120) });
+  const inner = h - L.u(8);
+  const ty = o.sub ? y + inner * 0.3 : y + inner / 2;
+  W.text(ctx, label, s.x + L.u(14), ty, { size: W.fs(L, 'bodyL'), weight: 700, maxW: s.w - L.u(14) - L.u(110) });
+  if (o.sub) W.text(ctx, o.sub, s.x + L.u(14), y + inner * 0.72, { size: W.fs(L, 'body'), color: C.sub, maxW: s.w - L.u(28) });
   if (o.toggle != null) {
     const tx = s.x + s.w - L.u(14) - L.u(54);
-    K.toggle(ctx, L, tx, cy, o.toggle);
-    W.text(ctx, o.toggle ? '开' : '关', tx - L.u(8), cy, { size: W.fs(L, 'body'), weight: 700, align: 'right', color: C.sub });
+    K.toggle(ctx, L, tx, ty, o.toggle);
+    W.text(ctx, o.toggle ? '开' : '关', tx - L.u(8), ty, { size: W.fs(L, 'body'), weight: 700, align: 'right', color: C.sub });
   } else if (o.action) {
-    W.text(ctx, o.action, s.x + s.w - L.u(14), cy, { size: W.fs(L, 'body'), weight: 800, align: 'right', color: C.youText });
-  } else W.iconChevron(ctx, s.x + s.w - L.u(20), cy, L.u(14), C.sub, 'right');
-  if (id) hits.add(id, s.x, y, s.w, Math.max(T.MIN_TAP, h - L.u(8)));
+    W.text(ctx, o.action, s.x + s.w - L.u(14), ty, { size: W.fs(L, 'body'), weight: 800, align: 'right', color: C.youText });
+  } else W.iconChevron(ctx, s.x + s.w - L.u(20), ty, L.u(14), C.sub, 'right');
+  if (id) hits.add(id, s.x, y, s.w, Math.max(T.MIN_TAP, inner));
   return y + h;
 }
 
@@ -87,7 +89,7 @@ function drawSettings(ctx, L, hits, vm) {
       y = row(c, L, h, s, y, 'settings:largeText', '大字模式', null, { toggle: !!st.largeText, sub: '文字和按钮更大' });
       y = row(c, L, h, s, y, 'settings:highContrast', '高对比度', null, { toggle: !!st.highContrast, sub: '白底黑字，标记更深' });
       const on = st.friendScope === 'granted';
-      y = row(c, L, h, s, y, on ? null : 'settings:openSetting', '好友排行：' + (on ? '已开启' : '未开启'), null, { action: on ? null : '去设置', sub: on ? '可显示好友和群友昵称' : '开启「微信朋友关系」可显示昵称' });
+      y = row(c, L, h, s, y, on ? null : 'settings:openSetting', '好友排行：' + (on ? '已开启' : '未开启'), null, { action: on ? null : '去设置', sub: on ? '可显示好友和群友昵称' : '开启后可显示昵称' });
       y = row(c, L, h, s, y, 'settings:privacy', '用户隐私保护指引', null, { sub: st.privacy === 'agreed' ? '已同意' : st.privacy === 'denied' ? '未同意' : null });
       y = row(c, L, h, s, y, 'settings:feedback', '联系我们 / 反馈', null, {});
       return y + L.u(8);

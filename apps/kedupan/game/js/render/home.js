@@ -141,7 +141,7 @@ function menu(ctx, L, hits, vm, x, y, w) {
 function draw(ctx, vm, L) {
   const hits = K.begin(ctx, vm, L);
   const top = L.navBottom + L.u(4);
-  const bottom = L.bottomEdge - L.bottomPad;
+  const bottom = L.bottomEdge;
   W.scrollView(ctx, L, hits, {
     x: 0,
     y: top,
@@ -156,7 +156,7 @@ function draw(ctx, vm, L) {
       // measure the lower stack (dry), then anchor it to the bottom if there is room
       const stackH = stack(c, L, dryHits(h), vm, 0, true);
       const wanted = logoBottom + gap + L.u(10);
-      const anchored = top + vh - stackH;
+      const anchored = top + vh - stackH - L.bottomPad;
       y = Math.max(wanted, anchored);
       const used = stack(c, L, h, vm, y, false);
       return y + used + L.u(4);

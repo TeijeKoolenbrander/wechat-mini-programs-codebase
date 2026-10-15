@@ -151,7 +151,8 @@ function trend(ctx, L, y, items) {
       W.strokeRR(ctx, cx - bw / 2, top + barMax - bh, bw, bh, L.u(4), T.MODE.hc ? C.ink : C.tapeShade, T.MODE.hc ? 2 : 1.2);
       W.text(ctx, String(v), cx, top + barMax - bh - bs * 0.7, { size: bs, weight: 800, align: 'center' });
     }
-    const lab = T.MODE.large ? String(it.label || '').split('/').pop().replace(/^0/, '') : String(it.label || '').replace(/(^|\/)0(\d)/g, '$1$2');
+    const full = String(it.label || '').replace(/(^|\/)0(\d)/g, '$1$2');
+    const lab = W.measure(ctx, full, bs, 400) + L.u(4) > colW ? full.split('/').pop() : full;
     W.text(ctx, lab, cx, top + barMax + L.u(14), { size: bs, color: C.sub, align: 'center', maxW: colW });
   });
   ctx.fillStyle = C.line;

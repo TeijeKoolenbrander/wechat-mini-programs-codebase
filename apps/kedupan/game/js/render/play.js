@@ -28,12 +28,17 @@ function title(vm) {
 function promptNote(ctx, L, x, y, w, card) {
   const ps = W.fs(L, 'prompt');
   const cs = W.fs(L, 'body');
-  const lines = W.wrap(ctx, card.prompt, w - L.u(40), ps, 900).slice(0, 2);
-  const h = L.u(14) + cs * 1.3 + lines.length * ps * 1.3 + L.u(12);
+  const compact = L.H < 640;
+  const showCat = !(compact && T.MODE.large);
+  let lines = W.wrap(ctx, card.prompt, w - L.u(40), ps, 900);
+  if (lines.length > 2) lines = [lines[0], lines[1].slice(0, -1) + '…'];
+  const padT = compact ? L.u(8) : L.u(14);
+  const catH = showCat ? cs * 1.3 : 0;
+  const h = padT + catH + lines.length * ps * (compact ? 1.2 : 1.3) + (compact ? L.u(8) : L.u(12));
   W.note(ctx, x, y, w, h, { fill: C.noteYellow, rot: -0.8, tape: true });
-  W.text(ctx, card.catLabel || '', x + w / 2, y + L.u(14) + cs * 0.6, { size: cs, weight: 700, color: C.sub, align: 'center' });
+  if (showCat) W.text(ctx, card.catLabel || '', x + w / 2, y + padT + cs * 0.6, { size: cs, weight: 700, color: C.sub, align: 'center' });
   lines.forEach((ln, i) => {
-    W.text(ctx, ln, x + w / 2, y + L.u(14) + cs * 1.3 + ps * 1.3 * (i + 0.5), { size: ps, weight: 900, align: 'center' });
+    W.text(ctx, ln, x + w / 2, y + padT + catH + ps * (compact ? 1.2 : 1.3) * (i + 0.5), { size: ps, weight: 900, align: 'center' });
   });
   return h;
 }
@@ -106,8 +111,9 @@ function draw(ctx, vm, L) {
     y: viewTop,
     w: L.W,
     h: viewBottom - viewTop,
-    scroll: vm.scrollY || 0,
+    scroll: vm.scrollY,
     id: 'play:scroll',
+    startAtEnd: !!revealed,
     draw(c, h, vh) {
       const noteH = promptNote(c, L, L.x0, viewTop + L.u(8), L.contentW, card);
       const naturalY = viewTop + L.u(8) + noteH + L.u(16);
@@ -159,8 +165,8 @@ function draw(ctx, vm, L) {
 
 function drawCoach(ctx, L, hits) {
   hits.add('coach:block', 0, 0, L.W, L.H);
-  ctx.fillStyle = 'rgba(36,33,30,0.45)';
-  ctx.fillRect(0, 0, L.W, L.navBottom + L.u(70));
+  ctx.fillStyle = 'rgba(36,33,30,0.4)';
+  ctx.fillRect(0, 0, L.W, L.H);
   const w = Math.min(L.contentW, L.u(320));
   const bh = K.btnH(L);
   const h = L.u(24) + W.fs(L, 'bodyL') * 1.5 * 3 + L.u(12) + bh;

@@ -138,7 +138,7 @@ function buildRound(msg, rawRows) {
   const byHash = matchRows(msg, rawRows);
   const server = (msg.rows || []).map((r, i) => ({ h: r[0], g: r[1], s: r[2], late: !!r[3], host: !!r[4], order: i }));
   const anonOrder = server
-    .filter((s) => s.h !== msg.selfHash && !(byHash[s.h] && byHash[s.h].nickname))
+    .filter((s) => !s.host && s.h !== msg.selfHash && !(byHash[s.h] && byHash[s.h].nickname))
     .map((s) => s.h)
     .sort();
   const letter = {};

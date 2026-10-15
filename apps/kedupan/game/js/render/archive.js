@@ -47,14 +47,16 @@ function draw(ctx, vm, L) {
         y += L.u(36);
       }
       const bs = W.fs(L, 'body');
-      const rh = Math.max(T.MIN_TAP + L.u(16), bs * 3.2);
+      const l1 = W.fs(L, 'bodyL') * 1.35;
+      const l2 = bs * 1.35;
+      const rh = Math.max(T.MIN_TAP + L.u(16), l1 + l2 + L.u(20));
       items.forEach((it) => {
         W.card(c, L.x0, y, L.contentW, rh, { r: L.u(12) });
-        W.text(c, '第 ' + it.issueNo + ' 期', L.x0 + L.u(14), y + rh * 0.34, { size: W.fs(L, 'bodyL'), weight: 900 });
-        W.text(c, it.dateText || '', L.x0 + L.contentW - L.u(34), y + rh * 0.34, { size: bs, color: C.sub, align: 'right' });
+        W.text(c, '第 ' + it.issueNo + ' 期', L.x0 + L.u(14), y + L.u(10) + l1 / 2, { size: W.fs(L, 'bodyL'), weight: 900 });
+        W.text(c, it.dateText || '', L.x0 + L.contentW - L.u(34), y + L.u(10) + l1 / 2, { size: bs, color: C.sub, align: 'right' });
         const played = /已玩|练习/.test(it.statusText || '');
-        W.text(c, it.statusText || '', L.x0 + L.u(14), y + rh * 0.72, { size: bs, weight: played ? 800 : 500, color: played ? C.nationText : C.sub, maxW: L.contentW - L.u(60) });
-        W.iconChevron(c, L.x0 + L.contentW - L.u(18), y + rh * 0.72, L.u(14), C.sub, 'right');
+        W.text(c, it.statusText || '', L.x0 + L.u(14), y + L.u(10) + l1 + l2 / 2, { size: bs, weight: played ? 800 : 500, color: played ? C.nationText : C.sub, maxW: L.contentW - L.u(60) });
+        W.iconChevron(c, L.x0 + L.contentW - L.u(18), y + L.u(10) + l1 + l2 / 2, L.u(14), C.sub, 'right');
         h.add('archive:item:' + it.dateKey, L.x0, y, L.contentW, rh);
         y += rh + L.u(8);
       });

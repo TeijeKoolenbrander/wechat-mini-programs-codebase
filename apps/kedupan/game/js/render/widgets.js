@@ -527,7 +527,7 @@ function scrollView(ctx, L, hits, o) {
   const bottom = o.draw(dryCtx(ctx), dry, o.h);
   const contentH = Math.max(o.h, bottom - o.y);
   const max = Math.max(0, Math.round(contentH - o.h));
-  const sc = clamp(o.scroll || 0, 0, max);
+  const sc = clamp(o.scroll == null ? (o.startAtEnd ? max : 0) : o.scroll, 0, max);
   hits.scrollMax[o.id] = max;
   hits.add(o.id, o.x, o.y, o.w, o.h);
   ctx.save();

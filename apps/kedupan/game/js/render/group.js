@@ -13,12 +13,14 @@ function rounds(ctx, L, hits, list, y) {
   W.text(ctx, '本群出题', L.x0, y + L.u(12), { size: W.fs(L, 'bodyL'), weight: 800 });
   y += L.u(32);
   const bs = W.fs(L, 'body');
-  const h = Math.max(T.MIN_TAP + L.u(8), bs * 3.1);
+  const l1 = W.fs(L, 'bodyL') * 1.35;
+  const l2 = bs * 1.35;
+  const h = Math.max(T.MIN_TAP + L.u(8), l1 + l2 + L.u(20));
   list.slice(0, 10).forEach((r) => {
     W.card(ctx, L.x0, y, L.contentW, h, { r: L.u(12) });
-    W.text(ctx, r.title, L.x0 + L.u(14), y + h * 0.34, { size: W.fs(L, 'bodyL'), weight: 800, maxW: L.contentW * 0.55 });
-    if (r.mqText) W.text(ctx, r.mqText, L.x0 + L.contentW - L.u(34), y + h * 0.34, { size: bs, weight: 800, align: 'right', color: C.groupText });
-    W.text(ctx, r.statusText || '', L.x0 + L.u(14), y + h * 0.72, { size: bs, color: C.sub, maxW: L.contentW - L.u(60) });
+    W.text(ctx, r.title, L.x0 + L.u(14), y + L.u(10) + l1 / 2, { size: W.fs(L, 'bodyL'), weight: 800, maxW: L.contentW * 0.55 });
+    if (r.mqText) W.text(ctx, r.mqText, L.x0 + L.contentW - L.u(34), y + L.u(10) + l1 / 2, { size: bs, weight: 800, align: 'right', color: C.groupText });
+    W.text(ctx, r.statusText || '', L.x0 + L.u(14), y + L.u(10) + l1 + l2 / 2, { size: bs, color: C.sub, maxW: L.contentW - L.u(60) });
     W.iconChevron(ctx, L.x0 + L.contentW - L.u(18), y + h / 2, L.u(14), C.sub, 'right');
     hits.add('group:round:' + r.roundId, L.x0, y, L.contentW, h);
     y += h + L.u(8);

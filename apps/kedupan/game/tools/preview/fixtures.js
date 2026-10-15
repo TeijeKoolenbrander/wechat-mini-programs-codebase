@@ -80,7 +80,7 @@ void mkSys;
 /** Draw a real open-data board into a fake shared canvas for the given rect. */
 function fakeBoard(createCanvas, L, kind, spec) {
   const rows = spec.rows;
-  const h = B.boxHeight(L, Math.min(rows.length, B.VISIBLE_ROWS));
+  const h = B.boxHeight(L, Math.min(spec.count || rows.length, B.VISIBLE_ROWS));
   const w = L.contentW;
   const canvas = createCanvas(Math.round(w * 2), Math.round(h * 2));
   const ctx = canvas.getContext('2d');
@@ -282,7 +282,7 @@ function buildFixtures(opts) {
   };
 
   // --------------------------------------------------------------- friend
-  const fboard = (n, raw, extra) => fakeBoard(createCanvas, L, 'friend', { rows: FRIEND_ROWS.slice(0, n), raw: raw || RAW, msg: Object.assign({ refs: [63, 72, 90, 82, 55] }, extra) });
+  const fboard = (n, raw, extra, count, from) => fakeBoard(createCanvas, L, 'friend', { rows: FRIEND_ROWS.slice(from || 0, (from || 0) + n), raw: raw || RAW, count, msg: Object.assign({ refs: [63, 72, 90, 82, 55] }, extra) });
   const friend = (vm) => Object.assign({ state: 'ready', mode: 'full', issueNo: 12, selfText: null, banner: { show: false, reservedHeight: 0 }, boardRows: 5, t: 0 }, vm);
   fx.friend = {
     loading: V(friend({ state: 'loading', mode: null })),
@@ -292,7 +292,7 @@ function buildFixtures(opts) {
     serverError: V(friend({ state: 'serverError', mode: null })),
     privacyDenied: V(friend({ state: 'privacyDenied', sharedCanvas: fboard(5, []) })),
     unauthorized: V(friend({ state: 'unauthorized', sharedCanvas: fboard(5, []) })),
-    selfOnly: V(friend({ mode: 'selfOnly', selfText: '你的成绩已校验，好友的成绩为自报，不排名次。', boardRows: 3, sharedCanvas: fboard(1, [{ openid: 'o_zs', nickname: '张三', avatarUrl: '', KVDataList: [{ key: 'kd', value: JSON.stringify({ d: '20261015', s: 480 }) }] }, { openid: 'o_ls', nickname: '李四', avatarUrl: '', KVDataList: [{ key: 'kd', value: JSON.stringify({ d: '20261015', s: 300 }) }] }], { mode: 'selfOnly' }) })),
+    selfOnly: V(friend({ mode: 'selfOnly', selfText: '你的成绩已校验，好友的成绩为自报，不排名次。', boardRows: 3, sharedCanvas: fboard(1, [{ openid: 'o_zs', nickname: '张三', avatarUrl: '', KVDataList: [{ key: 'kd', value: JSON.stringify({ d: '20261015', s: 480 }) }] }, { openid: 'o_ls', nickname: '李四', avatarUrl: '', KVDataList: [{ key: 'kd', value: JSON.stringify({ d: '20261015', s: 300 }) }] }], { mode: 'selfOnly' }, 3, 1) })),
   };
 
   // -------------------------------------------------------------- archive

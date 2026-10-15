@@ -45,14 +45,17 @@ function pickSpectrum(ctx, L, hits, vm, top) {
       y += L.u(6);
       const half = (L.contentW - L.u(10)) / 2;
       const free = vm.freeSwapLeft > 0;
-      W.button(c, L, h, { id: 'host:swapFree', x: L.x0, y, w: half, h: bh, label: free ? '换一组 (免费)' : '换一组 已用', disabled: !free });
       const ad = vm.adSwapLeft > 0;
       const adLoading = vm.adState === 'loading' || vm.adState === 'playing';
+      const stack = W.measure(c, '视频 换一批', W.fs(L, 'bodyL'), 700) + L.u(54) > half - L.u(16);
+      const fw = stack ? L.contentW : half;
+      W.button(c, L, h, { id: 'host:swapFree', x: L.x0, y, w: fw, h: bh, label: free ? '换一组 (免费)' : '换一组 已用', disabled: !free });
+      if (stack) y += bh + L.u(10);
       W.button(c, L, h, {
         id: 'host:swapAd',
-        x: L.x0 + half + L.u(10),
+        x: stack ? L.x0 : L.x0 + half + L.u(10),
         y,
-        w: half,
+        w: fw,
         h: bh,
         label: adLoading ? '广告加载中…' : '视频 换一批',
         kind: 'ad',
