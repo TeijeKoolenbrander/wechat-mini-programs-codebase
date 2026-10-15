@@ -50,7 +50,7 @@ The founder's single point of contact.
 - Reviews every change for correctness, security, and fit before reporting it done.
 - Has no Edit/Write tools, so it has to delegate. It raises compliance blockers (版号, 软著, 备案, privacy) at the idea stage.
 - Once an idea is approved, delivers the complete, release-ready app without interim approvals, logging its decisions in `docs/<app>/decisions.md`.
-- **Leaves to the founder** (constitution Article 4): choosing what to build, credentials, any upload or release, money, legal filings, merges into `main`, and irreversible actions. These are collected in one Founder Handoff (`docs/<app>/release/HANDOFF.md`).
+- **Leaves to the founder** (constitution Article 5): choosing what to build, credentials, any upload or release, money, legal filings, merges into `main`, and irreversible actions. These are collected in one Founder Handoff (`docs/<app>/release/HANDOFF.md`).
 
 ### market-researcher: Market research
 Researches a single angle of the WeChat mini program / mini game market.
