@@ -14,10 +14,18 @@ function subOf(measure, fact) {
   return fact.sub || measure.subLabel;
 }
 
+/** Source details for the source sheet (spec 6.12). Plain text only; the URL is never opened. */
+function infoOf(measure, fact) {
+  return { subLabel: subOf(measure, fact), year: fact.year, publisher: fact.publisher, sourceTitle: fact.source, url: fact.url, retrievedAt: fact.retrievedAt || null, licence: fact.licence || null };
+}
+
 /** A card whose value is known (the top card). */
 function knownFace(fact) {
   const m = BY_KEY[fact.measure];
-  const face = { factId: fact.id, label: fact.label, valueText: F.valueText(m, fact), unitText: F.unitText(m), approx: !!fact.approx, sourceText: F.sourceText(fact) };
+  const face = {
+    factId: fact.id, measure: m.key, label: fact.label, valueText: F.valueText(m, fact), unitText: F.unitText(m), approx: !!fact.approx,
+    sourceText: F.sourceText(fact), info: infoOf(m, fact),
+  };
   if (fact.sub) face.sub = fact.sub;
   return face;
 }
@@ -25,7 +33,7 @@ function knownFace(fact) {
 /** A card whose value is hidden (the bottom card): label and unit only. */
 function hiddenFace(fact) {
   const m = BY_KEY[fact.measure];
-  const face = { factId: fact.id, label: fact.label, unitText: F.unitText(m) };
+  const face = { factId: fact.id, measure: m.key, label: fact.label, unitText: F.unitText(m) };
   if (fact.sub) face.sub = fact.sub;
   return face;
 }
@@ -33,7 +41,10 @@ function hiddenFace(fact) {
 /** What the player learns when the bottom card turns over. */
 function revealOf(fact) {
   const m = BY_KEY[fact.measure];
-  return { factId: fact.id, value: fact.value, valueText: F.valueText(m, fact), unitText: F.unitText(m), approx: !!fact.approx, sourceText: F.sourceText(fact), note: fact.note || null };
+  return {
+    factId: fact.id, value: fact.value, valueText: F.valueText(m, fact), unitText: F.unitText(m), approx: !!fact.approx, sourceText: F.sourceText(fact),
+    note: fact.note || null, info: infoOf(m, fact),
+  };
 }
 
 /** question = deck.questions[k - 1]; byId resolves fact ids. */
@@ -68,4 +79,4 @@ function pairText(top, bottom, reveal) {
   return bottom.label + ' ' + reveal.valueText + ' ' + reveal.unitText + ' · ' + top.label + ' ' + top.valueText + ' ' + top.unitText;
 }
 
-module.exports = { subOf, knownFace, hiddenFace, revealOf, questionPayload, promptText, segmentBannerText, pairText };
+module.exports = { subOf, infoOf, knownFace, hiddenFace, revealOf, questionPayload, promptText, segmentBannerText, pairText };

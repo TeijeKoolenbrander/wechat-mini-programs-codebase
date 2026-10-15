@@ -1,10 +1,11 @@
 /**
  * Persistent client state (wx storage). Everything that must survive a kill:
- * in-progress runs (spec 18.2, AC 25), pending daily submits, stored results
- * (18.13), interstitial counters, mute, first-run flags, privacy status.
+ * the in-progress run (spec 6.3 resume, AC 8, 26), submits waiting for the
+ * network, stored results, interstitial counters, settings, first-run flags,
+ * privacy status. No fact values of future questions are ever stored.
  */
 
-const KEY = 'djt_state_v1';
+const KEY = 'bby_state_v1';
 
 function fresh() {
   return {
@@ -13,17 +14,22 @@ function fresh() {
     firstDate: null,
     lastSessionAt: 0,
     muted: false,
+    largeText: false,
+    highContrast: false,
     howtoSeen: false,
     coachSeen: false,
-    lifetimeRuns: 0,
-    dailyCache: null, // { dateKey, issueNo, rounds, offsetMs, myStatus, myRecord }
-    active: null, // in-progress run, see controller
-    pending: null, // finished daily/challenge awaiting submit
-    results: {}, // dailyResult by dateKey: stored submit response + lineup
-    lastResult: null, // result shown last (so a kill during the reveal shows the verdict)
+    lifetimeRuns: 0, // completed runs, any mode
+    freeGroup: 'all', // category chip (spec 6.14)
+    bestFree: 0, // local best, merged with the server's
+    dailyCache: null, // { dateKey, issueNo, themeLabel, myStatus, myRun, myResult, myDays, bests }
+    active: null, // the in-progress run, see controller.persistActive
+    pendingSubmits: [], // finished free runs waiting for submitRun
+    results: {}, // stored result view by dateKey (daily) / challenge id
+    reported: {}, // factId -> reason keys the player reported
     interstitial: { day: '', count: 0, lastAt: 0 },
     privacy: { privacy: 'unknown', friendScope: 'unknown', markerPending: [] },
     markerKeys: [], // dateKeys written to cloud storage (to remove after 7 days)
+    notes: { finalizedSeen: {} }, // dateKey -> true once the "finalized by window" note was shown
   };
 }
 

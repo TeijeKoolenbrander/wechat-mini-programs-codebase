@@ -162,7 +162,7 @@ function registerBundle(contentVersion, facts) {
 let LATEST_CONTENT_VERSION = 0;
 
 try {
-  const free = require('./content/facts.free');
+  const free = require('./content/facts.free.js');
   registerBundle(free.contentVersion, free.facts);
   LATEST_CONTENT_VERSION = free.contentVersion;
 } catch (e) {

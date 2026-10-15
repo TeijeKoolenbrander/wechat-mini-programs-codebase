@@ -17,8 +17,7 @@ const path = require('node:path');
 const { indexFacts } = require('../core/content');
 const { LATEST_CONFIG_VERSION, getConfig } = require('../core/config');
 const { generateDaily } = require('../core/deck');
-const { addDays, weekdayOf } = require('../core/date');
-const { deckStats, passesGates } = require('../core/gates');
+const { addDays } = require('../core/date');
 
 function run(opts) {
   const o = opts || {};
@@ -35,7 +34,6 @@ function run(opts) {
   const medians = [];
   const p20s = [];
   const pFulls = [];
-  let exclude = [];
   const history = [];
   for (let d = 0; d < dates; d++) {
     const dateKey = addDays(start, d);
@@ -59,10 +57,6 @@ function run(opts) {
       ids.push(q.b);
     });
     history.push(ids);
-    void exclude;
-    void passesGates;
-    void deckStats;
-    void weekdayOf;
   }
   const passRate = candidatesBuilt ? candidatesPassed / candidatesBuilt : 0;
   const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);

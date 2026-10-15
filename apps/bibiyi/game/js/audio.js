@@ -1,4 +1,8 @@
-/** Minimal sound: one InnerAudioContext per cue, silenced by the mute flag (AC 49). */
+/**
+ * Minimal sound: one InnerAudioContext per cue, silenced by the mute flag
+ * (AC 79). The miss vibration follows the same flag. Cues are short and calm
+ * (PO-35): no casino-style sounds (AC 10).
+ */
 
 function createAudio(wx, muted) {
   let m = !!muted;
@@ -11,7 +15,7 @@ function createAudio(wx, muted) {
       m = !!v;
       if (m) for (const k of Object.keys(cues)) if (cues[k].stop) cues[k].stop();
     },
-    /** name: flip | drum | bell (assets/sounds/<name>.mp3, shipped by frontend-ui). Never throws. */
+    /** name: turn | ok | miss (assets/sounds/<name>.mp3, shipped by frontend-ui). Never throws. */
     play(name) {
       if (m || !wx.createInnerAudioContext) return;
       try {
@@ -23,6 +27,15 @@ function createAudio(wx, muted) {
         cues[name].play();
       } catch (e) {
         /* missing asset: silent */
+      }
+    },
+    /** Light vibration on a miss, only when sound is on. */
+    vibrate() {
+      if (m || !wx.vibrateShort) return;
+      try {
+        wx.vibrateShort({ type: 'light' });
+      } catch (e) {
+        /* optional */
       }
     },
   };
