@@ -113,10 +113,11 @@ function titleBlock(ctx, L, top, avail) {
     W.text(ctx, '比 一 比', cx, top + avail / 2, { size: Math.min(avail * 0.6, L.u(34)), weight: 900, serif: true, align: 'center' });
     return;
   }
-  const seal = L.u(58) * Math.max(0.6, sc);
+  const full = avail >= L.u(132);
+  const seal = L.u(58) * Math.max(0.6, full ? sc : Math.min(sc, 0.75));
   const tSize = L.u(40) * Math.max(0.7, sc);
   const subSize = T.FS.body;
-  const blockH = seal + L.u(8) + tSize + L.u(6) + subSize * 1.4;
+  const blockH = seal + L.u(8) + tSize + (full ? L.u(6) + subSize * 1.4 : 0);
   let y = top + Math.max(0, (avail - blockH) / 2);
   W.seal(ctx, cx, y + seal / 2, seal, { rotate: -6 });
   y += seal + L.u(8);
@@ -133,7 +134,7 @@ function titleBlock(ctx, L, top, avail) {
     px += cwid[i] + gapC;
   });
   y += tSize + L.u(6);
-  W.text(ctx, '看上面的数，猜下面更多还是更少', cx, y + subSize * 0.7, { size: subSize, color: C.sub, align: 'center', maxW: L.contentW });
+  if (full) W.text(ctx, '看上面的数，猜下面更多还是更少', cx, y + subSize * 0.7, { size: subSize, color: C.sub, align: 'center', maxW: L.contentW });
 }
 
 function draw(ctx, vm, L) {
@@ -192,8 +193,10 @@ function draw(ctx, vm, L) {
   const catW = L.u(104) * (L.large ? 1.3 : 1);
   const freeW = cw - catW - L.u(8);
   W.button(ctx, L, hits, { id: 'home:free', x, y, w: freeW, h: freeH, label: '随便比比 · 不限次', size: T.FS.bodyL });
-  const catLabel = ((vm.free && vm.free.categoryLabel) || '全部') + ' ▾';
-  W.button(ctx, L, hits, { id: 'home:category', x: x + freeW + L.u(8), y, w: catW, h: freeH, label: catLabel, size: T.FS.body, kind: 'ghost' });
+  const catLabel = (vm.free && vm.free.categoryLabel) || '全部';
+  const catX = x + freeW + L.u(8);
+  W.button(ctx, L, hits, { id: 'home:category', x: catX, y, w: catW, h: freeH, label: catLabel, size: T.FS.body, kind: 'ghost' });
+  W.iconTri(ctx, catX + catW - L.u(16), y + freeH / 2, L.u(9), C.ink, 'down');
   y += freeH;
   if (bestText) {
     W.text(ctx, bestText, L.cx, y + bestH / 2 + L.u(2), { size: T.FS.body, color: C.sub, align: 'center', maxW: cw });

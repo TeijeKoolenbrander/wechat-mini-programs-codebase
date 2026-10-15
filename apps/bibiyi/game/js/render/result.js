@@ -39,7 +39,7 @@ function body(ctx, vm, L, hits, x, y0, w) {
   let y = y0;
   const status = vm.status || 'done';
   const centre = x + w / 2;
-  const lh = L.u(26) * (L.large ? 1.15 : 1);
+  const lh = L.u(L.compact ? 22 : 26) * (L.large ? 1.15 : 1);
 
   W.text(ctx, vm.headerText || '', centre, y + lh / 2, { size: T.FS.body, weight: 600, color: C.sub, align: 'center', maxW: w });
   y += lh + L.u(6);
@@ -47,7 +47,8 @@ function body(ctx, vm, L, hits, x, y0, w) {
   y += lh;
 
   // the streak number
-  const bigH = T.FS.streak * 1.2;
+  const bigSize = L.compact && !L.large ? 56 : T.FS.streak;
+  const bigH = bigSize * 1.1;
   if (status === 'finalizing') {
     W.skeleton(ctx, centre - L.u(46), y + bigH * 0.15, L.u(92), bigH * 0.7, vm.t, 12);
     y += bigH;
@@ -58,7 +59,7 @@ function body(ctx, vm, L, hits, x, y0, w) {
   const sc = vm.streakCount;
   let numStr = String(vm.streak != null ? vm.streak : 0);
   if (typeof sc === 'number' && sc < 1) numStr = String(Math.round((vm.streak || 0) * (1 - Math.pow(1 - clamp(sc, 0, 1), 3))));
-  W.text(ctx, numStr, centre, y + bigH / 2, { size: T.FS.streak, weight: 900, serif: true, color: (vm.streak || 0) >= 10 ? C.seal : C.ink, align: 'center' });
+  W.text(ctx, numStr, centre, y + bigH / 2, { size: bigSize, weight: 900, serif: true, color: (vm.streak || 0) >= 10 ? C.seal : C.ink, align: 'center' });
   y += bigH;
   const note = vm.streakText && vm.streakText.indexOf('（') >= 0 ? vm.streakText.slice(vm.streakText.indexOf('（')) : '';
   if (note) {

@@ -144,7 +144,7 @@ function draw(ctx, vm, L) {
 
   // ---- header row: mode / issue / theme left, streak chip right
   let y = L.navBottom + L.u(2);
-  const headH = L.u(40) * (L.large ? 1.2 : 1);
+  const headH = L.u(L.compact ? 36 : 40) * (L.large ? 1.2 : 1);
   const chipW = streakChip(ctx, L, vm, x + cw, y + headH / 2);
   W.text(ctx, vm.headerText || '', x, y + headH / 2, { size: T.FS.bodyL, weight: 700, color: C.ink, maxW: cw - chipW - L.u(10) });
   y += headH;
@@ -156,7 +156,7 @@ function draw(ctx, vm, L) {
   ctx.fillRect(x, y + L.u(2), cw, 4);
   ctx.fillStyle = C.ink;
   ctx.fillRect(x, y + L.u(2), (cw * done) / total, 4);
-  y += L.u(12);
+  y += L.u(L.compact ? 8 : 12);
 
   // challenge: quiet inline line, once
   if (vm.challenge && vm.challenge.passedText) {
@@ -170,7 +170,7 @@ function draw(ctx, vm, L) {
   const btnY = bottom - bh;
   const gapBtn = L.u(16);
   const btnW = (cw - gapBtn) / 2;
-  const promptH = L.u(30) * (L.large ? 1.2 : 1);
+  const promptH = L.u(L.compact ? 26 : 30) * (L.large ? 1.2 : 1);
   const promptY = btnY - L.u(8) - promptH;
   const vpTop = y;
   const vpBottom = promptY - L.u(2);

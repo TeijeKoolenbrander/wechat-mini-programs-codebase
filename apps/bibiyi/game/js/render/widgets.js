@@ -95,7 +95,7 @@ function wrap(ctx, str, maxW, size, weight, serif) {
   ctx.font = font(size, weight, serif);
   const lines = [];
   let line = '';
-  const punctNoStart = '，。！？、；：）】」』”’》…,.!?;:)';
+  const punctNoStart = '，。！？、；：）】」』”’》…';
   Array.from(String(str || '')).forEach((ch) => {
     if (ch === '\n') {
       lines.push(line);

@@ -79,7 +79,7 @@ function makeLayout(sys) {
     thumbTop: H * 0.6,
     board,
     // Heights that grow in large-text mode (spec 6.19: buttons >= 64pt).
-    btnH: u(large ? 64 : compact ? 52 : 56), // answer and primary buttons (>= 56pt)
+    btnH: u(large ? 64 : 56), // answer and primary buttons (>= 56pt)
     btnH2: u(large ? 60 : 50), // secondary buttons
     rowH: u(large ? 64 : 56),
     // Right edge a header text may use without touching the capsule row.
