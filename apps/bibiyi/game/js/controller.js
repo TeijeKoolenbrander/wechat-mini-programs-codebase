@@ -88,6 +88,9 @@ function createController(deps) {
     if (c.screen === 'board' && screen !== 'board') ads.destroyBanner();
     c.screen = screen;
     c.sheets = [];
+    c.ui.scrollY = 0;
+    c.ui.sheetScroll = 0;
+    c.ui.playScroll = null;
     c.ui.report = null;
     c.ui.source = null;
     invalidate();
@@ -96,6 +99,7 @@ function createController(deps) {
   const groupLabel = (key) => (FREE_GROUPS.find((g) => g.key === key) || FREE_GROUPS[0]).label;
   const topSheet = () => c.sheets[c.sheets.length - 1] || null;
   const openSheet = (kind) => {
+    c.ui.sheetScroll = 0;
     c.sheets.push(kind);
     invalidate();
   };
@@ -224,6 +228,7 @@ function createController(deps) {
   function setPhase(r, phase) {
     r.phase = phase;
     r.phaseAt = now();
+    c.ui.playScroll = null; // the card viewport follows the phase again (large text on a small screen)
     invalidate();
   }
 
@@ -1123,13 +1128,22 @@ function createController(deps) {
     c.scrollMax = m || {};
   };
 
+  /** Ids whose drag moves the screen's own scroll offset (vm.scrollY). */
+  const SCREEN_SCROLL_IDS = ['result:scroll', 'home:scroll', 'challenge:scroll', 'history:scroll', 'issue:scroll'];
+
+  /** Ids that only swallow taps (a card or scrim under a sheet or dialog). */
+  const SWALLOW_ID = /(:block|:card)$|^sheet:body$/;
+
   c.onDrag = function (id, dy) {
     const max = (c.scrollMax && c.scrollMax[id]) || 0;
     const clampTo = (v) => Math.max(0, Math.min(max, v));
-    if (id === 'result:scroll') c.ui.scrollY = clampTo(c.ui.scrollY - dy);
+    if (SCREEN_SCROLL_IDS.indexOf(id) >= 0) c.ui.scrollY = clampTo(c.ui.scrollY - dy);
     else if (id === 'sheet:list') c.ui.sheetScroll = clampTo(c.ui.sheetScroll - dy);
-    else if (id === 'history:list') c.ui.scrollY = clampTo(c.ui.scrollY - dy);
-    else if (id === 'issue:scroll') c.ui.scrollY = clampTo(c.ui.scrollY - dy);
+    else if (id === 'play:cards') {
+      // null = follow the phase; the first drag fixes the offset where the renderer had put it
+      const from = c.ui.playScroll === null || c.ui.playScroll === undefined ? (c.r && c.r.phase !== 'awaitAnswer' && c.r.phase !== 'loading' ? max : 0) : c.ui.playScroll;
+      c.ui.playScroll = clampTo(from - dy);
+    }
     else if (id === 'board:list' && c.board) {
       const L = getLayout();
       const cap = (c.board.rowCount || 0) * 66 * (L.s || 1);
@@ -1141,6 +1155,7 @@ function createController(deps) {
 
   c.onHit = function (id) {
     const ui = c.ui;
+    if (SWALLOW_ID.test(id)) return;
     if (ads.overlay) {
       if (id === 'adstub:complete') ads.stubComplete();
       else if (id === 'adstub:skip') ads.stubSkip();
@@ -1360,7 +1375,7 @@ function createController(deps) {
     if (id === 'answer:hi') return onAnswer('hi');
     if (id === 'answer:lo') return onAnswer('lo');
     if (id === 'play:retry') return retryLoad();
-    if (id === 'play:continue') return skipForward();
+    if (id === 'play:cards' || id === 'play:continue') return skipForward();
     if (id.indexOf('report:') === 0) return openReport(id.slice(7));
     if (id.indexOf('source:') === 0) return openSource(id.slice(7));
   }
@@ -1567,6 +1582,7 @@ function createController(deps) {
           hasGroupContext: c.group.status === 'ok', muted: S.muted, showHowToOnce: sheet === 'howto' && !S.howtoSeen, friendBoardEnabled: privacy.friendBoardEnabled(),
           sheet, sheetVm, display, t,
         });
+        vm.scrollY = c.ui.scrollY;
         break;
       }
       case 'play': {
@@ -1577,6 +1593,7 @@ function createController(deps) {
         }
         const revealT = r && r.phase === 'revealing' ? Math.min(1, (t - r.phaseAt) / REVEAL_MS) : 0;
         vm = V.playVm(r, { revealT, sheet, sheetVm, coach: c.coach, categoryLabel: groupLabel(r.group), display, muted: S.muted, t });
+        if (typeof c.ui.playScroll === 'number') vm.scrollY = c.ui.playScroll;
         break;
       }
       case 'result':
@@ -1584,15 +1601,18 @@ function createController(deps) {
         break;
       case 'challenge':
         vm = V.challengeVm(c.challenge, { display, t });
+        vm.scrollY = c.ui.scrollY;
         break;
       case 'board':
         vm = V.boardVm(Object.assign({}, c.board, { display, t }));
         break;
       case 'history':
         vm = V.historyVm(c.history, display);
+        vm.scrollY = c.ui.scrollY;
         break;
       case 'issue':
         vm = V.issueVm(c.issue, display);
+        vm.scrollY = c.ui.scrollY;
         vm.sheet = sheet;
         vm.sheetVm = sheetVm;
         break;
@@ -1601,6 +1621,8 @@ function createController(deps) {
       vm.sheet = null;
       vm.sheetVm = null;
     }
+    vm.sheetScroll = c.ui.sheetScroll;
+    if (sheet === 'questions' && vm.questions) vm.sheetVm = { questions: vm.questions };
     const overlay = {};
     if (c.ui.dialog) overlay.dialog = { text: c.ui.dialog.text, confirmLabel: c.ui.dialog.confirmLabel, cancelLabel: c.ui.dialog.cancelLabel, danger: !!c.ui.dialog.danger };
     if (c.ui.toast) overlay.toast = { text: c.ui.toast.text };

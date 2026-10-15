@@ -175,11 +175,14 @@ function sourceSheetVm(face, canReport) {
   const info = face.info || {};
   return {
     factId: face.factId,
+    card: face,
     label: face.label,
     valueText: face.valueText,
     unitText: face.unitText,
     subLabel: info.subLabel || '',
     year: info.year,
+    yearText: info.year ? String(info.year) : '',
+    note: face.note || null,
     publisher: info.publisher || '',
     sourceTitle: info.sourceTitle || '',
     url: info.url || '',
@@ -386,6 +389,7 @@ function issueVm(d, display) {
   if (!data) return out;
   out.issueNo = data.issue.issueNo;
   out.themeLabel = data.issue.themeLabel;
+  out.dateText = dateText(d.dateKey);
   out.titleText = '第' + data.issue.issueNo + '期 · ' + dateText(d.dateKey) + ' · ' + data.issue.themeLabel;
   if (data.mine) {
     out.mine = { streak: data.mine.streak, missK: data.mine.missK };
@@ -425,7 +429,7 @@ function cardVm(res) {
   const marks = (res.questions || []).map((x) => !!x.correct);
   const base = { mode: res.mode === 'daily' ? 'daily' : 'free', streak: res.streak, marks, cleared: !!res.cleared, rarityText: res.rarityShare !== null && res.rarityShare !== undefined ? rarityLine(res.rarityShare) : null };
   if (res.mode === 'daily') {
-    return Object.assign(base, { titleText: '比一比 · 今日一比 第' + res.issueNo + '期 · ' + res.themeLabel, taglineText: '同一套题，你能比我多吗？' });
+    return Object.assign(base, { issueNo: res.issueNo, themeLabel: res.themeLabel, titleText: '比一比 · 今日一比 第' + res.issueNo + '期 · ' + res.themeLabel, taglineText: '同一套题，你能比我多吗？' });
   }
   const miss = res.miss;
   return Object.assign(base, {
