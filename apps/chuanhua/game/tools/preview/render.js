@@ -4,6 +4,9 @@
  *
  *   cd apps/chuanhua/game/tools/preview && npm install && node render.js
  *
+ * REAL_DIR=<dir>: render the REAL view models the controller produced (tests/integration.test.js with DUMP_VIEWS=<dir>)
+ *   instead of the hand-written fixtures; output goes to out/real/<WxH>/<mode>/:
+ *     DUMP_VIEWS=/tmp/views node --test ../../tests/integration.test.js && REAL_DIR=/tmp/views node render.js
  * Env: DPR (default 2), HITS=1 (outline tap areas), ONLY=home,draw (screens),
  *   SIZES=320x568,430x932 (comma list; default 320x568,375x667,430x932),
  *   MODES=standard,large,hc (default all three), FONT_DIR for Noto fonts.
@@ -27,6 +30,13 @@ const FONT_DIR = process.env.FONT_DIR || 'C:/Windows/Fonts';
 });
 
 const DPR = Number(process.env.DPR || 2);
+const REAL_DIR = process.env.REAL_DIR || null;
+// preview mode name -> the display mode the integration tour ran in
+const REAL_MODE = { standard: 'default', large: 'large', hc: 'hc' };
+function realFixtures(mode) {
+  const f = path.join(REAL_DIR, 'real_' + REAL_MODE[mode] + '.json');
+  return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {};
+}
 const SHOW_HITS = process.env.HITS === '1';
 const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
 const sizesOnly = process.env.SIZES ? process.env.SIZES.split(',') : ['320x568', '375x667', '430x932'];
@@ -66,7 +76,7 @@ function renderState(screen, st, L, mode) {
 }
 
 function main() {
-  const out = path.join(__dirname, 'out');
+  const out = path.join(__dirname, 'out', REAL_DIR ? 'real' : '');
   let count = 0;
   for (const sz of SIZES) {
     const key = sz.w + 'x' + sz.h;
@@ -75,7 +85,7 @@ function main() {
     for (const mode of modesOnly) {
       const dir = path.join(out, key, mode);
       fs.mkdirSync(dir, { recursive: true });
-      const fx = buildFixtures({ L, mode });
+      const fx = REAL_DIR ? realFixtures(mode) : buildFixtures({ L, mode });
       for (const screen of Object.keys(fx)) {
         if (screen === 'shareCard' || (only && !only.includes(screen))) continue;
         const rendered = [];
@@ -108,7 +118,7 @@ function main() {
     }
   }
   // share cards (size independent, always the standard look)
-  if (!only || only.includes('shareCard')) {
+  if (!REAL_DIR && (!only || only.includes('shareCard'))) {
     const sdir = path.join(out, 'shareCard');
     fs.mkdirSync(sdir, { recursive: true });
     const cards = buildFixtures({ L: makeLayout(sysFor(SIZES[0])), mode: 'standard' }).shareCard || {};

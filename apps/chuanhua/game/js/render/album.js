@@ -109,6 +109,9 @@ function drawDetail(ctx, vm, L) {
       const lh = Math.round(T.FS.body * 1.5);
       const note = '这里只显示你自己传的棒，别人的内容要等揭晓。';
       y += W.paragraph(c, note, x + 2, y, w - 4, lh, { size: T.FS.body, color: C.sub }) + 8;
+      // vm.state (extra, from the controller): the list is empty while loading and when the fetch failed
+      const status = { loading: '正在打开…', offline: '需联网才能查看', error: '没打开，请返回再试' }[vm.state];
+      if (status && !mine.length) y += W.paragraph(c, status, x + 2, y + 8, w - 4, Math.round(T.FS.bodyL * 1.5), { size: T.FS.bodyL, weight: 700, color: C.sub, align: 'center' }) + 24;
       const STAMP = { pending: '审核中', passed: '已通过', blocked: '没通过', void: '已超时' };
       mine.forEach((m) => {
         const mod = STAMP[m.modState] ? m.modState : 'pending';

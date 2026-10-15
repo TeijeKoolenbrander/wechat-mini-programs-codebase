@@ -2,14 +2,15 @@
 
 WeChat Cloud Development backend for the mini game `chuanhua`. Spec: `docs/chuanhua/spec.md` §6, §7, §13, §16, §19; decisions `docs/chuanhua/decisions.md` (PO-10, PO-13..PO-19, PO-33).
 
-Status: code and tests complete and passing against a **test double** of the game core (`tests/fake-core`, same export shapes as the real core README). Not deployed (no AppID or cloud environment yet). The game core (minigame-dev, branch `worktree-agent-a4d33d779bf3c2cfb`, commit `63da5b2`) was read but **not merged or run** by this branch; `tests/core-adapter.test.js` contains 4 `REAL CORE` tests that skip until `apps/chuanhua/game/core` is in the tree, then verify parity (prompts/blocklist shapes, daily ids, stroke validation, rasteriser, constants). **After merging both branches run `npm run sync && npm run check && npm test` here.** Founder items are in "What the device pass / console must prove" below.
+Status: code and tests complete and passing. The game core (apps/chuanhua/game/core) is merged and the four `REAL CORE` parity tests in `tests/core-adapter.test.js` run (never skipped: a guard test fails if the core is missing). Most suites run against a test double of the core (`tests/fake-core`, same export shapes) for stable fixtures; `createHarness({realCore:true})` stages the real core, which is what the game's `tests/client-contract.test.js` uses to run the client flows against these functions. Run `npm run sync && npm run check && npm test` here after any change to `common/` or the core. Not deployed (no AppID or cloud environment yet). Founder items are in "What the device pass / console must prove" below.
 
 ## Functions
 
 | Function | Trigger | Timeout (s) | Purpose |
 |---|---|---|---|
 | `getHome` | client | 5 | today's 3 prompts, allowances, restriction, streak, features, kill-switch state |
-| `agreeRules` | client | 5 | records the 接龙公约 agreement |
+| `agreeRules` | client | 5 | records the 接龙公约 agreement (also clears `warnPending`) |
+| `ackWarning` | client | 5 | the player saw the one-time strike sheet: clears `getHome.me.warnPending` (kept until then); idempotent |
 | `joinGroup` | client | 5 | cloudID-decrypted group entry -> opaque `groupRef` (copied from 点将台) |
 | `createChain` | client | 8 | chain + immediate claim on 第 1 棒; custom prompt moderated first |
 | `getChain` | client | 5 | chain-entry state; **never any content** |
@@ -146,6 +147,8 @@ All point reads use deterministic `_id`s; uniqueness never relies on indexes.
 6. Run `admin` from the console routine of spec 7.2 (listReports daily for 4 weeks, `sample` of 20).
 
 ## Behaviour notes and spec gaps decided
+
+- **Client contract (reconciled with the game).** `getChain` returns `capReached` + `code` for limits (never `limit`), `until` for `restricted`, `canRevealNow` always, and `canSameAgain` only where the viewer already knows the prompt (revealed: anyone; expired: the starter, AC 10). `getReveal`/teaser, `getMyChains` (list and `{chainId}` detail) carry `promptId` for preset prompts under the same rule; list/detail items carry `blockedStep` and `length`; `claimStep` returns `canReport`. The full list of shapes and the client-side decisions are in `apps/chuanhua/game/core/README.md` and `apps/chuanhua/game/js/CONTRACT.md`; `apps/chuanhua/game/tests/client-contract.test.js` fails on any difference between these functions and the client's mock server.
 
 - `report` ids are `<reporterOpenid>_<stepId>` (spec 13.1), so `admin.listReports` shows an id that embeds the reporter's openid; admin console only, never returned to clients.
 - Restriction imposed **mid-turn** lets the current claim finish (spec edge 19); one that predates the claim blocks the submit (`players.restrictedAt`).

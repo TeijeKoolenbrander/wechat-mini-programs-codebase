@@ -494,7 +494,8 @@ function albumLine(it) {
     case 'expired':
       return '没传完' + (it.promptText ? '「' + it.promptText + '」' : '');
     case 'blocked':
-      return '这一棒没通过审核 · 第 ' + it.blockedStep + ' 棒';
+      // blockedStep is null when the 棒 timed out in review (void) instead of being blocked
+      return it.blockedStep ? '这一棒没通过审核 · 第 ' + it.blockedStep + ' 棒' : '这一棒没有传出去（审核没通过或超时）';
     case 'removed':
       return '该接龙已被移除';
     default:

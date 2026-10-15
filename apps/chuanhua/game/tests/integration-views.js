@@ -722,4 +722,45 @@ async function tourStates(w) {
   S1(Wn, 'home_group_line');
 }
 
-module.exports = { createProbe, makeWorld, tourSolo, tourChain, tourStates, displayOf };
+/** drawings the moderation blocks or never answers: sent (pending -> blocked / void), the strike sheet, album, detail */
+async function tourBlocked(w) {
+  const { probe } = w;
+  const S1 = (c, l) => probe.snap(c, l);
+  for (const kind of ['blocked', 'void']) {
+    const c = w.client('mod-' + kind);
+    await c.ctl.start(undefined);
+    await c.settle();
+    closeSheet(c);
+    await tapSettle(c, 'home:start');
+    c.tapId((h) => h.id.indexOf('picker:select:') === 0);
+    await tapSettle(c, 'picker:start');
+    c.strokes(kind === 'blocked' ? 13 : 15); // the mock rules: exactly 13 strokes -> risky, exactly 15 -> no verdict
+    w.t.mock.timers.tick(300);
+    await tapSettle(c, 'draw:submit');
+    S1(c, 'sent_' + kind + '_pending');
+    w.adv(61e3);
+    w.t.mock.timers.tick(16e3);
+    c.view();
+    await c.settle();
+    if (kind === 'void') {
+      w.adv(72 * 60e3);
+      w.t.mock.timers.tick(16e3);
+      c.view();
+      await c.settle();
+      // the poll window (a few minutes) is over by now; the player finds the verdict in 我的接龙, and a reopened screen shows it
+      const r = await c.api.getMyChains({ chainId: c.ctl.state.sent.chainId });
+      if (r.items[0].mine[0].modState !== 'void') throw new Error('the 棒 should be void: ' + JSON.stringify(r.items[0].mine[0].modState));
+      c.ctl.state.sent.modState = 'void';
+    }
+    S1(c, 'sent_' + kind);
+    await tapSettle(c, 'back');
+    S1(c, 'home_after_' + kind);
+    closeSheet(c);
+    await tapSettle(c, 'home:album');
+    S1(c, 'album_' + kind);
+    await tapSettle(c, (h) => h.id.indexOf('album:item:') === 0);
+    S1(c, 'detail_' + kind);
+  }
+}
+
+module.exports = { createProbe, makeWorld, tourSolo, tourChain, tourStates, tourBlocked, displayOf };

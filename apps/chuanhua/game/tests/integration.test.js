@@ -20,7 +20,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { createProbe, makeWorld, tourSolo, tourChain, tourStates } = require('./integration-views');
+const { createProbe, makeWorld, tourSolo, tourChain, tourStates, tourBlocked } = require('./integration-views');
 const renderers = require('../js/renderers');
 
 const ROOT = path.join(__dirname, '..');
@@ -67,6 +67,11 @@ for (const mode of MODES) {
     await tourChain(makeWorld(t, p, mode));
     collect(p, mode);
   });
+  test(`real screens, blocked and voided drawings: sent, strike sheet, album, detail, ${mode}`, async (t) => {
+    const p = createProbe(mode);
+    await tourBlocked(makeWorld(t, p, mode));
+    collect(p, mode);
+  });
   test(`real screens, entry states, group list, album, detail, offline, ${mode}`, async (t) => {
     const p = createProbe(mode);
     await tourStates(makeWorld(t, p, mode));
@@ -93,6 +98,9 @@ test('every screen the game has was visited, with its main states', () => {
   has('describe', /busy/);
   has('sent', /pending/);
   has('sent', /passed/);
+  has('sent', /blocked$/);
+  has('sent', /void$/);
+  has('detail', /blocked/);
   has('reveal', /autoplay/);
   has('reveal', /paused/);
   has('reveal', /offline/);

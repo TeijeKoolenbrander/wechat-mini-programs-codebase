@@ -53,7 +53,7 @@ Hit ids: `back` (首页), `sent:share`, `sent:reveal`, `sent:subscribe`, `sent:g
 Extras: `claimBusy` (接这一棒 tap in flight), `timerSecText` (e.g. 限时 45 秒).
 Never draws a prompt or any 棒 content; it reads only counts, kinds and pre-formatted lines. `headline` and `subline` default per `state`.
 Hit ids: `back` (首页), `entry:claim`, `entry:group`, `entry:revealNow`, `entry:new`, `entry:refresh`, `entry:subscribe`, `entry:share`, `entry:reveal`, `entry:teaser`, `entry:mine`, `entry:sameAgain`, `entry:home`, `entry:retry`.
-`entry:claim` is drawn disabled (no hit area) for `restricted`/`ugcPaused`, and enabled for `rulesRequired` (logic opens the rules sheet).
+`entry:teaser` is drawn for the state `revealedTeaser`, which the controller never shows (it opens the teaser screen instead); the id is routed anyway. `entry:claim` is drawn disabled (no hit area) for `restricted`/`ugcPaused`, and enabled for `rulesRequired` (logic opens the rules sheet).
 
 ## reveal  (`reveal.js`)
 Extras: `replay: {n, progress}` (replay of one drawing after a tap on it), `teaser: {promptText, finalText, passed, canSameAgain}` (data for `notParticipant`; `steps` is never read for that state), `autoplay.progress` (0..1, panel progress).
@@ -75,7 +75,7 @@ Extras: `offlineNote` (bool, cached list shown read-only; `state: 'offline'` wit
 Hit ids: `back`, `album:item:<chainId>`, `album:more` (when `cursor` is set), `album:start`, `album:retry`, `banner:slot`.
 
 ## detail  (`album.drawDetail`, screen key `detail`)
-vm = `{chainId, mine:[{n, kind, strokes?, text?, modState, canDelete}], display, sheet}`. Only the viewer's own 棒.
+vm = `{chainId, mine:[{n, kind, strokes?, text?, modState, canDelete}], state, display, sheet}`. Only the viewer's own 棒. `state` (`loading|ready|offline|error`, extra): while `mine` is empty and the state is not ready the screen shows 正在打开… / 需联网才能查看 / 没打开，请返回再试.
 Hit ids: `back`, `detail:delete:<n>`.
 
 ## settings  (`settings.js`)
@@ -83,7 +83,7 @@ Extras: `subscribeStatusText`, `version`. `display` defaults to `{largeText, hig
 Hit ids: `back`, `settings:sound`, `settings:largeText`, `settings:highContrast`, `settings:palette`, `settings:rules`, `settings:terms`, `settings:privacy`, `settings:feedback` (position `wx.createFeedbackButton` over this rect), `settings:deleteAll`, `settings:deleteRetry`.
 
 ## Sheets  (`sheets.js`, drawn last by every screen)
-`vm.sheet`: `'rules'` (接龙公约 with 先看看 / 同意并开始; data `vm.rules`), `'strike'` (one-time strike warning, `vm.warningText` optional), `'howto'` (玩法), `'report'` (`vm.report = {target, reason, state}`; `reason` is the selected key, `state` idle/submitting/done/limit/dup/error). `vm.sheetScroll` scrolls long sheets.
+The controller owns the state and fills `vm.sheet`, `vm.rules` / `vm.report` (report: `{open, target, reasons, reasonLabels, reason, state, message}`; `reason` is the selected key) and the scroll offsets; the renderer only draws them. `vm.sheet`: `'rules'` (接龙公约 with 先看看 / 同意并开始; data `vm.rules`), `'strike'` (one-time strike warning, `vm.warningText` optional), `'howto'` (玩法), `'report'` (`vm.report = {target, reason, state}`; `reason` is the selected key, `state` idle/submitting/done/limit/dup/error). `vm.sheetScroll` scrolls long sheets.
 Hit ids: `sheet:close` (scrim and X), `sheet:body`, `sheet:scroll`, `rules:agree`, `rules:later`, `rules:terms`, `rules:privacy`, `strike:ok`, `howto:ok`, `report:reason:<key>` (keys `porn|politics|abuse|ad|other`), `report:submit`, `report:cancel`.
 
 ## overlay  (`overlay.js`, draw after any screen)
