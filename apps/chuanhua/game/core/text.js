@@ -12,7 +12,7 @@
  */
 
 const { CONFIG } = require('./config');
-const blocklist = require('./content/blocklist.v1');
+const blocklist = require('./content/blocklist.v1.js');
 
 const REJECT_MESSAGE = '换个说法吧';
 const ALLOWED_PUNCT = '，。！？、…—·~,.!?-\' ';

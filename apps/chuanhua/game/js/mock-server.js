@@ -56,7 +56,7 @@ function createMockServer(opts) {
     submits: {}, // claimId -> response (idempotent submit)
     ugc: { createEnabled: true, viewEnabled: true },
   };
-  const knobs = { moderationBusy: false, ugcBusy: false, mediaDelaySec: CONFIG.moderation.mockMediaDelaySec, rasterize: opts.rasterize !== false };
+  const knobs = { moderationBusy: false, ugcBusy: false, subscribeTmpl: null, updatableCard: true, mediaDelaySec: CONFIG.moderation.mockMediaDelaySec, rasterize: opts.rasterize !== false };
   const srv = { db, knobs, offline: false, calls: [] };
 
   const nextId = (p) => {
@@ -255,7 +255,7 @@ function createMockServer(opts) {
           unseenReveals: unseen,
           lifetimeReveals: revealedMine,
         },
-        features: { subscribe: null, updatableCard: true, banner: { enabled: false, adUnitId: null }, interstitial: { enabled: true, minLifetimeReveals: 3, minGapSec: 180, maxPerDay: 3 } },
+        features: { subscribe: knobs.subscribeTmpl ? { tmplId: knobs.subscribeTmpl } : null, updatableCard: knobs.updatableCard !== false, banner: { enabled: false, adUnitId: null }, interstitial: { enabled: true, minLifetimeReveals: 3, minGapSec: 180, maxPerDay: 3 } },
         ugc: { createEnabled: db.ugc.createEnabled, viewEnabled: db.ugc.viewEnabled },
       };
     },

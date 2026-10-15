@@ -5,7 +5,7 @@
  *   batch(rng, excludeIds, n = 3) -> [{id, text}]   (换一批: random non-retired prompts, not in excludeIds)
  */
 
-const bank = require('./content/prompts.v1');
+const bank = require('./content/prompts.v1.js');
 const { shuffle } = require('./rng');
 
 const PROMPTS = bank.prompts;

@@ -1738,7 +1738,7 @@ function createController(deps) {
     if (c.ui.toast) overlay.toast = { text: c.ui.toast.text };
     if (ads.overlay) overlay.adStub = { kind: ads.overlay.kind, secondsLeft: Math.max(0, Math.ceil((ads.overlay.durationMs - (t - ads.overlay.startedAt)) / 1000)) };
     if (c.report.open) overlay.sheet = { kind: 'report', vm: V.reportVm(Object.assign({}, c.report, { reason: c.report.reason })) };
-    else if (c.rules.open) overlay.sheet = { kind: 'rules', vm: V.rulesVm(c.rules, RULES_LINES) };
+    else if (c.rules.open) overlay.sheet = { kind: 'rules', vm: V.rulesVm({ open: c.rules.open, pendingAction: c.rules.pendingAction ? c.rules.pendingAction.trigger : null }, RULES_LINES) };
     else if (c.screen === 'home' && c.home.sheet) overlay.sheet = { kind: c.home.sheet, vm: c.home.sheet === 'howto' ? V.howtoVm() : { text: '你有内容没通过审核。请遵守接龙公约，多次违规将被限制参与。', lines: RULES_LINES } };
     return { screen: c.screen, vm, overlay, display: { largeText: S.largeText, highContrast: S.highContrast }, muted: S.muted };
   };
