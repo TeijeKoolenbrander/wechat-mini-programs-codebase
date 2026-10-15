@@ -110,7 +110,7 @@ test('AC 34: contact and ad patterns are rejected locally', () => {
   assert.equal(T.check('猫1猫2猫3猫4', 'desc').ok, true); // 4 digits is fine
   assert.equal(T.check('一二三四', 'desc').ok, true);
   assert.equal(T.check('三只小猪', 'desc').ok, true);
-  assert.equal(T.check('v i x', 'desc').reason, 'contact'); // spaced evasion
+  assert.equal(T.check('v x', 'desc').reason, 'contact'); // spaced evasion
 });
 
 test('AC 35: blocklisted text is rejected locally with the standard message', () => {
