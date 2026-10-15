@@ -49,8 +49,8 @@ vm = spec 10 Play plus `headerText`, `verdictText` ('对' / '错', shown with th
 `netError: {text, retryLabel}|null`, `loadingText`, `measureKey`, `muted`, `sheet`, `sheetVm`, `t`. `top`/`bottom` are CardFaces (`bottom.valueText` is null until the reveal;
 during `revealing` it holds the final value: count up to it with `revealT`). `phase`: loading | awaitAnswer | sending | revealing | correct | miss | segmentChange | cleared | netError.
 `miss`: shake the card (no flashing), keep both values visible. `segmentBanner` shows during `segmentChange`. `challenge.passedText` is an inline line, no sound, no pop-up.
-Hit ids: `back`, `answer:hi`, `answer:lo` (drawn disabled when `buttons.*.enabled` is false; ≥ 56 pt tall, ≥ 16 pt apart, thumb zone), `play:continue`
-(a transparent area over the cards: a tap skips the count-up or the pause; draw it BEFORE the source links so they win), `play:retry` (when `netError`), `coach:skip`
+Hit ids: `back`, `answer:hi`, `answer:lo` (drawn disabled when `buttons.*.enabled` is false; ≥ 56 pt tall, ≥ 16 pt apart, thumb zone), `play:cards`
+(the card viewport: a tap skips the count-up or the pause, a drag scrolls when large text does not fit a small screen; `scrollMax["play:cards"]`), `play:retry` (when `netError`), `coach:skip`
 (the one-time bubble when `coachMark`), `source:top`, `source:bottom`, `report:top`, `report:bottom` (only when that face's `canReport`).
 Sheets on play: `continue` (再答一次, `sheetVm = {visible, missText, adState, canOffer}`; ids `continue:video`, `continue:result`; ≥ 24 pt gap), `source`, `report`.
 
@@ -101,3 +101,26 @@ Rank by `n` descending; **equal `n` share one rank number**; within a tie the sm
 
 ## Audio and haptics
 Cues: `assets/sounds/turn.mp3`, `ok.mp3`, `miss.mp3` (short, calm, no casino-style sounds). Muting silences all of them and the miss vibration.
+
+## Reconciliation with the real renderer (js/renderers.js)
+
+`js/render/CONTRACT.md` names tap areas after the module that draws them; this file names them after what the controller does. `js/renderers.js` is the only place that knows both: it renames ids, draws the open sheet over the screen, and rebuilds the layout when `vm.display` changes. `tests/integration.test.js` checks every id the real renderer emits against the list below and that tapping it changes something.
+
+Renames (render id -> controller id): `play:back` -> `back`, `play:hi|lo` -> `answer:hi|lo`, `play:sourceTop|Bottom` -> `source:top|bottom`, `play:reportTop|Bottom` -> `report:top|bottom`, `result:top|bottom:source|report` -> `source|report:miss:top|bottom`, `questions:<k>:top|bottom:source|report` -> `source|report:q:<k>:top|bottom`, `issue:<k>:top|bottom:source|report` -> `source|report:issue:<k>:top|bottom`, `picker:<key>` -> `category:<key>`, `rewarded:watch|skip` -> `continue:video|result`, `sources:back` -> `sheet:close`, `sources:scroll` -> `sheet:list`. The 相册 sheet (`albumDenied`) is drawn as a dialog: `dialog:confirm` -> `save:openSetting`, `dialog:cancel` -> `sheet:close`.
+
+View-model additions made at the boundary: `vm.sheetScroll` (sheet scroll offset, every screen), `vm.scrollY` (home, play only after a drag, challenge, history, issue, result), `turn`/`count` derived from `revealT` while revealing, `sheetVm.card` and `yearText` on the source sheet, `sheetVm.questions` on 本局题目, `dateText` on the issue, `issueNo`/`themeLabel` on the daily share card, `pair` -> `hook` on the free share card. `themeLabel` is empty in v1 (no weekday themes): headers drop the dangling " · ".
+
+Scroll ids (drag): `home:scroll`, `play:cards`, `result:scroll`, `challenge:scroll`, `history:scroll`, `issue:scroll`, `sheet:list`, `board:list`.
+
+### All hit ids (checked by tests/integration.test.js)
+
+Screens: `home:daily`, `home:retry`, `home:free`, `home:freeResume`, `home:category`, `home:groupBoard`, `home:groupBanner`, `home:friendBoard`, `home:history`, `home:howto`, `home:sound`, `home:settings`, `home:scroll`;
+`back`, `answer:hi`, `answer:lo`, `play:cards`, `play:retry`, `coach:skip`, `source:top`, `source:bottom`, `report:top`, `report:bottom`;
+`result:back`, `result:share`, `result:challenge`, `result:save`, `result:questions`, `result:board`, `result:again`, `result:retry`, `result:subscribe`, `result:scroll`, `source:miss:top`, `source:miss:bottom`, `report:miss:top`, `report:miss:bottom`;
+`challenge:accept`, `challenge:home`, `challenge:retry`, `challenge:free`, `challenge:daily`, `challenge:compare`, `challenge:subscribe`, `challenge:scroll`;
+`board:back`, `board:retry`, `board:goPlay`, `board:share`, `board:contract`, `board:agree`, `board:openSetting`, `board:list`;
+`history:back`, `history:retry`, `history:item:<dateKey>`, `history:scroll`;
+`issue:back`, `issue:retry`, `issue:scroll`, `source:issue:<k>:top`, `source:issue:<k>:bottom`, `report:issue:<k>:top`, `report:issue:<k>:bottom`.
+Sheets: `sheet:close`, `sheet:list`, `sheet:body` (swallows taps), `settings:sound`, `settings:largeText`, `settings:highContrast`, `settings:sources`, `settings:openSetting`, `settings:privacy`, `settings:feedback`, `category:<key>`, `continue:video`, `continue:result`, `source:report`, `report:reason:<key>`, `report:submit`, `report:cancel`, `source:q:<k>:top`, `source:q:<k>:bottom`, `report:q:<k>:top`, `report:q:<k>:bottom`, `save:openSetting`.
+Overlays: `dialog:confirm`, `dialog:cancel`, `dialog:block`, `adstub:complete`, `adstub:skip`, `adstub:block`, `privacy:agree`, `privacy:refuse`, `privacy:contract`, `privacy:block` (the privacy overlay is drawn by the platform prompt flow in js/privacy.js; the renderer module exists but the controller does not pass `overlay.privacy`).
+Swallow-only ids (`*:block`, `*:card`, `sheet:body`) are ignored by the controller.

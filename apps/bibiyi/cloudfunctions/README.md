@@ -2,7 +2,7 @@
 
 WeChat Cloud Development backend for the mini game `bibiyi`. Spec: `docs/bibiyi/spec.md` §3.8, §4.3-4.4, §5, §8, §11, §13, §16, §17. Decisions: `docs/bibiyi/decisions.md` (PO-9 server-stepped runs, PO-15 shared ranks, PO-17 history lock, PO-23 reports, PO-33 retention, PO-34 observe-only flags).
 
-Status: code and tests complete and passing against a **test double of the game core** (`tests/fake-core`), because minigame-dev's real core (`apps/bibiyi/game/core`) had not landed when this was built. The adapter `common/coreapi.js` is the only file that touches the core; see "Core contract". Not deployed (no AppID or cloud environment yet).
+Status: code and tests complete and passing against the **real game core** (`apps/bibiyi/game/core`, synced by `npm run sync`) and the real daily pool (`game/tools/out/daily-facts.json`, 214 facts). The adapter `common/coreapi.js` is the only file that touches the core. Not deployed (no AppID or cloud environment yet).
 
 ## Functions
 
@@ -50,7 +50,7 @@ cloudfunctions/
   <fn>/index.js, package.json, function.config.json, config.json (timers / openapi permissions)
   scripts/sync-core.js, scripts/import-daily-facts.js
   database/rules.json
-  tests/             node --test; helpers/ = fake db + harness; fake-core/ = core test double
+  tests/             node --test; helpers/ = fake db + harness
 ```
 
 A cloud function deploys as one folder, so shared code is copied in:
@@ -62,24 +62,9 @@ npm test         # sync first (pretest), then everything, including the drift te
 ```
 
 - `<fn>/common/` copies are committed (source: `common/`). `<fn>/core/` copies are generated and git-ignored (the core is owned by the game).
-- **Which core is synced:** `apps/bibiyi/game/core` when it has `deck.js`, otherwise `tests/fake-core` (override: `BIBIYI_CORE=fake`). **Do not deploy with the fake core**: run `npm run sync` after the real core lands and check `node scripts/sync-core.js --check` prints "no drift" with `apps/bibiyi/game/core` as the source. The unit tests always run on the fake core (the harness stages it explicitly) so they stay stable; the `core contract` test checks the *active* core.
-
-### Core contract (what `common/coreapi.js` expects)
-
-```
-core/date.js     beijingDateKey(ms)
-core/config.js   LATEST_CONFIG_VERSION, getConfig(v) -> {gateVersion, boardListCap, gates, daily?:{repeatWindowDays,maxCandidates}, ads?:{interstitial}, anomaly?} | null
-core/content.js  LATEST_CONTENT_VERSION, getMeasures() -> {key:{category,kind,unit,subLabel,hi,lo,...}}, getFreeFact(v,id), getContent(v) | null
-core/deck.js     themeForWeekday(0..6) -> {key,label,categories|null}
-                 buildFreeDeck(seed, cv, cfgv, group) -> [{a,b}] fact objects (id, measure, value, ...) | null
-                 buildDailyDeck({facts, seed, attempt, theme, configVersion}) -> [{a,b}] | null      (server only)
-core/gates.js    evaluateDeck([{a,b}], configVersion) -> {median, p20, p40, pass}
-core/judge.js    correctChoice(a, b) -> 'hi' | 'lo'
-core/format.js   formatValue(fact, measure) -> {valueText, unitText, approx}, sourceLine(fact)
-core/rng.js      mulberry32, hash32, sub
-```
-
-If minigame-dev's API differs, change only `common/coreapi.js` (and the fake core to match); the tests will show what else moved. `tests/fake-core` is a faithful-enough implementation of spec 4.1-4.4 (pair rules, bands, segments, weekday themes, analytic gate) but is **not** the real balance.
+- **The core** is `apps/bibiyi/game/core`, the same code the client runs (decks, question and reveal payloads, judging, the difficulty gate), so both sides cannot disagree. `tests/` run on it and on the real daily pool; `core contract` in `security.test.js` checks the calls the adapter makes.
+- `common/coreapi.js` converts between the core (decks of fact ids, an index) and the backend (deck documents of ids, `[{a,b}]` fact objects). Question, reveal and answered-pair payloads are the core's own `question.js` builders, so a server-stepped question has exactly the shape of a local one.
+- **Client contract:** `tests/client-contract*.test.js` boot the real game (real controller and renderers) against these handlers; `tests/mock-parity.test.js` runs one scripted session against these functions and the game's mock-server and fails on any shape difference. Errors are `{ok:false, code, message}`; the rarity is `{pct, total}` or null; `theme` is the key and `themeLabel` the label (empty in v1: no weekday themes).
 
 ## Environment variables (cloud environment config; never committed)
 
@@ -115,7 +100,7 @@ node apps/bibiyi/cloudfunctions/scripts/import-daily-facts.js <daily-facts expor
 - The script validates (required fields, `pool` must be `daily`, https URL, unique ids and labels per measure, finite positive values, integer years, label <= 10 and note <= 24 characters, known measure and status) and **writes nothing if anything is wrong**. `--check` validates only.
 - Output: JSON Lines in the OS temp dir (or `--out`), one doc per fact: `{_id: "v<version>_<factId>", contentVersion, ...fact}`. The `v<version>_` prefix keeps the last two content versions side by side (decks pin their version, spec 3.9).
 - Console: database > `daily_facts` > import > the file > file type **JSON Lines** (one JSON object per line) > conflict mode **upsert** (safe to re-run with a corrected file). Then **delete the file from disk. Never commit it** (it is the daily answer key; `*.import.jsonl` and `daily-facts*` are git-ignored here).
-- `<contentVersion>` must equal the core's `LATEST_CONTENT_VERSION` (the functions read `daily_facts` for the live version). Expect 242 facts at contentVersion 1 (spec 3.3); `genDaily` refuses to generate (`DAILY_UNAVAILABLE`, `[ALERT]`) with fewer than 30 usable facts.
+- `<contentVersion>` must equal the core's `LATEST_CONTENT_VERSION` (the functions read `daily_facts` for the live version). Expect 214 facts at contentVersion 1 (the real v1 daily pool; see docs/bibiyi/decisions.md); `genDaily` refuses to generate (`DAILY_UNAVAILABLE`, `[ALERT]`) with fewer than 30 usable facts.
 - A monthly content release: import the new version's file, then redeploy the functions with the new core (the new `LATEST_CONTENT_VERSION`); the previous version's docs stay for pinned decks and can be deleted a month later.
 
 ## Collections
@@ -187,7 +172,7 @@ All point reads use the deterministic `_id`. `getHistory` lists `daily_decks` by
 
 ## Tests
 
-`npm test` (Node >= 20): in-memory fake DB with duplicate-`_id` errors, throwing `doc.get`, the 100/1000 row query limits, and rolled-back serialized transactions; the SDK is mocked (including `openapi.subscribeMessage.send`); `Date.now` is controlled. Functions run against the fake core. Covers: generation, idempotency under double fire and lazy races, impossible gates (`DAILY_UNAVAILABLE`), themes at 15:59:59/16:00:00 UTC with `TZ=UTC`/unset, repeat window, suspension; full scripted runs with payload capture (no lookahead), idempotent/concurrent answers, `INVALID_ORDER`, window at 00:29/00:31, finalization atomicity, day streaks; challenges (spoiler lock, ranked/friendly/past/own/expired, counting, subscribe once, send failure); free-run replay and rejections; reports and auto-suspend; board hashing, ties, groups, cap modes; history lock at 00:29/00:31; cleanup retention, finalization, roll-ups and alerts; track; security (rules, identity, secrets, error-code coverage, drift, core contract, import script).
+`npm test` (Node >= 20): in-memory fake DB with duplicate-`_id` errors, throwing `doc.get`, the 100/1000 row query limits, and rolled-back serialized transactions; the SDK is mocked (including `openapi.subscribeMessage.send`); `Date.now` is controlled. Functions run against the real game core and the real daily pool. Covers: generation, idempotency under double fire and lazy races, impossible gates (`DAILY_UNAVAILABLE`), the issue date at 15:59:59/16:00:00 UTC with `TZ=UTC`/unset, repeat window, suspension; full scripted runs with payload capture (no lookahead), idempotent/concurrent answers, `INVALID_ORDER`, window at 00:29/00:31, finalization atomicity, day streaks; challenges (spoiler lock, ranked/friendly/past/own/expired, counting, subscribe once, send failure); free-run replay and rejections; reports and auto-suspend; board hashing, ties, groups, cap modes; history lock at 00:29/00:31; cleanup retention, finalization, roll-ups and alerts; track; security (rules, identity, secrets, error-code coverage, drift, core contract, import script).
 
 ## Spec gaps decided (flag if you disagree)
 

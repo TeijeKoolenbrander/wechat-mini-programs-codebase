@@ -59,12 +59,22 @@ function dailyCopy(d) {
   return out;
 }
 
+/** The mid line (result, progress) breaks at its " · " into two centred lines when it does not fit, never inside a number. */
+function midParts(ctx, L, c, iw) {
+  if (W.measure(ctx, c.mid, T.FS.bodyL + 2, 800, true) <= iw) return [c.mid];
+  return c.mid.split(' · ').slice(0, 2);
+}
+function midLines(ctx, L, c, iw) {
+  return midParts(ctx, L, c, iw).length;
+}
+
 function dailyCardH(ctx, L, d, cw) {
   const c = dailyCopy(d);
   const pad = L.u(14);
   const inner = cw - 2 * pad;
   let h = pad + L.u(30) * (L.large ? 1.15 : 1); // title
-  if (c.mid || c.skeleton) h += L.u(34) * (L.large ? 1.15 : 1);
+  if (c.skeleton) h += L.u(34) * (L.large ? 1.15 : 1);
+  else if (c.mid) h += midLines(ctx, L, c, inner) * L.u(34) * (L.large ? 1.15 : 1);
   c.sub.forEach((s) => (h += W.lineCount(ctx, s, inner, T.FS.body, 400, false, 2) * L.u(24) * (L.large ? 1.15 : 1)));
   h += L.u(10) + L.btnH + pad;
   return h;
@@ -91,8 +101,10 @@ function drawDailyCard(ctx, L, hits, d, x, y, w, h, t) {
     W.skeleton(ctx, x + w * 0.2, cy + L.u(8), w * 0.6, L.u(18) * kk, t, 6);
     cy += L.u(34) * kk;
   } else if (c.mid) {
-    W.text(ctx, c.mid, mx, cy + (L.u(34) * kk) / 2, { size: T.FS.bodyL + 2, weight: 800, serif: true, color: c.midColor, align: 'center', maxW: iw });
-    cy += L.u(34) * kk;
+    const parts = midParts(ctx, L, c, iw);
+    const n = parts.length;
+    parts.forEach((ln, i) => W.text(ctx, ln, mx, cy + (L.u(34) * kk) * (i + 0.5), { size: T.FS.bodyL + 2, weight: 800, serif: true, color: c.midColor, align: 'center', maxW: iw }));
+    cy += n * L.u(34) * kk;
   }
   c.sub.forEach((s, i) => {
     const isStreak = d.dayStreak && d.dayStreak.text === s;
@@ -193,7 +205,7 @@ function draw(ctx, vm, L) {
   // 随便比比 + category chip
   const catW = L.u(104) * (L.large ? 1.3 : 1);
   const freeW = cw - catW - L.u(8);
-  W.button(ctx, L, hits, { id: 'home:free', x, y, w: freeW, h: freeH, label: '随便比比 · 不限次', size: T.FS.bodyL });
+  W.button(ctx, L, hits, { id: 'home:free', x, y, w: freeW, h: freeH, label: L.large && L.W < 400 ? '随便比比' : '随便比比 · 不限次', size: T.FS.bodyL });
   const catLabel = (vm.free && vm.free.categoryLabel) || '全部';
   const catX = x + freeW + L.u(8);
   W.button(ctx, L, hits, { id: 'home:category', x: catX, y, w: catW, h: freeH, label: catLabel, size: T.FS.body, kind: 'ghost' });
@@ -218,7 +230,7 @@ function draw(ctx, vm, L) {
   const bw = (cw - 3 * L.u(6)) / 4;
   [
     ['home:groupBoard', '群榜'],
-    ['home:friendBoard', '好友榜'],
+    ['home:friendBoard', L.large && L.W < 400 ? '好友' : '好友榜'],
     ['home:history', '往期'],
     ['home:howto', '玩法'],
   ].forEach((b, i) => W.button(ctx, L, hits, { id: b[0], x: x + i * (bw + L.u(6)), y, w: bw, h: rowH, label: b[1], size: T.FS.body }));

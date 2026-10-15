@@ -17,7 +17,7 @@ Hit ids: `play:back`, `play:hi`, `play:lo`, `play:cards` (the whole card viewpor
 
 ## home  (`home.js`)
 Extras: `t`, `scrollY` (only when large text overflows), `bannerText` (default 来自群聊 · 查看本群今日排行).
-Hit ids: `home:daily` (开始 / 继续 / 查看结果, decide by `daily.state`), `home:retry` (error/offline), `home:free`, `home:category`, `home:groupBoard`, `home:friendBoard`, `home:history`, `home:howto`, `home:sound`, `home:settings`, `home:groupBanner`, `home:scroll`.
+Hit ids: `home:daily` (开始 / 继续 / 查看结果, decide by `daily.state`), `home:retry` (error/offline), `home:free`, `home:freeResume` (only when `free.resumeText`), `home:category`, `home:groupBoard`, `home:friendBoard`, `home:history`, `home:howto`, `home:sound`, `home:settings`, `home:groupBanner`, `home:scroll`.
 
 ## result  (`result.js`)
 Extras: `scrollY`, `t`, `stampT`, `boardLabel` (default 看群榜/好友榜), `streakCount` 0..1 (count-up of the big number; omit for static).

@@ -12,7 +12,7 @@ Spec: `docs/bibiyi/spec.md` (section numbers below). Tests: `tests/core-*.test.j
 |---|---|
 | `rng.js` | `mulberry32(seed)`, `hash32(str)`, `sub(seed, name)` (named sub-stream), `int`, `pick`, `shuffle`, `randomSeed`. Copied from 点将台. |
 | `date.js` | Beijing (UTC+8) date keys, never the device clock: `beijingDateKey`, `dateKeyToMs`, `addDays`, `daysBetween`, `issueNo`, `weekdayOf(key)` (0 = Sunday), `windowCloseMs(key)` (D+1 00:30), `inWindow(key, nowMs)`, `secondsSinceBeijingMidnight`. |
-| `measures.js` | `CATEGORIES`, `MEASURES` (13, spec 3.1: verbs, unit, scale, kind, minGap, knowledgeScale), `THEMES` (weekday, spec 4.3), `THEME_GROUPS`, `FREE_GROUPS`, `getMeasure`. |
+| `measures.js` | `CATEGORIES`, `MEASURES` (13, spec 3.1: verbs, unit, scale, kind, minGap, knowledgeScale), `DAILY_THEME` (v1: one mixed theme), `FREE_GROUPS`, `getMeasure`. |
 | `config.js` | Versioned tuning: `getConfig(v)`, `LATEST_CONFIG_VERSION`, bands, model, gates, ads caps, `resolveInterstitial(config, remote)` (clamps), `bandAt(config, k)`. Bump `configVersion` whenever a generated deck would change. |
 | `format.js` | `valueText(measure, fact)` ("6,300", "约 6,300", "公元前221"), `unitText`, `sourceText(fact)` ("来源：水利部 · 2013"), `displayNumber` (the rounded number the player sees), `fixedWithSeparators`. The renderer never formats. |
 | `content.js` | `validateContent(facts, {strict})`, `indexFacts(facts, v)` -> `{byId, byMeasure}`, `getContent(v)` (the bundled free pool), `registerBundle`, licence / banned-host / exclusion-tag lists. |
@@ -34,7 +34,7 @@ buildFreeDeck(seed, contentVersion, configVersion, group, source?) -> deck      
 generateDaily({dateKey, index, contentVersion, configVersion, exclude?, suspended?, seed?, maxAttempts?})
   -> {ok:true, deck, attempts, stats} | {ok:false, code:'DAILY_UNAVAILABLE'}     // the nightly loop, gate-checked
 buildDailyDeck({..., attempt}) -> deck | null                                    // one candidate, no gates
-dailySeed(dateKey), themeOf(dateKey)                                             // weekday theme from the date key
+dailySeed(dateKey), themeOf(dateKey)                                             // the (empty, mixed) v1 theme
 pairLegal(config, a, b, {suspended?}) -> bool                                    // spec 4.1 rules 1-4
 bandRange(config, measure, k, a, b) -> [lo, hi]; gapOf; effMinGap                // spec 4.2
 validateDeck(deck, byId, config, {suspended?, strictBands?}) -> string[]         // problems; [] = fine
@@ -48,9 +48,8 @@ deckFactIds(deck), segmentSizes(deck)
 - Never publishes a relaxed deck: on `DAILY_UNAVAILABLE` the backend alerts and publishes nothing.
 - Gap rules: ratio kind `max/min >= minGap` (approximate facts use `minGap^1.5`, i.e. 1.5x in log space); year kind
   `|delta| >= max(30, 2 x larger uncertainty)`. The displayed (rounded) values must differ in the raw direction.
-- Daily structure: 40 questions, segments of 4-8; questions 1-20 from the weekday theme (Sunday mixed), 21-40 mixed
-  with at most 2 mixed segments per measure; each fact introduced once per deck. A theme with a single measure
-  (周三 古今) necessarily repeats that measure in consecutive segments.
+- Daily structure: 40 questions, segments of 4-8, all measures with at least 6 daily facts mixed, at most 2 segments per measure
+  (3 after 40 failed candidates, so a thin pool right after two busy days still makes a deck); each fact introduced once per deck.
 
 ## Answer and run API (`judge.js`)
 
@@ -69,11 +68,12 @@ replayRun(deck, byId, [{k, c}], lifeAtK) -> {ok, streak, ended, endReason, lifeU
 ```
 node tools/build-content.js [--src DIR] [--strict] [--spotcheck] [--check]
 node tools/deckstats.js [--dates N] [--check]
-node tools/make-fixture.js        # (re)writes the PLACEHOLDER fixture; not real data
+node tools/make-distances.js      # computed distance measure from GeoNames (content-src/distance.jsonl)
 ```
 
 `build-content.js` reads `apps/bibiyi/content-src/` (`<measure>.jsonl` or `.csv`; see the header of the tool for
 the field list = spec 3.2), validates (licence, source, https URL, banned hosts, forbidden terms, two verifier roles,
 label/note length, exclusion tags), skips excluded measures, and writes `core/content/facts.free.js` (game) plus
-`tools/out/daily-facts.json` (server only, not shipped). Without `content-src/` it uses the placeholder fixture and flags
-every output `placeholder: true`.
+`tools/out/daily-facts.json` (server only, not shipped). There is no placeholder fixture any more. Collector rows (`subject`, `source_name`, ...) are converted by `fromCollector`;
+`content-src/pools.json` fixes each fact's pool (free = bundled, daily = server only). `tools/make-distances.js` writes the computed
+`distance` measure (GeoNames, CC BY 4.0). v1 has no weekday themes: every daily deck mixes all measures (`themeOf` returns `{key:'mix', label:''}`).

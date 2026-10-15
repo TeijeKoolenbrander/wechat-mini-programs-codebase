@@ -169,6 +169,7 @@ function buildFixtures(ctxArgs) {
   add('home', 'available', home({}));
   add('home', 'available_streak', home({ dayStreak: { current: 5, text: '连续 5 天' } }));
   add('home', 'available_group', home({ dayStreak: { current: 5, text: '连续 5 天' } }, { hasGroupContext: true }));
+  add('home', 'available_resume', home({}, { free: { categoryKey: 'all', categoryLabel: '全部', bestText: '随便比比最佳 23', resumeText: '继续上局 · 已连对 3' } }));
   add('home', 'inProgress', home({ state: 'inProgress', progressText: '已连对 7 · 第 8 题', streak: 7 }));
   add('home', 'done', home({ state: 'done', streak: 14, rarityText: '超过 82% 的玩家', dayStreak: { current: 5, text: '连续 5 天' } }));
   add('home', 'done_window', home({ state: 'done', streak: 9, rarityText: null, finalizedByWindow: true }));

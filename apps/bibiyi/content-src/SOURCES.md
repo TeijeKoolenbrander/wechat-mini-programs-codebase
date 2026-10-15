@@ -67,3 +67,17 @@ The four river facts are in `_dropped/river.jsonl` (all four values re-confirmed
 - Many provincial government hosts refused or reset connections from the fetch tool (ECONNREFUSED/ECONNRESET/403): 广东, 山东 (certificate mismatch), 河南, 四川, 浙江, 湖南, 安徽, 河北, 广西, 江西, 云南, 山西, 陕西, 甘肃, 贵州 provincial bulletins. See README for the list of URLs a human can try from a mainland-China connection.
 - The stats.gov.cn yearbook tables (fu03*.pdf) are PDF and could not be text-extracted here.
 - Lake areas: the pages found conflict with each other (e.g. 太湖 2445 vs 2338 on the same page), so no lake facts were written.
+
+## 7. GeoNames (CC BY 4.0): city coordinates for the computed `distance` measure
+
+Added 2026-10-15 by `apps/bibiyi/game/tools/make-distances.js`. Source: GeoNames `cities15000.zip` (https://download.geonames.org/export/dump/cities15000.zip, fetched 2026-10-15), licence CC BY 4.0, https://www.geonames.org. Only the coordinates of 39 mainland cities that already have a population fact (`city_pop` / `prov_pop`) are used; they are listed with their GeoNames ids in `distance-cities.json`.
+
+`distance.jsonl` holds 150 neutral city pairs ("北京—上海", unit 公里). Each value is **computed**, not read: haversine (R = 6371.0088 km) between the two GeoNames points, rounded to 10 km, cross-checked against Vincenty's inverse formula on WGS-84 (the tool fails above 0.6 % difference; the worst pair differs by 0.34 %). Facts carry `method: computed`, licence `CC-BY-4.0`, publisher GeoNames and the credit line "GeoNames (CC BY 4.0), https://www.geonames.org，直线距离为本游戏计算". The source line on a card reads "来源：GeoNames，本游戏计算 · 2026"; the 数据来源 page lists GeoNames.
+Re-run: `node tools/make-distances.js` (downloads GeoNames; exit code 2 and nothing written if it cannot).
+
+## 8. Edits made at integration (CTO decisions 2026-10-15, see docs/bibiyi/decisions.md)
+
+- `_dropped/animal_life.jsonl`: 加拉帕戈斯象龟 (177 years, anecdotal per AnAge) removed from v1; `river.jsonl` removed (rivers are in `_dropped/river.jsonl`).
+- `animal_weight`: 非洲野驴 relabelled 驴 (id `f_animal_weight_lv`); the AnAge entry Equus_asinus is the domestic donkey. Value unchanged.
+- `pools.json`: which facts are in the free pool (bundled) and which in the daily pool (server only), assigned deterministically by `tools/build-content.js` and never moved afterwards.
+- Source URLs: `http://` hosts upgraded to `https://` (tjj.hubei.gov.cn and tjj.ln.gov.cn answer 200 over https; tjj.zhengzhou.gov.cn answered 403 to our client both ways, so its fact keeps the page the verifier read, scheme only changed). USDA API URLs (they carry the public DEMO_KEY) are shown as the public food page `https://fdc.nal.usda.gov/fdc-app.html#/food-details/<fdcId>/nutrients`.

@@ -216,3 +216,18 @@ test('questions reveal nothing about the bottom card before the answer (AC 2, 18
   assert.equal(rv.value, free.byId[q.b].value);
   assert.ok(rv.sourceText.startsWith('来源：'));
 });
+
+test('daily: a fresh start with random seeds never fails (busy days in a row, thin pool at the repeat-window step)', () => {
+  let seed = 4242;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) % 4294967296);
+  for (let chain = 0; chain < 12; chain++) {
+    const hist = [];
+    for (let d = 0; d < 4; d++) {
+      const ex = new Set();
+      hist.slice(-2).forEach((ids) => ids.forEach((id) => ex.add(id)));
+      const r = D.generateDaily({ dateKey: addDays('20261101', d), index: daily, contentVersion: 1, configVersion: 1, exclude: ex, seed: rnd() });
+      assert.ok(r.ok, 'chain ' + chain + ' day ' + d);
+      hist.push(D.deckFactIds(r.deck));
+    }
+  }
+});

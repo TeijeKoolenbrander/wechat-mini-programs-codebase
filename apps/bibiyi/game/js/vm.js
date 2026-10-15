@@ -17,6 +17,7 @@ const SOURCES = [
   { publisher: '自然资源部、水利部', attribution: '地理数据：自然资源部、水利部公布数据', url: null },
   { publisher: 'NASA', attribution: '天文数据：NASA', url: 'https://nssdc.gsfc.nasa.gov/planetary/factsheet/' },
   { publisher: 'USDA FoodData Central', attribution: '食物热量：USDA FoodData Central (CC0)', url: 'https://fdc.nal.usda.gov/' },
+  { publisher: 'AnAge（HAGR）', attribution: '动物数据来自 AnAge / Human Ageing Genomic Resources (HAGR)，CC BY 3.0；寿命为最长寿命纪录，不代表平均寿命', url: 'https://genomics.senescence.info' },
   { publisher: 'GeoNames', attribution: '城市坐标：GeoNames (CC BY 4.0)，距离为本游戏计算的直线距离', url: 'https://www.geonames.org/' },
   { publisher: '国家文物局', attribution: '文物年代与高度：国家文物局及各文物保护单位公布资料', url: null },
   { publisher: '各出版方', attribution: '其他：各条目注明的出版物', url: null },
