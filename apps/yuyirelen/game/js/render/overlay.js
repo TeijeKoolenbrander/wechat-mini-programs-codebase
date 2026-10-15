@@ -1,0 +1,130 @@
+/**
+ * Overlays drawn on top of any screen, after its own draw(): confirm dialog
+ * (the give-up dialog, spec 8.3), toast, stub ad overlay, own privacy dialog
+ * (fallback for onNeedPrivacyAuthorization). Concatenate the returned hit
+ * areas after the screen's (later areas win).
+ *
+ * vm: { dialog?, toast?, adStub?, privacy?, display? }
+ *   dialog:  {title?, text, confirmLabel, cancelLabel?, danger?}
+ *            hit ids dialog:confirm, dialog:cancel, dialog:block
+ *   toast:   {text}  (no hit areas; logic removes it after ~2s)
+ *   adStub:  {kind: 'rewarded'|'interstitial', secondsLeft:number}
+ *            hit ids adstub:complete, adstub:skip
+ *   privacy: {}  hit ids privacy:agree, privacy:refuse, privacy:contract
+ */
+
+const T = require('./theme');
+const W = require('./widgets');
+const { Hits } = require('./layout');
+const C = T.COLORS;
+
+function modalCard(ctx, L, hits, blockId, w, h) {
+  ctx.fillStyle = C.scrim;
+  ctx.fillRect(0, 0, L.W, L.H);
+  hits.add(blockId, 0, 0, L.W, L.H);
+  const x = (L.W - w) / 2;
+  const y = Math.max(L.navBottom, (L.H - h) / 2 - L.u(20));
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.3)';
+  ctx.shadowBlur = 18;
+  ctx.shadowOffsetY = 4;
+  W.fillRR(ctx, x, y, w, h, L.u(18), C.sheet);
+  ctx.restore();
+  W.strokeRR(ctx, x, y, w, h, L.u(18), C.lineStrong, 2);
+  hits.add(blockId + ':card', x, y, w, h);
+  return { x, y, w, h };
+}
+
+function drawDialog(ctx, L, hits, d) {
+  const bh = L.u(T.METRICS.btn);
+  const lineH = L.u(T.METRICS.large ? 32 : 27);
+  const w = Math.min(L.contentW, L.u(330));
+  const inner = w - L.u(40);
+  const lines = W.wrap(ctx, d.text, inner, T.FS.bodyL, 500, false);
+  const titleH = d.title ? L.u(36) : 0;
+  const h = L.u(28) + titleH + lines.length * lineH + L.u(24) + bh + L.u(20);
+  const m = modalCard(ctx, L, hits, 'dialog:block', w, h);
+  let y = m.y + L.u(28);
+  if (d.title) {
+    W.text(ctx, d.title, m.x + m.w / 2, y, { size: T.FS.title, weight: 800, serif: true, align: 'center', maxW: inner });
+    y += titleH;
+  }
+  lines.forEach((ln, i) => W.text(ctx, ln, m.x + m.w / 2, y + i * lineH + L.u(8), { size: T.FS.bodyL, align: 'center', weight: 500 }));
+  const by = m.y + m.h - L.u(20) - bh;
+  const bw = d.cancelLabel ? (m.w - L.u(40) - L.u(12)) / 2 : m.w - L.u(40);
+  let bx = m.x + L.u(20);
+  if (d.cancelLabel) {
+    // the safe choice (再想想) sits first and carries the weight; the destructive one is outlined
+    W.button(ctx, L, hits, { id: 'dialog:cancel', x: bx, y: by, w: bw, h: bh, label: d.cancelLabel, kind: d.danger ? 'primary' : 'secondary' });
+    bx += bw + L.u(12);
+  }
+  W.button(ctx, L, hits, { id: 'dialog:confirm', x: bx, y: by, w: bw, h: bh, label: d.confirmLabel || '好', kind: d.danger ? 'secondary' : 'primary', size: T.FS.bodyL });
+}
+
+function drawToast(ctx, L, t) {
+  const size = T.FS.bodyL;
+  const maxW = L.contentW;
+  const lines = W.wrap(ctx, t.text, maxW - L.u(40), size, 600, false);
+  const lineH = L.u(T.METRICS.large ? 30 : 26);
+  const h = lines.length * lineH + L.u(20);
+  let tw = 0;
+  lines.forEach((ln) => (tw = Math.max(tw, W.measure(ctx, ln, size, 600, false))));
+  tw = Math.min(maxW, tw + L.u(40));
+  const x = (L.W - tw) / 2;
+  // sits just above the pinned action row, clear of chips and suggestions
+  const y = Math.max(L.navBottom + L.u(8), L.bottomEdge - L.bottomPad - L.u(T.METRICS.btn) - L.u(16) - h);
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.3)';
+  ctx.shadowBlur = 10;
+  W.fillRR(ctx, x, y, tw, h, Math.min(h / 2, L.u(24)), 'rgba(30,27,24,0.94)');
+  ctx.restore();
+  lines.forEach((ln, i) => W.text(ctx, ln, L.W / 2, y + L.u(10) + lineH * i + lineH / 2, { size, weight: 600, color: '#F6F1E7', align: 'center' }));
+}
+
+function drawAdStub(ctx, L, hits, a) {
+  ctx.fillStyle = '#17140F';
+  ctx.fillRect(0, 0, L.W, L.H);
+  hits.add('adstub:block', 0, 0, L.W, L.H);
+  const cy = L.H * 0.36;
+  W.text(ctx, '广告位（测试）', L.cx, cy, { size: T.FS.hero, weight: 800, serif: true, color: '#F6F1E7', align: 'center' });
+  W.text(ctx, a.kind === 'interstitial' ? '插屏广告' : '激励视频', L.cx, cy + L.u(40), { size: T.FS.bodyL, color: '#E4DBC8', align: 'center' });
+  W.text(ctx, '还剩 ' + Math.max(0, Math.ceil(a.secondsLeft || 0)) + ' 秒', L.cx, cy + L.u(76), { size: T.FS.bodyL, color: '#E4DBC8', align: 'center' });
+  const bw = Math.min(L.contentW, L.u(300));
+  const bx = L.cx - bw / 2;
+  const bh = L.u(T.METRICS.btn);
+  const by = L.bottomEdge - L.bottomPad - bh * 2 - L.u(14);
+  W.button(ctx, L, hits, { id: 'adstub:complete', x: bx, y: by, w: bw, h: bh, label: '模拟看完', kind: 'primary' });
+  W.button(ctx, L, hits, { id: 'adstub:skip', x: bx, y: by + bh + L.u(14), w: bw, h: bh, label: '跳过（不给奖励）', kind: 'secondary' });
+}
+
+function drawPrivacy(ctx, L, hits) {
+  const bh = L.u(T.METRICS.btn);
+  const w = Math.min(L.contentW, L.u(340));
+  const text = '为了在好友榜和群榜上显示你的成绩，我们需要使用你的微信朋友关系。';
+  const lines = W.wrap(ctx, text, w - L.u(40), T.FS.bodyL, 500, false);
+  const lineH = L.u(T.METRICS.large ? 32 : 27);
+  const h = L.u(26) + L.u(36) + lines.length * lineH + L.u(14) + L.u(T.METRICS.tap) + L.u(10) + bh + L.u(20);
+  const m = modalCard(ctx, L, hits, 'privacy:block', w, h);
+  let y = m.y + L.u(30);
+  W.text(ctx, '用户隐私保护提示', m.x + m.w / 2, y, { size: T.FS.title, weight: 800, serif: true, align: 'center', maxW: w - L.u(32) });
+  y += L.u(28);
+  lines.forEach((ln, i) => W.text(ctx, ln, m.x + L.u(20), y + i * lineH + L.u(8), { size: T.FS.bodyL, weight: 500 }));
+  y += lines.length * lineH + L.u(8);
+  W.link(ctx, L, hits, { id: 'privacy:contract', x: m.x + m.w / 2, y: y + L.u(T.METRICS.tap) / 2, align: 'center', label: '《用户隐私保护指引》', color: C.accent, underline: true, size: T.FS.body });
+  const by = m.y + m.h - L.u(20) - bh;
+  const bw = (m.w - L.u(40) - L.u(12)) / 2;
+  W.button(ctx, L, hits, { id: 'privacy:refuse', x: m.x + L.u(20), y: by, w: bw, h: bh, label: '拒绝', kind: 'secondary' });
+  W.button(ctx, L, hits, { id: 'privacy:agree', x: m.x + L.u(20) + bw + L.u(12), y: by, w: bw, h: bh, label: '同意', kind: 'primary' });
+}
+
+function draw(ctx, vm, L) {
+  if (vm.display) T.applyDisplay(vm.display);
+  const hits = new Hits();
+  if (vm.dialog) drawDialog(ctx, L, hits, vm.dialog);
+  if (vm.privacy) drawPrivacy(ctx, L, hits);
+  if (vm.adStub) drawAdStub(ctx, L, hits, vm.adStub);
+  if (vm.toast) drawToast(ctx, L, vm.toast);
+  return hits.result();
+}
+
+module.exports = { draw };
