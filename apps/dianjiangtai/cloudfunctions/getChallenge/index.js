@@ -3,6 +3,7 @@
 // caller has answered (a runs row with this challengeId and the caller's openid exists).
 const core = require('./common/coreapi');
 const store = require('./common/store');
+const limits = require('./common/limits');
 const input = require('./common/input');
 const rules = require('./common/rules');
 const { now, fail } = require('./common/util');
@@ -40,4 +41,4 @@ exports.main = store.handler(async (event, { openid }) => {
   const out = { ...base, status: 'ready', countsAsDaily, isFriendly: !countsAsDaily };
   if (!countsAsDaily) out.rounds = ch.rounds;
   return out;
-});
+}, { rate: limits.rateOf('getChallenge') });

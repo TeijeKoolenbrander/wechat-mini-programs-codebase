@@ -6,7 +6,7 @@ const { createHarness } = require('./helpers/harness');
 const { playDaily, allStrings, allKeys } = require('./helpers/fixtures');
 
 const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT
-const PEPPER = 'test-pepper-not-a-secret';
+const PEPPER = 'test-pepper-not-a-secret-0123456789abcdef';
 let h;
 beforeEach(() => {
   h = createHarness({ now: T0 });
@@ -16,7 +16,7 @@ afterEach(() => h.teardown());
 
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const board = (openid, event = {}) => h.call('getBoard', { kind: 'friend', dateKey: '20261103', ...event }, { openid });
-const group = (openid, openGId) => h.call('joinGroup', { groupData: { cloudID: 'c', data: { opengid: openGId, chat_type: 3 } } }, { openid });
+const group = (openid, openGId) => h.call('joinGroup', { cloudID: h.groupCloudID(openGId) }, { openid });
 
 // ranks: rank k -> distinct win counts in the fake sim (0 -> 12, 4 -> 10, 5 -> 5, 6 -> 0, ...)
 async function populate() {
@@ -163,7 +163,8 @@ test('60 s cache: second call is served from memory (fewer DB reads), expires af
   const readsAfter = h.db.stats.reads - reads1;
   assert.ok(readsAfter < reads1, 'cached result rows are not re-read');
   assert.deepEqual(second.rows.map((r) => r[1]), first.rows.map((r) => r[1]));
-  assert.equal(h.db.all('events').filter((e) => e.name === 'board_list').pop().props.cached, true);
+  // sampled (M3): the second response inside the minute writes no second board_list event
+  assert.equal(h.db.all('events').filter((e) => e.name === 'board_list').length, 1);
   // a new result inside the 60 s window: the other viewers do not see it yet, the player does
   await playDaily(h, 'zed', { rank: 5 });
   assert.equal((await board('alice')).rows.length, 5);

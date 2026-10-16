@@ -5,6 +5,7 @@
 // Never returns a seed, rounds, or any other player's data.
 const core = require('./common/coreapi');
 const store = require('./common/store');
+const limits = require('./common/limits');
 const rules = require('./common/rules');
 const { isInt, fail, now } = require('./common/util');
 
@@ -72,4 +73,4 @@ exports.main = store.handler(async (event, { openid }) => {
   });
   const ps = await store.getDoc('player_stats', openid);
   return { ok: true, items, bestStreak: (ps && ps.bestStreak) || 0 };
-});
+}, { rate: limits.rateOf('getHistory') });

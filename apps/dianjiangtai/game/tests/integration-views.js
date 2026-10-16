@@ -391,7 +391,8 @@ async function runMisc(t, mode) {
   await g.settle();
   S('board_ready');
   hit(g, 'board:back');
-  const joined = mock.call('joinGroup', { groupData: { mockData: { opengid: 'G1', chat_type: 3 } } });
+  mock.openData['cloud-views-1'] = { opengid: 'G1', chat_type: 3 };
+  const joined = mock.call('joinGroup', { cloudID: 'cloud-views-1' });
   g.app.ctl.state.group = { status: 'ok', groupRef: joined.groupRef, shareTicket: 'T', groupid: null };
   hit(g, 'home:groupBoard');
   await g.settle();

@@ -5,7 +5,19 @@
  *     drawOverlay(ctx, overlayVm, layout) -> hits, hitTest(hits,x,y), shareCard }
  */
 
-const stub = require('./stub-render');
+// js/stub-render.js is the dev/QA drawer: required lazily, only when the real renderer is missing or throws on a screen, and a
+// release build leaves it out of the package (packOptions.ignore; tests/release-gate.test.js)
+let stubModule;
+function getStub() {
+  if (stubModule === undefined) {
+    try {
+      stubModule = require('./stub-render');
+    } catch (e) {
+      stubModule = null;
+    }
+  }
+  return stubModule;
+}
 
 function hitTestLocal(hits, x, y) {
   for (let i = hits.length - 1; i >= 0; i--) {
@@ -40,7 +52,8 @@ function loadRenderers() {
             fallbackErrors.push(screen + ': ' + (e && e.message));
           }
         }
-        return stub.draw(screen, ctx, vm, layout);
+        const stub = getStub();
+        return stub ? stub.draw(screen, ctx, vm, layout) : [];
       },
       drawOverlay: (ctx, ov, layout) => (real.overlay ? real.overlay.draw(ctx, ov, layout) : []),
       hitTest: real.hitTest || hitTestLocal,
@@ -49,6 +62,8 @@ function loadRenderers() {
       shareCard: real.shareCard || null,
     };
   }
+  const stub = getStub();
+  if (!stub) throw new Error('no renderer: js/render/index.js and js/stub-render.js are both missing');
   return { kind: 'stub', makeLayout: stub.stubLayout, draw: stub.draw, drawOverlay: stub.drawOverlay, hitTest: hitTestLocal, shareCard: null };
 }
 

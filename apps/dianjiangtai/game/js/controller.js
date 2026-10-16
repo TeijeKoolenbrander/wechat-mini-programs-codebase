@@ -40,6 +40,16 @@ const TOAST_MS = 2400;
 const SHIREN_STEP_MS = 300;
 const LARGE_FONT_SETTING = 18; // wx font size setting at or above this pre-selects 大字模式 on first launch (spec 8.10, E12)
 
+/**
+ * Codes that mean "try again" rather than "this is wrong": no connection, no reply, and RATE_LIMITED (the per-openid limits in
+ * cloudfunctions/common/limits.js). A queued submit retries later, the home / challenge / history screens show their offline
+ * state with a retry, and analytics re-queues; none of them shows a hard error for a rate-limited call.
+ */
+const TRANSIENT_CODES = ['NETWORK', 'TIMEOUT', 'BAD_RESPONSE', 'RATE_LIMITED'];
+function isTransient(code) {
+  return TRANSIENT_CODES.indexOf(code) >= 0;
+}
+
 function createController(deps) {
   const { wx, api, store, analytics, ads, share, privacy, odc, config, content } = deps;
   const subscribe = deps.subscribe;
@@ -230,7 +240,7 @@ function createController(deps) {
     } else {
       applyFeatures(null); // spec 18.32: config unreadable -> subscribe hidden, banner off, interstitial defaults
       const active = S.active && S.active.mode === 'daily' ? S.active : null;
-      const net = !r || r.code === 'NETWORK' || r.code === 'TIMEOUT';
+      const net = !r || isTransient(r.code);
       if (active && active.dateKey === todayKey()) {
         c.home.daily = { state: 'inProgress', issueNo: active.issueNo, dateKey: active.dateKey, round: restoreActive().run.round, variant: active.variant || 'standard', streak: S.dailyCache && S.dailyCache.dateKey === active.dateKey ? S.dailyCache.myStreak : { current: 0 } };
       } else {
@@ -420,6 +430,7 @@ function createController(deps) {
     const score = content.roleScores[gi][SLOTS.indexOf(slot)];
     track('draft_pick', { runId: r.clientRunId, round: r.run.round, generalId: gid, slot, fit: score >= 7.5 ? 'good' : score >= 5.5 ? 'ok' : 'bad', pickFaction, poolSize, poolTotal });
     c.ui.selectedId = null;
+    if (deps.audio) deps.audio.play('pick');
     if (r.hidden && !S.shirenCoachSeen) {
       S.shirenCoachSeen = true;
       store.save();
@@ -594,6 +605,7 @@ function createController(deps) {
     c.ui.scrollY = 0;
     c.ui.replayAdState = 'idle';
     c.ui.revealStart = reveal ? now() : 0;
+    c.ui.revealCued = 0;
     c.ui.doneAt = reveal ? 0 : now() - STAMP_MS;
     if (res.status === 'revealing' && !reveal) res.status = 'done';
     go('result');
@@ -633,7 +645,7 @@ function createController(deps) {
     if (r && r.ok) return onServerResult(p, res, r);
     const code = r && r.code;
     if (code === 'ALREADY_PLAYED' && r.result && r.result.ok) return onServerResult(p, res, r.result); // backend: the stored result rides along
-    if (code === 'NETWORK' || code === 'TIMEOUT' || !code) {
+    if (isTransient(code) || !code) {
       S.pending = p;
       store.save();
       res.status = 'pendingSubmit';
@@ -692,6 +704,7 @@ function createController(deps) {
     if (r.challengeCompare) res.challenge = { theirRecord: r.challengeCompare.theirRecord, lineupLocked: !!r.challengeCompare.lineupLocked, theirLineup: (r.challengeCompare.theirLineup || []).map((e) => ({ slot: e.slot, name: content.byId[e.generalId] ? content.byId[e.generalId].name : '' })) };
     res.status = 'revealing';
     c.ui.revealStart = now();
+    c.ui.revealCued = 0;
     c.ui.doneAt = 0;
     if (res.ranked && p.mode === 'daily') {
       S.results[p.dateKey] = { dailyDone: true, record: res.record, band: res.band, res: stripRes(res) };
@@ -752,7 +765,8 @@ function createController(deps) {
     res.status = 'done';
     c.ui.doneAt = now();
     if (res.record.w === 12 && wx.vibrateShort) wx.vibrateShort({ type: 'light' });
-    if (deps.audio) deps.audio.play(res.record.w === 12 ? 'bell' : 'drum');
+    // skipped reveal: one cue for the verdict instead of the per-battle ones
+    if (deps.audio && (c.ui.revealCued || 0) < 12 && c.ui.revealStart) deps.audio.play(res.record.w >= 6 ? 'win' : 'loss');
     if (!res.tracked) {
       res.tracked = true;
       const r = c.r;
@@ -870,7 +884,7 @@ function createController(deps) {
     } else if (r && (r.status === 'expired' || r.code === 'CHALLENGE_EXPIRED' || r.code === 'NOT_FOUND')) {
       c.challenge = { id, status: 'expired', theirRecord: { w: 0, l: 0 } };
     } else {
-      const net = !r || r.code === 'NETWORK' || r.code === 'TIMEOUT';
+      const net = !r || isTransient(r.code);
       c.challenge = { id, status: net ? 'offline' : 'error', theirRecord: { w: 0, l: 0 } };
       track('error', { where: 'getChallenge', code: r ? r.code : 'none' });
     }
@@ -962,7 +976,7 @@ function createController(deps) {
       const items = (r.items || []).slice(0, 30);
       c.history = { state: items.length ? 'ready' : 'empty', items, bestStreak: r.bestStreak || 0, scroll: 0 };
     } else {
-      const net = !r || r.code === 'NETWORK' || r.code === 'TIMEOUT';
+      const net = !r || isTransient(r.code);
       c.history = { state: net ? 'offline' : 'error', items: [], bestStreak: 0, scroll: 0 };
       track('error', { where: 'getHistory', code: r ? r.code : 'none' });
     }
@@ -1086,7 +1100,12 @@ function createController(deps) {
     const e = parseEnter(options);
     if (e.kind === 'none') return e;
     // the launch options and the first onShow can be the same entry: count it once
-    const key = JSON.stringify([options.query, options.shareTicket, options.scene]);
+    let key;
+    try {
+      key = JSON.stringify([options.query, options.shareTicket, options.scene]);
+    } catch (err) {
+      key = String(Date.now()); // an odd launch query never stops the entry
+    }
     if (key === c.lastEntryKey && now() - c.lastEntryAt < 3000) return e;
     c.lastEntryKey = key;
     c.lastEntryAt = now();
@@ -1464,6 +1483,16 @@ function createController(deps) {
 
   // ---------------------------------------------------------------- rendering state
 
+  /** One win or loss cue per battle as the 战报 reveal passes it (a late frame plays only the latest). */
+  function cueReveal(res, t) {
+    const upto = Math.min(12, Math.floor(revealCount(t)));
+    if (upto > (c.ui.revealCued || 0)) {
+      const b = res.battles && res.battles[upto - 1];
+      c.ui.revealCued = upto;
+      if (b) deps.audio.play(b.win ? 'win' : 'loss');
+    }
+  }
+
   function revealCount(t) {
     if (!c.ui.revealStart) return 12;
     return Math.min(12.0, (t - c.ui.revealStart) / REVEAL_MS);
@@ -1472,6 +1501,7 @@ function createController(deps) {
   /** Called every frame: advances time-driven transitions. */
   c.tick = function (t) {
     const res = c.res;
+    if (c.screen === 'result' && res && res.status === 'revealing' && c.ui.revealStart && deps.audio) cueReveal(res, t);
     if (c.screen === 'result' && res && res.status === 'revealing' && c.ui.revealStart && revealCount(t) >= 12 && t - c.ui.revealStart >= 12 * REVEAL_MS + 300) finishReveal();
     if (c.screen === 'result' && res && res.reveal && res.reveal.pending && res.status === 'done') {
       const el = t - c.ui.shirenAt;

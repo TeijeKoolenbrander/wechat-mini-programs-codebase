@@ -1,0 +1,3179 @@
+点将台 V1.0.0 源程序                                            第 1 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+require('./js/main');
+/**
+ * Versioned tuning config (spec 7, 7.5, 12, 11.5). Pure JS; copied into the
+ * cloud functions. Anything that changes a sim outcome bumps `configVersion`
+ * (the seed bank and stored runs pin to it); the server keeps the last 2.
+ *
+ * Tuned with tools/simstats.js, see tools/simstats-report.md. Deviations from the spec 7.2/7.5 star
+    ting values (all reported to the CTO):
+ * curve (flatter and higher: 7.7 -> 10.3), tau 0.7, jitter 0.35, event pMin 0.672 (was 0.35), band 
+    targets (12-0 is really hard:
+ * founder decision), gate greedy window [0.0025, 0.2]. Formula weights, role weights, morale consta
+    nts are unchanged.
+ */
+const V1 = {
+  configVersion: 1,
+  /** Bumped whenever the 7.5.1 population rules change. */
+  gateVersion: 1,
+  rounds: 5,
+  battles: 12,
+  /**
+   * Battle types and their team-power weights over (zhugong, junshi,
+   * xianfeng, mengjiang, shoujiang), spec 7.2 step 4.
+   */
+  battleTypes: [
+    { key: 'yeZhan', label: '野战', w: [0.15, 0.15, 0.3, 0.3, 0.1] },
+    { key: 'gongCheng', label: '攻城', w: [0.15, 0.25, 0.25, 0.2, 0.15] },
+    { key: 'shouCheng', label: '守城', w: [0.15, 0.2, 0.05, 0.15, 0.45] },
+    { key: 'shuiZhan', label: '水战', w: [0.15, 0.4, 0.15, 0.15, 0.15] },
+    { key: 'qiXi', label: '奇袭', w: [0.1, 0.3, 0.35, 0.2, 0.05] },
+    { key: 'anMin', label: '安民', w: [0.45, 0.25, 0.05, 0.05, 0.2] },
+  ],
+  /** Opponent strength per battle and the logistic temperature. */
+  curve: [7.41, 7.674, 7.937, 8.201, 8.465, 8.728, 8.992, 9.255, 9.519, 9.783, 10.046, 10.31],
+  tau: 0.7,
+  /** Opponent jitter j_i is uniform in [-jitter, +jitter]. */
+  jitter: 0.35,
+  /** Morale multiplier M (spec 7.2 step 2). */
+  morale: { base: 0.85, perLord: 0.03, perBond: 0.04, cohesion4: 0.03, cohesion5: 0.05, cap: 1.25 },
+  /** Events (spec 7.2 step 8). */
+  events: {
+    wavering: { maxXin: 3, base: 4, perPoint: 0.1 },
+    stratagem: { minZhi: 9, pMin: 0.672, types: ['shuiZhan', 'qiXi'] },
+    unstoppable: { yong: 10, pMin: 0.672, types: ['yeZhan'] },
+  },
+  /** 天时 label from the shared luck roll u (low u is lucky). */
+  luck: { jiBelow: 1 / 3, pingBelow: 2 / 3 },
+  /** Grade bands (spec 7.5), by wins. */
+  bands: [
+    { key: 'yitong', label: '一统天下', min: 12, max: 12, target: [0.002, 0.005] },
+    { key: 'baye', label: '霸业将成', min: 10, max: 11, target: [0.06, 0.1] },
+
+点将台 V1.0.0 源程序                                            第 2 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    { key: 'xiongju', label: '雄踞一方', min: 8, max: 9, target: [0.22, 0.32] },
+    { key: 'dingli', label: '三分鼎立', min: 6, max: 7, target: [0.25, 0.36] },
+    { key: 'pianan', label: '偏安一方', min: 4, max: 5, target: [0.15, 0.25] },
+    { key: 'bingwei', label: '兵微将寡', min: 2, max: 3, target: [0.05, 0.12] },
+    { key: 'tubai', label: '一败涂地', min: 0, max: 1, target: [0, 0.02] },
+  ],
+  /** Re-spin allowance per run by mode (spec 4). */
+  allowance: {
+    free: { faction: 1, era: 1, ad: 2 },
+    daily: { faction: 1, era: 1, ad: 0 },
+    challenge: { faction: 1, era: 1, ad: 0 },
+  },
+  /** Alternates stored per dimension per round (1 free + up to 2 ad). */
+  altCount: 3,
+  /** Fallback token sets stored per round for the empty-pool reflip (spec 4). */
+  fallbackCount: 4,
+  /** Gate populations (spec 7.5.1). */
+  gates: {
+    K: 400,
+    greedy: { respinP: 0.3, gainBelow: 7.0, takeBest: 0.8, rateMin: 0.0025, rateMax: 0.2 },
+    random: { respinP: 0.5, rateMax: 0.005 },
+    maxCandidates: 50,
+  },
+  /** Player models for tools/simstats.js (spec 7.5). */
+  players: {
+    // deterministic-choice greedy used for the tuning table: re-spin a
+    // dimension when the best current S gain is below this
+    greedyRespinBelow: 7.0,
+    naiveRespin: false,
+  },
+  /** Ads (spec 12). */
+  ads: {
+    rewardedRespinPerRun: 2,
+    rewardedReplayPerRun: 1,
+    interstitial: { minLifetimeRuns: 4, everyNthRun: 3, minGapMs: 120000, maxPerDay: 5 },
+    stubDelayMs: 3000,
+  },
+  /** 复盘 (spec 7.4): token sets with more distinct general sets than this are asked of the server fi
+    rst. */
+  search: { heavySets: 2000 },
+  /** Pool cap per round (spec 4, PO-5): the first poolCap undrafted generals of the cell in the see
+    ded pool order. Cells of 8 or fewer are unaffected. */
+  poolCap: 8,
+  /** 识人模式 (spec 8.11): the Sunday daily (Date weekday 0). Display only: never changes the sim. */
+  shiren: { weekday: 0 },
+  /** Boards (spec 11.5). */
+  boardListCap: 3000,
+  showUnverified: true,
+  /** Analytics (spec 15). */
+  analytics: { flushMs: 20000, maxBatch: 50, sessionGapMs: 30 * 60 * 1000 },
+
+点将台 V1.0.0 源程序                                            第 3 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  /** Daily 军令 (spec 5.2). */
+  daily: { launchDateKey: '20261101', graceMs: 30 * 60 * 1000, bankLowWarn: 10 },
+  /**
+   * Free-play rarity (spec 7.5 "Rarity line"): freeRarity[w] is the share of
+   * sensible-player runs reaching w wins or better. Filled from the
+   * simstats distribution.
+   */
+  freeRarity: [1, 0.998, 0.9896, 0.9667, 0.9219, 0.8476, 0.7346, 0.5817, 0.3975, 0.2204, 0.0929, 0.0
+    253, 0.0033],
+};
+/**
+ * configVersion 2 (contentVersion 2, the v1 release). Same formula, role weights and morale constan
+    ts as configVersion 1;
+ * the retune for the 120-general roster (D15 targets, AC 74) lives in V2_TUNING. configVersion 1 st
+    ays intact for old seeds.
+ */
+const V2 = JSON.parse(JSON.stringify(V1));
+V2.configVersion = 2;
+V1.contentVersion = 1;
+V2.contentVersion = 2;
+const V2_TUNING = {
+  // v1 curve shifted down by 0.05 (the only lever needed): the 120-general roster, the pool cap and
+     the 16 bonds
+  // kept sensible 12-0 at 0.28% with configVersion 1's curve; -0.05 centres it on 0.33% and keeps n
+    aive < 0.2%.
+  curve: [7.36, 7.624, 7.887, 8.151, 8.415, 8.678, 8.942, 9.205, 9.469, 9.733, 9.996, 10.26],
+  // 复盘 (spec 7.4): the pool cap leaves about 14,000 distinct sets in a typical search (v1: about 2,
+    000). Searches up to this
+  // many sets took p99 about 80 ms and at most about 150 ms in node (4000 sampled), which leaves ro
+    om on a slower phone; larger
+  // ones are asked of getReplay first (the client falls back to its own search when the server fail
+    s).
+  search: { heavySets: 5000 },
+  // sensible-player cumulative shares (tools/simstats-report-cv2.md, run 1)
+  freeRarity: [1, 0.9993, 0.9945, 0.9784, 0.9402, 0.8665, 0.7494, 0.5875, 0.399, 0.2205, 0.0924, 0.0
+    256, 0.0033],
+};
+Object.assign(V2, V2_TUNING);
+/**
+ * configVersion 3 (contentVersion 2, the v1 release after QA finding V1-2). configVersion 2's naive
+     12-0 sat at about 0.185%
+ * against the HARD MAXIMUM of 0.2% (D15: naive < 0.2%, a ceiling, so lower is safer), which failed 
+    about half of fresh 100k-seed
+ * windows. Only the opponent curve changed (tau 0.7, jitter 0.35, pMin, morale, bands and gates are
+     as in version 2): the curve
+ * is version 2's raised by 0.14 and tilted by -0.03 per battle about its middle (early battles a to
+    uch harder, late ones a
+ * touch easier). That moves naive 12-0 to about 0.14% and sensible 12-0 to about 0.29% (inside 0.2-
+    0.5% with margin on both
+ * sides, the ratio of the two is a property of the roster so both move together), and keeps every b
+
+点将台 V1.0.0 源程序                                            第 4 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    and, the median and the
+ * event rate inside their targets (tools/simstats-report-cv2.md). Version 2 stays intact: the serve
+    r keeps the last 2 versions.
+ * The seed bank must be generated for configVersion 3 (PO-17): gateVersion is unchanged, but bank e
+    ntries pin configVersion.
+ */
+const V3 = JSON.parse(JSON.stringify(V2));
+V3.configVersion = 3;
+V3.contentVersion = 2;
+V3.curve = [7.665, 7.899, 8.132, 8.366, 8.6, 8.833, 9.067, 9.3, 9.534, 9.768, 10.001, 10.235];
+// sensible-player cumulative shares (tools/simstats-report-cv2.md)
+V3.freeRarity = [1, 0.9984, 0.989, 0.9621, 0.9067, 0.8138, 0.6803, 0.5119, 0.3322, 0.1775, 0.0718, 0
+    .0199, 0.0026];
+const CONFIGS = { 1: V1, 2: V2, 3: V3 };
+const LATEST_CONFIG_VERSION = 3;
+/** The config a content version is tuned with: 1 -> 1, 2 -> 2. Callers that pass no configVersion g
+    et this. */
+function defaultConfigVersion(contentVersion) {
+  return Number(contentVersion) === 1 ? 1 : LATEST_CONFIG_VERSION;
+}
+/** getConfig(version) -> config | null */
+function getConfig(version) {
+  return CONFIGS[Number(version)] || null;
+}
+/** Wins -> band object. */
+function bandFor(config, wins) {
+  for (const b of config.bands) if (wins >= b.min && wins <= b.max) return b;
+  return config.bands[config.bands.length - 1];
+}
+module.exports = { getConfig, bandFor, LATEST_CONFIG_VERSION, CONFIGS, defaultConfigVersion };
+/**
+ * Beijing date helpers (spec 5.2, AC 66). Explicit UTC+8 arithmetic: never
+ * uses local-time getters, so the answer is the same whatever TZ the process
+ * (or the device) runs in.
+ */
+const BJT_OFFSET_MS = 8 * 3600e3;
+const DAY_MS = 86400e3;
+/** 'YYYYMMDD' of the Beijing date at epoch-ms `nowMs`. */
+function beijingDateKey(nowMs) {
+  return new Date(nowMs + BJT_OFFSET_MS).toISOString().slice(0, 10).replace(/-/g, '');
+}
+/** Epoch-ms of 00:00 Beijing time on the date of `nowMs`. */
+function beijingMidnightMs(nowMs) {
+  return Math.floor((nowMs + BJT_OFFSET_MS) / DAY_MS) * DAY_MS - BJT_OFFSET_MS;
+}
+/** Seconds after 00:00 BJT (board tie-break `s`, spec 11.4). */
+function secondsSinceBeijingMidnight(nowMs) {
+  return Math.floor((nowMs - beijingMidnightMs(nowMs)) / 1000);
+}
+/** Epoch-ms of 00:00 BJT for a 'YYYYMMDD' key. */
+
+点将台 V1.0.0 源程序                                            第 5 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+function dateKeyToMs(key) {
+  const y = +key.slice(0, 4);
+  const m = +key.slice(4, 6);
+  const d = +key.slice(6, 8);
+  return Date.UTC(y, m - 1, d) - BJT_OFFSET_MS;
+}
+/** The key `n` days after `key` (n may be negative). */
+function addDays(key, n) {
+  return beijingDateKey(dateKeyToMs(key) + n * DAY_MS + 12 * 3600e3);
+}
+/** Whole days from key a to key b. */
+function daysBetween(a, b) {
+  return Math.round((dateKeyToMs(b) - dateKeyToMs(a)) / DAY_MS);
+}
+/** Milliseconds until the next 00:00 BJT. */
+function msUntilBeijingMidnight(nowMs) {
+  return beijingMidnightMs(nowMs) + DAY_MS - nowMs;
+}
+/** Issue number (第 N 期): days since launch, launch day = 1. */
+function issueNo(dateKey, launchKey) {
+  return daysBetween(launchKey, dateKey) + 1;
+}
+/** Day of week (0 = Sunday) of the Beijing date 'YYYYMMDD'. Pure calendar arithmetic, TZ independen
+    t. */
+function weekdayOf(key) {
+  return new Date(Date.UTC(+key.slice(0, 4), +key.slice(4, 6) - 1, +key.slice(6, 8))).getUTCDay();
+}
+/**
+ * The daily variant of a date key (spec 5.2/8.11, PO-1): 'shiren' on the config weekday (Sunday), e
+    lse 'standard'.
+ * `weekday` is config.shiren.weekday. Display only: the seed, sheet, sim, gates and validation neve
+    r look at it.
+ */
+function variantOf(key, weekday) {
+  return weekdayOf(key) === (weekday === undefined ? 0 : weekday) ? 'shiren' : 'standard';
+}
+module.exports = {
+  weekdayOf,
+  variantOf,
+  BJT_OFFSET_MS,
+  DAY_MS,
+  beijingDateKey,
+  beijingMidnightMs,
+  secondsSinceBeijingMidnight,
+  dateKeyToMs,
+  addDays,
+  daysBetween,
+  msUntilBeijingMidnight,
+  issueNo,
+};
+
+点将台 V1.0.0 源程序                                            第 6 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+/**
+ * Seeded randomness (spec 5.1). Pure JS, no wx, no DOM: this file is copied
+ * into the cloud functions, so client and server draw identical streams.
+ *
+ *   sub(seed, name) = mulberry32(hash32(seed + ":" + name))
+ */
+/** mulberry32: same seed, same sequence, forever. Returns () => float in [0,1). */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+/** FNV-1a over UTF-16 code units, then a murmur3 finaliser. Returns uint32. */
+function hash32(str) {
+  const s = String(str);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+/** A named sub-stream of a run seed. */
+function sub(seed, name) {
+  return mulberry32(hash32(seed + ':' + name));
+}
+/** Integer in [0, maxExclusive). */
+function int(rng, maxExclusive) {
+  return Math.floor(rng() * maxExclusive);
+}
+/** A uniformly random element of `arr`. */
+function pick(rng, arr) {
+  return arr[int(rng, arr.length)];
+}
+/** Fisher-Yates, in place. Returns the same array. */
+function shuffle(rng, arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = int(rng, i + 1);
+    const t = arr[i];
+    arr[i] = arr[j];
+    arr[j] = t;
+
+点将台 V1.0.0 源程序                                            第 7 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  }
+  return arr;
+}
+/** A fresh random uint32 from Math.random (client-side free-play seeds only). */
+function randomSeed() {
+  return Math.floor(Math.random() * 4294967296) >>> 0;
+}
+module.exports = { mulberry32, hash32, sub, int, pick, shuffle, randomSeed };
+/**
+ * Content tables (spec 3, Appendix B). Pure JS; copied into cloud functions.
+ *
+ *   getContent(contentVersion) -> content | null
+ *
+ * Content ships as core/content/generals.v<N>.js. The sim and server
+ * validation pin to the contentVersion; the server keeps the last 2 versions.
+ */
+const V1 = require('./content/generals.v1.js');
+const V2 = require('./content/generals.v2.js');
+const STAT_KEYS = ['zhi', 'xin', 'ren', 'yong', 'yan'];
+/** Slot order is fixed everywhere (lineup arrays, event stream indexes). */
+const SLOTS = ['zhugong', 'junshi', 'xianfeng', 'mengjiang', 'shoujiang'];
+const FACTIONS = [
+  { key: 'wei', label: '魏', color: '#B8862B', phase: 1 },
+  { key: 'shu', label: '蜀', color: '#C0392B', phase: 1 },
+  { key: 'wu', label: '吴', color: '#2E7D7A', phase: 1 },
+  { key: 'qun', label: '群', color: '#7A5230', phase: 1 },
+  { key: 'jin', label: '晋', color: '#C9D3DD', phase: 2, light: true },
+];
+const ERAS = [
+  { key: 'huangjin', label: '黄巾', span: '184-189', phase: 1 },
+  { key: 'qunxiong', label: '群雄', span: '190-207', phase: 1 },
+  { key: 'chibi', label: '赤壁', span: '208-214', phase: 1 },
+  { key: 'sanfen', label: '三分', span: '215-234', phase: 1 },
+  { key: 'guijin', label: '归晋', span: '235-280', phase: 2 },
+];
+/** Role weights over (zhi xin ren yong yan), spec 3.4. */
+const ROLES = [
+  { key: 'zhugong', label: '主公', blurb: '定人心、聚众志', weights: { zhi: 0.15, xin: 0.2, ren: 0.4, yong: 0
+    .05, yan: 0.2 } },
+  { key: 'junshi', label: '军师', blurb: '运筹帷幄', weights: { zhi: 0.65, xin: 0.15, ren: 0.05, yong: 0.0
+    , yan: 0.15 } },
+  { key: 'xianfeng', label: '先锋', blurb: '冲阵破敌', weights: { zhi: 0.1, xin: 0.05, ren: 0.0, yong: 0.5
+    5, yan: 0.3 } },
+  { key: 'mengjiang', label: '猛将', blurb: '万军之中取上将首级', weights: { zhi: 0.0, xin: 0.1, ren: 0.0, yong
+    : 0.8, yan: 0.1 } },
+  { key: 'shoujiang', label: '守将', blurb: '坚守城池、稳住后方', weights: { zhi: 0.2, xin: 0.25, ren: 0.05, yo
+    ng: 0.1, yan: 0.4 } },
+];
+const BONDS = [
+  { key: 'taoyuan', label: '桃园', members: ['g_liubei', 'g_guanyu', 'g_zhangfei'], bonus: 0.04 },
+
+点将台 V1.0.0 源程序                                            第 8 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  { key: 'jiangdong', label: '江东', members: ['g_sunce', 'g_zhouyu'], bonus: 0.04 },
+];
+/** Terms that must never appear in user-visible content (AC 7, AC 50). */
+const FORBIDDEN_TERMS = ['82-0', 'NBA', '武力', '统率', '政治', '魅力', 'SSR', '抽卡', '三国志', '三国杀', '光荣', 'Ko
+    ei'];
+/** Per content version: which factions/eras exist and the min generals per drawable cell. */
+const RAW = { 1: V1, 2: V2 };
+const META = {
+  1: { factions: ['wei', 'shu', 'wu', 'qun'], eras: ['huangjin', 'qunxiong', 'chibi', 'sanfen'], min
+    Cell: 2 },
+  2: { factions: ['wei', 'shu', 'wu', 'qun', 'jin'], eras: ['huangjin', 'qunxiong', 'chibi', 'sanfen
+    ', 'guijin'], minCell: 4 },
+};
+const cache = {};
+function cellKey(faction, era) {
+  return faction + '|' + era;
+}
+function build(raw) {
+  const meta = META[raw.contentVersion];
+  const factions = FACTIONS.filter((f) => meta.factions.indexOf(f.key) >= 0);
+  const eras = ERAS.filter((e) => meta.eras.indexOf(e.key) >= 0);
+  const bonds = raw.bonds || BONDS;
+  // v1 content is read as one appearance {faction, eras} per general (spec 3.5)
+  const generals = raw.generals.map((g) => (g.appearances ? g : Object.assign({}, g, { appearances: 
+    [{ faction: g.faction, eras: g.eras.slice() }] })));
+  const byId = {};
+  const indexOf = {};
+  generals.forEach((g, i) => {
+    byId[g.id] = g;
+    indexOf[g.id] = i;
+  });
+  const roleByKey = {};
+  ROLES.forEach((r) => (roleByKey[r.key] = r));
+  const factionByKey = {};
+  factions.forEach((f) => (factionByKey[f.key] = f));
+  const eraByKey = {};
+  eras.forEach((e) => (eraByKey[e.key] = e));
+  // cells[faction|era] = roster indexes, in roster order (built from appearances)
+  const cells = {};
+  for (const f of factions) for (const e of eras) cells[cellKey(f.key, e.key)] = [];
+  generals.forEach((g, i) => {
+    for (const a of g.appearances) for (const e of a.eras) cells[cellKey(a.faction, e)].push(i);
+  });
+  const MIN_CELL = meta.minCell;
+  const validCells = [];
+  for (const f of factions) {
+    for (const e of eras) if (cells[cellKey(f.key, e.key)].length >= MIN_CELL) validCells.push({ fac
+    tion: f.key, era: e.key });
+  }
+  // role scores, precomputed: roleScores[generalIndex][slotIndex]
+
+点将台 V1.0.0 源程序                                            第 9 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const roleScores = generals.map((g) =>
+    SLOTS.map((s) => {
+      const w = roleByKey[s].weights;
+      let sum = 0;
+      for (const k of STAT_KEYS) sum += w[k] * g.stats[k];
+      return Math.round(sum * 1e6) / 1e6;
+    })
+  );
+  return {
+    contentVersion: raw.contentVersion,
+    generals,
+    byId,
+    indexOf,
+    roster: generals.map((g) => g.id),
+    factions,
+    eras,
+    roles: ROLES,
+    roleByKey,
+    factionByKey,
+    eraByKey,
+    slots: SLOTS,
+    bonds,
+    cells,
+    validCells,
+    minCell: MIN_CELL,
+    roleScores,
+    texts: raw.texts,
+    forbiddenTerms: FORBIDDEN_TERMS,
+  };
+}
+function getContent(contentVersion) {
+  const v = Number(contentVersion);
+  if (!RAW[v]) return null;
+  if (!cache[v]) cache[v] = build(RAW[v]);
+  return cache[v];
+}
+const LATEST_CONTENT_VERSION = 2;
+/** The appearance note of a general under a faction ('' when none), shown under the name in that ce
+    ll's pool. */
+function appearanceNote(content, generalId, faction) {
+  const g = content.byId[generalId];
+  if (!g) return '';
+  for (const a of g.appearances) if (a.faction === faction) return a.note || '';
+  return '';
+}
+/** roleScore(g, r) = sum of weight[r][s] * g.stats[s] (spec 3.4), 1-10. */
+function roleScore(content, generalId, slot) {
+  return content.roleScores[content.indexOf[generalId]][SLOTS.indexOf(slot)];
+}
+/** Derived display tier from the stat total (spec 3.5). */
+
+点将台 V1.0.0 源程序                                           第 10 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+function tierOf(stats) {
+  const t = STAT_KEYS.reduce((a, k) => a + stats[k], 0);
+  return t >= 38 ? 'jia' : t >= 30 ? 'yi' : 'bing';
+}
+/** Fit chip for a role score (spec 3.4). */
+function fitOf(score) {
+  return score >= 7.5 ? 'good' : score >= 5.5 ? 'ok' : 'bad';
+}
+/** Collect every string value in an object tree. */
+function collectStrings(x, out) {
+  if (typeof x === 'string') out.push(x);
+  else if (Array.isArray(x)) x.forEach((y) => collectStrings(y, out));
+  else if (x && typeof x === 'object') Object.keys(x).forEach((k) => collectStrings(x[k], out));
+  return out;
+}
+/**
+ * Content validation (AC 7). Returns a list of problems; empty means valid.
+ * Used by the unit tests and by tools; the Phase 1 roster must have exactly
+ * 32 generals, 8 per faction, stats 1-10, every cell >= 2.
+ */
+function validateContent(content) {
+  if (content.contentVersion === 2) return validateV2(content);
+  const errs = [];
+  const g = content.generals;
+  const REQUIRED = ['id', 'name', 'courtesy', 'faction', 'eras', 'primaryRole', 'stats', 'tier', 'bo
+    nds', 'portraitId', 'monogram', 'blurb', 'statNote', 'source', 'contentVersion'];
+  if (g.length !== 32) errs.push('expected 32 generals, got ' + g.length);
+  const perFaction = {};
+  const ids = {};
+  for (const x of g) {
+    for (const f of REQUIRED) if (x[f] === undefined || x[f] === null) errs.push(x.id + ': missing '
+     + f);
+    if (ids[x.id]) errs.push('duplicate id ' + x.id);
+    ids[x.id] = true;
+    perFaction[x.faction] = (perFaction[x.faction] || 0) + 1;
+    if (!content.factionByKey[x.faction]) errs.push(x.id + ': bad faction');
+    if (!x.eras || x.eras.length < 1) errs.push(x.id + ': no eras');
+    for (const e of x.eras || []) if (!content.eraByKey[e]) errs.push(x.id + ': bad era ' + e);
+    if (!content.roleByKey[x.primaryRole]) errs.push(x.id + ': bad primaryRole');
+    for (const k of STAT_KEYS) {
+      const v = x.stats && x.stats[k];
+      if (!Number.isInteger(v) || v < 1 || v > 10) errs.push(x.id + ': stat ' + k + ' not an integer
+     1-10');
+    }
+    if (x.stats && x.tier !== tierOf(x.stats)) errs.push(x.id + ': tier does not match stat total');
+    if ([...(x.monogram || '')].length !== 1) errs.push(x.id + ': monogram must be 1 char');
+    if ([...(x.blurb || '')].length > 14) errs.push(x.id + ': blurb longer than 14 chars');
+    if (x.contentVersion !== content.contentVersion) errs.push(x.id + ': contentVersion mismatch');
+    for (const b of x.bonds || []) if (!content.bonds.some((bb) => bb.key === b)) errs.push(x.id + '
+    : unknown bond ' + b);
+
+点将台 V1.0.0 源程序                                           第 11 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  }
+  for (const f of content.factions) if (perFaction[f.key] !== 8) errs.push('faction ' + f.key + ' ha
+    s ' + (perFaction[f.key] || 0) + ' generals, expected 8');
+  let entries = 0;
+  for (const f of content.factions) {
+    for (const e of content.eras) {
+      const n = content.cells[cellKey(f.key, e.key)].length;
+      entries += n;
+      if (n < 2) errs.push('cell ' + f.key + '/' + e.key + ' has ' + n + ' generals');
+    }
+  }
+  if (entries !== 77) errs.push('expected 77 general-cell entries, got ' + entries);
+  for (const b of content.bonds) for (const m of b.members) if (!content.byId[m]) errs.push('bond ' 
+    + b.key + ' member missing ' + m);
+  // forbidden terms over every user-visible string
+  // `source` is provenance, never shown (it cites the historical book by name).
+  const visibleGenerals = g.map((x) => Object.assign({}, x, { source: '' }));
+  const strings = collectStrings({ generals: visibleGenerals, texts: content.texts, factions: conten
+    t.factions, eras: content.eras, roles: ROLES, bonds: content.bonds }, []);
+  for (const s of strings) for (const t of FORBIDDEN_TERMS) if (s.indexOf(t) >= 0) errs.push('forbid
+    den term "' + t + '" in "' + s + '"');
+  return errs;
+}
+/** Extra user-visible-term bans for v1 content (AC 7 lists 传说 and 稀有 too). */
+const EXTRA_FORBIDDEN_V2 = ['传说', '稀有'];
+/**
+ * contentVersion 2 validation (AC 69): 120 generals, primary counts, appearances,
+ * 21 used cells >= 4 (273 entries), 16 bonds, stats, tiers, forbidden terms.
+ */
+function validateV2(content) {
+  const errs = [];
+  const g = content.generals;
+  const REQUIRED = ['id', 'name', 'courtesy', 'faction', 'appearances', 'eras', 'primaryRole', 'stat
+    s', 'tier', 'bonds', 'portraitId', 'monogram', 'blurb', 'statNote', 'source', 'contentVersion'];
+  if (g.length !== 120) errs.push('expected 120 generals, got ' + g.length);
+  const perFaction = {};
+  const ids = {};
+  for (const x of g) {
+    for (const f of REQUIRED) if (x[f] === undefined || x[f] === null) if (!(f === 'portraitId' && x
+    [f] === null)) errs.push(x.id + ': missing ' + f);
+    if (ids[x.id]) errs.push('duplicate id ' + x.id);
+    ids[x.id] = true;
+    perFaction[x.faction] = (perFaction[x.faction] || 0) + 1;
+    if (!content.factionByKey[x.faction]) errs.push(x.id + ': bad faction');
+    if (x.portraitId !== null) errs.push(x.id + ': portraitId must be null in v1');
+    if (!x.appearances || x.appearances.length < 1) errs.push(x.id + ': no appearances');
+    const seenF = {};
+    const union = [];
+    for (const a of x.appearances || []) {
+      if (!content.factionByKey[a.faction]) errs.push(x.id + ': bad appearance faction ' + a.faction
+
+点将台 V1.0.0 源程序                                           第 12 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    );
+      if (seenF[a.faction]) errs.push(x.id + ': two appearances for ' + a.faction);
+      seenF[a.faction] = true;
+      if (!a.eras || a.eras.length < 1) errs.push(x.id + ': appearance without eras');
+      for (const e of a.eras || []) {
+        if (!content.eraByKey[e]) errs.push(x.id + ': bad era ' + e);
+        if (a.faction === 'jin' && e !== 'guijin') errs.push(x.id + ': 晋 appearance outside guijin')
+    ;
+        if (union.indexOf(e) < 0) union.push(e);
+      }
+      if (a.note !== undefined && [...a.note].length > 6) errs.push(x.id + ': appearance note longer
+     than 6 chars');
+    }
+    if (!seenF[x.faction]) errs.push(x.id + ': primary faction has no appearance');
+    if ([...(x.eras || [])].sort().join() !== union.slice().sort().join()) errs.push(x.id + ': eras 
+    is not the union of appearance eras');
+    if (!content.roleByKey[x.primaryRole]) errs.push(x.id + ': bad primaryRole');
+    for (const k of STAT_KEYS) {
+      const v = x.stats && x.stats[k];
+      if (!Number.isInteger(v) || v < 1 || v > 10) errs.push(x.id + ': stat ' + k + ' not an integer
+     1-10');
+    }
+    if (x.stats && x.tier !== tierOf(x.stats)) errs.push(x.id + ': tier does not match stat total');
+    if ([...(x.monogram || '')].length !== 1) errs.push(x.id + ': monogram must be 1 char');
+    if ([...(x.blurb || '')].length > 14) errs.push(x.id + ': blurb longer than 14 chars');
+    if (!x.statNote || !x.source) errs.push(x.id + ': empty statNote or source');
+    if (x.contentVersion !== content.contentVersion) errs.push(x.id + ': contentVersion mismatch');
+    for (const b of x.bonds || []) if (!content.bonds.some((bb) => bb.key === b)) errs.push(x.id + '
+    : unknown bond ' + b);
+  }
+  const want = { shu: 26, wei: 26, wu: 25, qun: 25, jin: 18 };
+  for (const k of Object.keys(want)) if (perFaction[k] !== want[k]) errs.push('faction ' + k + ' has
+     ' + (perFaction[k] || 0) + ' generals, expected ' + want[k]);
+  let entries = 0;
+  let used = 0;
+  for (const f of content.factions) {
+    for (const e of content.eras) {
+      const n = content.cells[cellKey(f.key, e.key)].length;
+      entries += n;
+      const unusedJin = f.key === 'jin' && e.key !== 'guijin';
+      if (unusedJin) {
+        if (n !== 0) errs.push('unused cell ' + f.key + '/' + e.key + ' has ' + n + ' generals');
+      } else {
+        used++;
+        if (n < 4) errs.push('cell ' + f.key + '/' + e.key + ' has ' + n + ' generals, expected >= 4
+    ');
+      }
+    }
+  }
+  if (used !== 21) errs.push('expected 21 used cells, got ' + used);
+
+点将台 V1.0.0 源程序                                           第 13 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  if (entries !== 273) errs.push('expected 273 general-cell entries, got ' + entries);
+  if (content.bonds.length !== 16) errs.push('expected 16 bonds, got ' + content.bonds.length);
+  for (const b of content.bonds) for (const m of b.members) if (!content.byId[m]) errs.push('bond ' 
+    + b.key + ' member missing ' + m);
+  const visibleGenerals = g.map((x) => Object.assign({}, x, { source: '' }));
+  const strings = collectStrings({ generals: visibleGenerals, texts: content.texts, factions: conten
+    t.factions, eras: content.eras, roles: ROLES, bonds: content.bonds }, []);
+  for (const s of strings) for (const t of FORBIDDEN_TERMS.concat(EXTRA_FORBIDDEN_V2)) if (s.indexOf
+    (t) >= 0) errs.push('forbidden term "' + t + '" in "' + s + '"');
+  return errs;
+}
+module.exports = {
+  getContent,
+  LATEST_CONTENT_VERSION,
+  STAT_KEYS,
+  SLOTS,
+  FACTIONS,
+  ERAS,
+  ROLES,
+  BONDS,
+  FORBIDDEN_TERMS,
+  cellKey,
+  roleScore,
+  tierOf,
+  fitOf,
+  appearanceNote,
+  collectStrings,
+  validateContent,
+};
+/**
+ * Simulated players (spec 7.5, 7.5.1). They play the real draft engine, so
+ * a player can never do something a human could not. Used by the tuning
+ * tool and by the daily seed gates (core/gates.js).
+ *
+ *   playRun(model, seed, contentVersion, mode, rng, scn?, opts?) ->   (opts.rounds: a prebuilt shee
+    t, saves rebuilding it per player)
+ *     { run, lineup, record:{w,l} }
+ *   models: 'random' | 'naive' | 'greedy' | 'greedyNoisy' | 'sensible'
+ *
+ * Choices use `rng` only; the battle and event streams belong to the seed,
+ * so every player on a seed faces the same battles.
+ */
+const draft = require('./draft');
+const { SLOTS } = require('./content');
+const { makeScenario, simulateScenario } = require('./sim');
+const { int } = require('./rng');
+const TIER_RANK = { jia: 3, yi: 2, bing: 1 };
+/** All (generalIndex, slotIndex, score) options for the current pool, best first. */
+function options(run) {
+  const out = [];
+
+点将台 V1.0.0 源程序                                           第 14 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const pool = draft.currentPool(run);
+  const rs = run.content.roleScores;
+  for (const g of pool) {
+    for (let s = 0; s < SLOTS.length; s++) {
+      if (run.slots[SLOTS[s]]) continue;
+      out.push({ g, s, score: rs[g][s] });
+    }
+  }
+  out.sort((a, b) => b.score - a.score || a.g - b.g || a.s - b.s);
+  return out;
+}
+function doPick(run, g, s) {
+  return draft.apply(run, { round: run.round, type: 'pick', generalId: run.content.roster[g], slot: 
+    SLOTS[s] });
+}
+function availableRespins(run) {
+  const out = [];
+  for (const dim of ['faction', 'era']) {
+    const info = draft.respinInfo(run, dim);
+    if (info.enabled && info.nextSource === 'free') out.push(dim);
+  }
+  return out;
+}
+function doRespin(run, dim) {
+  return draft.apply(run, { round: run.round, type: dim === 'faction' ? 'respinFaction' : 'respinEra
+    ', source: 'free' });
+}
+/**
+ * One round for a model. Returns nothing; mutates the run.
+ * `cfg` = {respin: 'none'|'random'|'greedy'|'greedyNoisy', respinP, gainBelow, takeBest}
+ */
+function playRound(run, model, rng, cfg) {
+  draft.apply(run, { round: run.round, type: 'flip' });
+  // --- re-spins ---
+  if (cfg.respin === 'random') {
+    // each available re-spin is used with probability respinP
+    for (const dim of ['faction', 'era']) {
+      const info = draft.respinInfo(run, dim);
+      if (info.enabled && info.nextSource === 'free' && rng() < cfg.respinP) doRespin(run, dim);
+    }
+  } else if (cfg.respin === 'greedy' || cfg.respin === 'greedyNoisy') {
+    for (let guard = 0; guard < 2; guard++) {
+      const dims = availableRespins(run);
+      if (dims.length === 0) break;
+      const opts = options(run);
+      const best = opts.length ? opts[0].score : 0;
+      if (best >= cfg.gainBelow) break;
+      if (cfg.respin === 'greedyNoisy' && rng() >= cfg.respinP) break;
+      doRespin(run, dims[dims.length === 1 ? 0 : int(rng, dims.length)]);
+    }
+
+点将台 V1.0.0 源程序                                           第 15 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  }
+  // --- pick ---
+  const opts = options(run);
+  if (model === 'random') {
+    const pool = draft.currentPool(run);
+    const g = pool[int(rng, pool.length)];
+    const open = [];
+    for (let s = 0; s < SLOTS.length; s++) if (!run.slots[SLOTS[s]]) open.push(s);
+    doPick(run, g, open[int(rng, open.length)]);
+    return;
+  }
+  if (model === 'naive') {
+    const pool = draft.currentPool(run);
+    const gens = run.content.generals;
+    let bg = -1;
+    let bk = -1;
+    for (const g of pool) {
+      const st = gens[g].stats;
+      const key = TIER_RANK[gens[g].tier] * 1000 + st.zhi + st.xin + st.ren + st.yong + st.yan;
+      if (key > bk) {
+        bk = key;
+        bg = g;
+      }
+    }
+    const pr = SLOTS.indexOf(gens[bg].primaryRole);
+    if (!run.slots[SLOTS[pr]]) {
+      doPick(run, bg, pr);
+      return;
+    }
+    let bs = -1;
+    let bv = -1;
+    for (let s = 0; s < SLOTS.length; s++) {
+      if (run.slots[SLOTS[s]]) continue;
+      const v = run.content.roleScores[bg][s];
+      if (v > bv) {
+        bv = v;
+        bs = s;
+      }
+    }
+    doPick(run, bg, bs);
+    return;
+  }
+  // greedy / greedyNoisy
+  let k = 0;
+  if (model === 'greedyNoisy' && opts.length > 1 && rng() >= cfg.takeBest) k = 1;
+  doPick(run, opts[k].g, opts[k].s);
+}
+function cfgFor(model, config, opts) {
+  const g = config.gates;
+  switch (model) {
+
+点将台 V1.0.0 源程序                                           第 16 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    case 'random':
+      return { respin: opts && opts.noRespin ? 'none' : 'random', respinP: g.random.respinP };
+    case 'greedyNoisy':
+      return { respin: 'greedyNoisy', respinP: g.greedy.respinP, gainBelow: g.greedy.gainBelow, take
+    Best: g.greedy.takeBest };
+    case 'greedy':
+      return { respin: 'greedy', gainBelow: config.players.greedyRespinBelow };
+    case 'naive':
+    default:
+      return { respin: 'none' };
+  }
+}
+function playRun(model, seed, contentVersion, mode, rng, scn, opts) {
+  const sc = scn || makeScenario(seed, contentVersion, opts && opts.configVersion);
+  let m = model;
+  if (m === 'sensible') m = rng() < 0.5 ? 'naive' : 'greedy';
+  const run = draft.createRun({ seed, contentVersion, mode, configVersion: sc.config.configVersion, 
+    rounds: opts && opts.rounds });
+  const cfg = cfgFor(m, sc.config, opts);
+  for (let r = 0; r < sc.config.rounds; r++) {
+    if (r > 0) draft.nextRound(run);
+    playRound(run, m, rng, cfg);
+  }
+  const lineup = draft.lineupOf(run);
+  const sim = simulateScenario(sc, lineup);
+  return { run, lineup, record: sim.record, sim };
+}
+module.exports = { playRun, options };
+'use strict';
+/**
+ * Analytics event catalogue (spec §15): the ONE list of client-sendable events and the props each m
+    ay carry (security
+ * hardening L2). The `track` cloud function validates every batch against it: unknown events are dr
+    opped, unknown prop keys
+ * are dropped, and values of the wrong type or outside their enum are dropped, so a modified client
+     cannot write arbitrary
+ * documents or free text into the `events` collection. Pure; the tests check it against the events 
+    the shipped client sends.
+ *
+ * Prop type specs:
+ *   'bool'                   boolean
+ *   ['int', min, max]        integer in [min, max]
+ *   ['enum', a, b, ...]      one of the listed strings
+ *   'tag'                    short identifier-like string (<= 40 of [A-Za-z0-9_.:-])
+ *   'text'                   short display-ish string (<= 80, control characters removed)
+ *   'code'                   error code: integer, or a 'text'
+ *   'runId' 'challengeId' 'generalId' 'dateKey'   the same shapes the cloud functions validate
+ *   'texts'                  array (<= 12) of 'text'
+ * Server-only events (daily_gen, board_list, anomaly_daily) are NOT in the catalogue.
+ */
+
+点将台 V1.0.0 源程序                                           第 17 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+const RUN_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
+const CHALLENGE_ID_RE = /^[A-Z2-7]{8}$/;
+const GENERAL_ID_RE = /^g_[a-z0-9_]{1,40}$/;
+const DATE_KEY_RE = /^\d{8}$/;
+const TAG_RE = /^[A-Za-z0-9_.:-]{1,40}$/;
+const MODE = ['enum', 'daily', 'free', 'challenge'];
+const VARIANT = ['enum', 'standard', 'shiren'];
+const PLACEMENT = ['enum', 'respin', 'replay', 'interstitial', 'banner'];
+const WINS = ['int', 0, 12];
+/** props every event may carry (analytics.js adds them to every event; sessionId is handled by trac
+    k itself) */
+const COMMON = {
+  isNewUser: 'bool',
+  contentVersion: ['int', 0, 100000],
+  appVersion: 'tag',
+  platform: 'tag',
+};
+const CATALOGUE = {
+  session_start: { scene: ['int', 0, 100000], fromCard: ['enum', 'none', 'result', 'challenge'], has
+    ShareTicket: 'bool', challengeId: 'challengeId' },
+  card_open: { cardKind: ['enum', 'result', 'challenge'], hasShareTicket: 'bool', challengeId: 'chal
+    lengeId' },
+  run_start: { runId: 'runId', mode: MODE, source: 'tag', variant: VARIANT },
+  round_fetch: { runId: 'runId', round: ['int', 1, 5], result: ['enum', 'ok', 'timeout', 'offline', 
+    'invalid'], ms: ['int', 0, 3600000] },
+  respin: { runId: 'runId', round: ['int', 1, 5], dim: ['enum', 'faction', 'era'], src: ['enum', 'fr
+    ee', 'ad'] },
+  draft_pick: {
+    runId: 'runId', round: ['int', 1, 5], generalId: 'generalId', slot: 'tag', fit: ['enum', 'good',
+     'ok', 'bad'], pickFaction: 'text',
+    poolSize: ['int', 0, 100], poolTotal: ['int', 0, 1000],
+  },
+  draft_undo: { runId: 'runId', round: ['int', 1, 5] },
+  run_complete: {
+    runId: 'runId', mode: MODE, wins: WINS, durationMs: ['int', 0, 86400000], respinsFree: ['int', 0
+    , 10], respinsAd: ['int', 0, 10],
+    events: 'texts', variant: VARIANT, multiAppearancePicks: ['int', 0, 5],
+  },
+  run_abandon: { runId: 'runId', mode: MODE, round: ['int', 0, 5] },
+  reveal_skip: { runId: 'runId', atBattle: ['int', 0, 12] },
+  shiren_reveal: { runId: 'runId', skipped: 'bool' },
+  share_tap: { runId: 'runId', kind: ['enum', 'result', 'challenge', 'group_invite', 'menu'], mode: 
+    MODE, wins: WINS },
+  challenge_created: { challengeId: 'challengeId', mode: MODE, wins: WINS },
+  challenge_answered: { challengeId: 'challengeId', myWins: WINS, theirWins: WINS, countsAsDaily: 'b
+    ool' },
+  board_view: { kind: ['enum', 'group', 'friend'], state: 'tag', mode: 'tag' },
+  group_join: {
+    result: ['enum', 'ok', 'wrongScene', 'leftGroup', 'notGroup', 'error'], errCode: 'code', scene: 
+    ['int', 0, 100000], chatType: ['int', -1, 100],
+
+点将台 V1.0.0 源程序                                           第 18 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  },
+  privacy_result: { trigger: 'tag', result: 'tag' },
+  friend_scope_result: { result: 'tag', via: 'tag' },
+  board_write: { dateKey: 'dateKey', result: 'tag', w: WINS },
+  streak_shown: { current: ['int', 0, 100000], where: 'tag' },
+  history_view: { items: ['int', 0, 1000], state: 'tag' },
+  history_issue_view: { dateKey: 'dateKey', hasMine: 'bool', bestShown: 'bool' },
+  save_image: { mode: 'tag', result: 'tag', errCode: 'code' },
+  subscribe_offer: { where: 'tag' },
+  subscribe_result: { result: 'tag', errCode: 'code' },
+  display_setting: { largeText: 'bool', highContrast: 'bool', source: 'tag' },
+  ad_request: { placement: PLACEMENT, stub: 'bool' },
+  ad_show: { placement: PLACEMENT, stub: 'bool' },
+  ad_reward: { placement: PLACEMENT, stub: 'bool' },
+  ad_close_early: { placement: PLACEMENT, stub: 'bool' },
+  ad_error: { placement: PLACEMENT, stub: 'bool', errCode: 'code' },
+  interstitial_show: { runsThisSession: ['int', 0, 100000] },
+  error: { where: 'text', code: 'code' },
+};
+const EVENT_NAMES = Object.keys(CATALOGUE);
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+function text(x) {
+  if (typeof x !== 'string') return undefined;
+  // eslint-disable-next-line no-control-regex
+  return x.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 80);
+}
+/** validate one value against its spec; returns the normalised value or undefined (= drop) */
+function checkValue(spec, x) {
+  if (Array.isArray(spec)) {
+    if (spec[0] === 'enum') return typeof x === 'string' && spec.indexOf(x, 1) > 0 ? x : undefined;
+    if (spec[0] === 'int') return Number.isInteger(x) && x >= spec[1] && x <= spec[2] ? x : undefine
+    d;
+    return undefined;
+  }
+  switch (spec) {
+    case 'bool': return typeof x === 'boolean' ? x : undefined;
+    case 'tag': return typeof x === 'string' && TAG_RE.test(x) ? x : undefined;
+    case 'text': return text(x);
+    case 'code': return Number.isInteger(x) && Math.abs(x) <= 1e12 ? x : text(x);
+    case 'runId': return typeof x === 'string' && RUN_ID_RE.test(x) ? x : undefined;
+    case 'challengeId': return typeof x === 'string' && CHALLENGE_ID_RE.test(x) ? x : undefined;
+    case 'generalId': return typeof x === 'string' && GENERAL_ID_RE.test(x) ? x : undefined;
+    case 'dateKey': return typeof x === 'string' && DATE_KEY_RE.test(x) ? x : undefined;
+    case 'texts': {
+      if (!Array.isArray(x)) return undefined;
+      const ok = x.slice(0, 12).map(text).filter((t) => t !== undefined && t !== '');
+      return ok;
+    }
+    default: return undefined;
+  }
+
+点将台 V1.0.0 源程序                                           第 19 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+}
+/**
+ * Props of `name` reduced to the catalogue: only declared keys (plus the common ones), each type/en
+    um checked, everything
+ * else dropped (prototype keys included). Returns null for an event name that is not in the catalog
+    ue. Never throws.
+ */
+function cleanProps(name, props) {
+  if (typeof name !== 'string' || !has(CATALOGUE, name)) return null;
+  const spec = CATALOGUE[name];
+  const out = {};
+  if (!props || typeof props !== 'object' || Array.isArray(props)) return out;
+  const keys = Object.keys(props);
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    const s = has(spec, k) ? spec[k] : has(COMMON, k) ? COMMON[k] : null;
+    if (!s) continue;
+    const val = checkValue(s, props[k]);
+    if (val !== undefined) out[k] = val;
+  }
+  return out;
+}
+module.exports = { CATALOGUE, COMMON, EVENT_NAMES, cleanProps, checkValue };
+/**
+ * Token sheet (spec 4, 5.1): everything the client may know about a seed.
+ *
+ *   buildSheet(seed, contentVersion[, configVersion]) -> rounds[5]
+ *   round = { faction, era, altFaction[<=3], altEra[<=3], fallback: tokenSet[], pools? }
+ *   tokenSet = { faction, era, altFaction, altEra }
+ *   pools = { 'faction|era': [rosterIndex, ...] }   (contentVersion 2 only)
+ *
+ * - The primary cell is uniform over the valid cells. No rarity weighting.
+ * - altFaction[k] differs from the current faction (all alternates in a
+ *   round are distinct from it and from each other) and forms a valid cell
+ *   with the current era; likewise altEra[k]. k is the number of re-spins of
+ *   that dimension already used in the round.
+ * - fallback holds deterministic replacement token sets for the "pool is
+ *   empty after earlier picks" auto-reflip. The last entry is always a cell
+ *   too big to be emptied by earlier picks, so a reflip always terminates.
+ * - pools (v2, spec 4 "Pool"): for every valid cell with more than poolCap
+ *   generals, the round's pool ORDER, a seeded shuffle of the cell's roster
+ *   indexes (sub(seed, 'pool:' + round + ':' + faction + ':' + era), round
+ *   1-based). The pool is the first poolCap undrafted generals in that
+ *   order. Because the order rides in the round, the daily client (which
+ *   has no seed) and the server derive identical pools. Cells with at most
+ *   poolCap generals have no entry (all undrafted members are shown).
+ *
+ * The sheet never contains battle or event randomness.
+ */
+const { sub, int, pick, shuffle } = require('./rng');
+
+点将台 V1.0.0 源程序                                           第 20 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+const { getContent, cellKey } = require('./content');
+const { getConfig, defaultConfigVersion } = require('./config');
+function isValidCell(content, faction, era) {
+  const c = content.cells[cellKey(faction, era)];
+  return !!c && c.length >= content.minCell;
+}
+function makeTokenSet(content, rng, cell, altCount) {
+  const altFaction = shuffle(
+    rng,
+    content.factions.map((f) => f.key).filter((f) => f !== cell.faction && isValidCell(content, f, c
+    ell.era))
+  ).slice(0, altCount);
+  const altEra = shuffle(
+    rng,
+    content.eras.map((e) => e.key).filter((e) => e !== cell.era && isValidCell(content, cell.faction
+    , e))
+  ).slice(0, altCount);
+  return { faction: cell.faction, era: cell.era, altFaction, altEra };
+}
+/** The seeded pool order of a cell in round `round` (1-based): roster indexes. */
+function poolOrder(seed, content, round, faction, era) {
+  const cell = content.cells[cellKey(faction, era)].slice();
+  return shuffle(sub(seed >>> 0, 'pool:' + round + ':' + faction + ':' + era), cell);
+}
+function buildSheet(seed, contentVersion, configVersion) {
+  const content = getContent(contentVersion);
+  if (!content) throw new Error('unknown contentVersion ' + contentVersion);
+  const config = getConfig(configVersion || defaultConfigVersion(contentVersion));
+  const sheetRng = sub(seed, 'sheet');
+  const fbRng = sub(seed, 'fallback');
+  const cells = content.validCells;
+  // Cells that cannot be emptied by the (at most rounds-1) earlier picks.
+  const safe = cells.filter((c) => content.cells[cellKey(c.faction, c.era)].length >= config.rounds)
+    ;
+  const big = cells.filter((c) => content.cells[cellKey(c.faction, c.era)].length > config.poolCap);
+  const rounds = [];
+  for (let r = 0; r < config.rounds; r++) {
+    const cell = pick(sheetRng, cells);
+    const round = makeTokenSet(content, sheetRng, cell, config.altCount);
+    round.fallback = [];
+    for (let k = 0; k < config.fallbackCount; k++) {
+      const last = k === config.fallbackCount - 1 && safe.length > 0;
+      const c = last ? safe[int(fbRng, safe.length)] : cells[int(fbRng, cells.length)];
+      round.fallback.push(makeTokenSet(content, fbRng, c, config.altCount));
+    }
+    if (big.length > 0) {
+      round.pools = {};
+      for (const c of big) round.pools[cellKey(c.faction, c.era)] = poolOrder(seed, content, r + 1, 
+    c.faction, c.era);
+    }
+
+点将台 V1.0.0 源程序                                           第 21 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    rounds.push(round);
+  }
+  return rounds;
+}
+module.exports = { buildSheet, isValidCell, makeTokenSet, poolOrder };
+/**
+ * The draft state machine (spec 2, 4, 5.1). One engine shared by the client
+ * (live play), `validate.replay` (server) and the simulated players, so the
+ * rules can never drift between them.
+ *
+ * A run is fully defined by (seed, contentVersion, actions[]). Actions:
+ *   { round, type: 'flip' }
+ *   { round, type: 'respinFaction'|'respinEra', source?: 'free'|'ad' }
+ *   { round, type: 'pick', generalId, slot }
+ *   { round, type: 'undo' }
+ *
+ * Phases per round: awaitFlip -> flipped -> placed. After the 5th pick the
+ * run is complete (phase 'placed', round 5, 5 picks). `flip` for round n+1
+ * is accepted straight from 'placed' of round n (the UI's 下一轮 step is
+ * not an action).
+ *
+ * Decisions on points the spec leaves open:
+ * - Re-spin is allowed after an undo (no pick is standing), never while a
+ *   pick is placed.
+ * - An ad re-spin of a dimension requires that dimension's free re-spin to
+ *   be spent already; at most `allowance.ad` ad re-spins per run, free play
+ *   only.
+ * - A re-spin result (or a flip) whose pool is empty is replaced from the
+ *   round's deterministic fallback list, at no cost, with a log line.
+ */
+const { getContent, SLOTS, cellKey } = require('./content');
+const { buildSheet, isValidCell } = require('./sheet');
+const { getConfig, defaultConfigVersion } = require('./config');
+const ACTION_TYPES = ['flip', 'respinFaction', 'respinEra', 'pick', 'undo'];
+function createRun(opts) {
+  const content = getContent(opts.contentVersion);
+  if (!content) return null;
+  const config = getConfig(opts.configVersion || defaultConfigVersion(content.contentVersion));
+  if (!config) return null;
+  const mode = opts.mode || 'free';
+  const allowance = config.allowance[mode];
+  if (!allowance) return null;
+  return {
+    seed: opts.seed >>> 0,
+    mode,
+    contentVersion: content.contentVersion,
+    configVersion: config.configVersion,
+    content,
+    config,
+    allowance,
+
+点将台 V1.0.0 源程序                                           第 22 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    rounds: opts.rounds || buildSheet(opts.seed >>> 0, content.contentVersion, config.configVersion)
+    ,
+    round: 1,
+    phase: 'awaitFlip',
+    token: null,
+    fbIdx: -1,
+    used: { faction: 0, era: 0 },
+    free: { faction: false, era: false },
+    adUsed: 0,
+    picks: [],
+    drafted: {},
+    slots: { zhugong: null, junshi: null, xianfeng: null, mengjiang: null, shoujiang: null },
+    finalTokens: [null, null, null, null, null],
+    respinsFree: 0,
+    respinsAd: 0,
+    log: [],
+    actions: [],
+  };
+}
+/**
+ * The selectable pool (roster indexes, roster order) of a (faction, era) cell in the run's current 
+    round
+ * (spec 4): the first `config.poolCap` undrafted members in the round's seeded pool order
+ * (`rounds[r].pools[cell]`), or all undrafted members when the cell has no order (size <= poolCap).
+ * Depends only on the seed, the round, the cell and which people are drafted.
+ */
+function poolOf(run, faction, era) {
+  const key = cellKey(faction, era);
+  const cell = run.content.cells[key] || [];
+  const round = run.rounds[run.round - 1];
+  const order = round && round.pools && round.pools[key];
+  const roster = run.content.roster;
+  const cap = run.config.poolCap;
+  const out = [];
+  if (order && order.length > cap) {
+    for (let i = 0; i < order.length && out.length < cap; i++) if (!run.drafted[roster[order[i]]]) o
+    ut.push(order[i]);
+    out.sort((a, b) => a - b);
+    return out;
+  }
+  for (let i = 0; i < cell.length; i++) if (!run.drafted[roster[cell[i]]]) out.push(cell[i]);
+  return out;
+}
+/** Members of the cell already in the lineup (roster indexes): shown after the pool, dimmed "已点将", 
+    not selectable. */
+function draftedInCell(run, faction, era) {
+  const cell = run.content.cells[cellKey(faction, era)] || [];
+  const out = [];
+  for (let i = 0; i < cell.length; i++) if (run.drafted[run.content.roster[cell[i]]]) out.push(cell[
+    i]);
+
+点将台 V1.0.0 源程序                                           第 23 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  return out;
+}
+/** Pool of the current token (empty before the flip). */
+function currentPool(run) {
+  return run.token ? poolOf(run, run.token.faction, run.token.era) : [];
+}
+function startToken(run) {
+  return run.rounds[run.round - 1];
+}
+/** Replace an empty-pool token from the round's fallback list. */
+function settleToken(run) {
+  while (run.token && poolOf(run, run.token.faction, run.token.era).length === 0) {
+    const next = run.rounds[run.round - 1].fallback[run.fbIdx + 1];
+    if (!next) return false;
+    run.fbIdx++;
+    run.token = {
+      faction: next.faction,
+      era: next.era,
+      altFaction: next.altFaction,
+      altEra: next.altEra,
+    };
+    run.log.push({ round: run.round, text: '此路无将，重新翻令' });
+  }
+  return true;
+}
+/** What a re-spin of `dim` ('faction'|'era') would do right now. */
+function respinInfo(run, dim) {
+  const base = { free: run.free[dim] ? 0 : 1, enabled: false, hint: '', nextSource: null, target: nu
+    ll };
+  if (run.phase !== 'flipped' || !run.token) return base;
+  const alts = dim === 'faction' ? run.token.altFaction : run.token.altEra;
+  const k = run.used[dim];
+  const alt = alts[k];
+  const valid =
+    alt !== undefined &&
+    (dim === 'faction' ? isValidCell(run.content, alt, run.token.era) : isValidCell(run.content, run
+    .token.faction, alt));
+  if (!valid) {
+    base.hint = '此令无可换';
+    return base;
+  }
+  base.target = alt;
+  if (!run.free[dim]) {
+    base.enabled = true;
+    base.nextSource = 'free';
+  } else if (run.allowance.ad > 0 && run.adUsed < run.allowance.ad) {
+    base.nextSource = 'ad';
+  } else {
+    base.hint = '已用';
+  }
+
+点将台 V1.0.0 源程序                                           第 24 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  return base;
+}
+function reject(reason) {
+  return { ok: false, reason };
+}
+/** Apply one action. Returns {ok:true} or {ok:false, reason}. Mutates `run` on success only. */
+function apply(run, a) {
+  if (!a || ACTION_TYPES.indexOf(a.type) < 0 || !Number.isInteger(a.round)) return reject('BAD_ACTIO
+    N');
+  const type = a.type;
+  if (run.picks.length === run.config.rounds && type !== 'undo') return reject('EXTRA_ACTIONS');
+  if (type === 'flip') {
+    if (run.phase === 'placed' && run.round < run.config.rounds && a.round === run.round + 1) {
+      // progressive delivery (spec 5.2): a client holding only the rounds released so far cannot fl
+    ip further
+      if (!run.rounds[run.round]) return reject('ROUND_NOT_RELEASED');
+      run.round++;
+      run.phase = 'awaitFlip';
+      run.token = null;
+      run.fbIdx = -1;
+      run.used = { faction: 0, era: 0 };
+    }
+    if (a.round !== run.round) return reject('ROUND_MISMATCH');
+    if (run.phase !== 'awaitFlip') return reject('ALREADY_FLIPPED');
+    const t = startToken(run);
+    if (!t) return reject('ROUND_NOT_RELEASED');
+    run.token = { faction: t.faction, era: t.era, altFaction: t.altFaction, altEra: t.altEra };
+    if (!settleToken(run)) return reject('NO_POOL');
+    run.phase = 'flipped';
+    run.actions.push({ round: a.round, type });
+    return { ok: true };
+  }
+  if (a.round !== run.round) return reject('ROUND_MISMATCH');
+  if (type === 'respinFaction' || type === 'respinEra') {
+    const dim = type === 'respinFaction' ? 'faction' : 'era';
+    if (run.phase === 'awaitFlip') return reject('NOT_FLIPPED');
+    if (run.phase === 'placed') return reject('RESPIN_AFTER_PICK');
+    const source = a.source || 'free';
+    if (source !== 'free' && source !== 'ad') return reject('BAD_ACTION');
+    if (source === 'ad') {
+      if (!(run.allowance.ad > 0)) return reject('AD_RESPIN_NOT_ALLOWED');
+      if (!run.free[dim]) return reject('AD_BEFORE_FREE');
+      if (run.adUsed >= run.allowance.ad) return reject('RESPIN_LIMIT');
+    } else if (run.free[dim] || !(run.allowance[dim] > 0)) {
+      return reject('RESPIN_LIMIT');
+    }
+    const info = respinInfo(run, dim);
+    if (info.target === null) return reject('NO_ALT');
+    if (dim === 'faction') run.token.faction = info.target;
+    else run.token.era = info.target;
+
+点将台 V1.0.0 源程序                                           第 25 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    run.used[dim]++;
+    if (source === 'free') {
+      run.free[dim] = true;
+      run.respinsFree++;
+    } else {
+      run.adUsed++;
+      run.respinsAd++;
+    }
+    settleToken(run);
+    run.actions.push({ round: a.round, type, source });
+    return { ok: true };
+  }
+  if (type === 'pick') {
+    if (run.phase === 'awaitFlip') return reject('NOT_FLIPPED');
+    if (run.phase === 'placed') return reject('ALREADY_PICKED');
+    if (SLOTS.indexOf(a.slot) < 0) return reject('BAD_SLOT');
+    const content = run.content;
+    const gi = content.indexOf[a.generalId];
+    if (gi === undefined) return reject('NOT_IN_POOL');
+    const inCell = content.cells[cellKey(run.token.faction, run.token.era)].indexOf(gi) >= 0;
+    if (!inCell) return reject('NOT_IN_POOL');
+    // a person can be drafted at most once per run, from whichever cell (spec 3.2)
+    if (run.drafted[a.generalId]) return reject('DUPLICATE_GENERAL');
+    // pool cap (spec 4): only the first poolCap undrafted members of the pool order are selectable
+    if (currentPool(run).indexOf(gi) < 0) return reject('NOT_IN_POOL');
+    if (run.slots[a.slot]) return reject('DUPLICATE_SLOT');
+    run.drafted[a.generalId] = true;
+    run.slots[a.slot] = a.generalId;
+    run.picks.push({ round: run.round, generalId: a.generalId, slot: a.slot, faction: run.token.fact
+    ion });
+    run.finalTokens[run.round - 1] = { faction: run.token.faction, era: run.token.era };
+    run.phase = 'placed';
+    run.actions.push({ round: a.round, type, generalId: a.generalId, slot: a.slot });
+    return { ok: true };
+  }
+  // undo
+  if (run.phase !== 'placed') return reject('UNDO_INVALID');
+  const last = run.picks[run.picks.length - 1];
+  if (!last || last.round !== run.round) return reject('UNDO_INVALID');
+  run.picks.pop();
+  delete run.drafted[last.generalId];
+  run.slots[last.slot] = null;
+  run.finalTokens[run.round - 1] = null;
+  run.phase = 'flipped';
+  run.actions.push({ round: a.round, type });
+  return { ok: true };
+}
+/** UI step 下一轮: move to the next round's face-down tokens. Not an action. */
+function nextRound(run) {
+  if (run.phase !== 'placed' || run.round >= run.config.rounds) return false;
+
+点将台 V1.0.0 源程序                                           第 26 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  run.round++;
+  run.phase = 'awaitFlip';
+  run.token = null;
+  run.fbIdx = -1;
+  run.used = { faction: 0, era: 0 };
+  return true;
+}
+function isComplete(run) {
+  return run.picks.length === run.config.rounds;
+}
+/**
+ * Lineup in fixed slot order. Slots may be null until complete. Each entry carries `faction`, the f
+    action of the
+ * cell the general was drafted from (cohesion uses it, spec 3.2/7.2); pass the entries to `simulate
+    ` unchanged.
+ */
+function lineupOf(run) {
+  return SLOTS.map((s) => {
+    const p = run.picks.find((x) => x.slot === s);
+    return { slot: s, generalId: run.slots[s], faction: p ? p.faction : null };
+  });
+}
+module.exports = {
+  createRun,
+  apply,
+  nextRound,
+  poolOf,
+  draftedInCell,
+  currentPool,
+  respinInfo,
+  isComplete,
+  lineupOf,
+  ACTION_TYPES,
+};
+/**
+ * Display helpers shared by client and server: per-slot role scores for a
+ * lineup and the 说书人 评语 (spec 8.3). Pure JS.
+ */
+const { SLOTS, fitOf } = require('./content');
+/** [{slot, generalId, name, score, fit}] in slot order for a lineup of {slot, generalId}. */
+function lineupDetail(content, lineup) {
+  const byslot = {};
+  for (const e of lineup) byslot[e.slot] = e.generalId;
+  return SLOTS.map((slot, k) => {
+    const id = byslot[slot];
+    if (!id || content.indexOf[id] === undefined) return { slot, generalId: id || null, name: null, 
+    score: null, fit: null };
+    const gi = content.indexOf[id];
+    const score = content.roleScores[gi][k];
+    return { slot, generalId: id, name: content.generals[gi].name, score, fit: fitOf(score) };
+
+点将台 V1.0.0 源程序                                           第 27 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  });
+}
+/**
+ * One-line verdict: the strongest slot, then a regret about the weakest, for
+ * example "猛将如云，可惜城头少一员稳将。" Ends use fixed lines.
+ */
+function commentFor(content, lineup, wins) {
+  const t = content.texts;
+  if (wins >= 12) return t.commentPerfect;
+  if (wins <= 1) return t.commentWorst;
+  const d = lineupDetail(content, lineup);
+  let hi = 0;
+  let lo = 0;
+  for (let i = 1; i < d.length; i++) {
+    if (d[i].score > d[hi].score) hi = i;
+    if (d[i].score < d[lo].score) lo = i;
+  }
+  if (hi === lo) return t.strong[d[hi].slot] + '。';
+  return t.strong[d[hi].slot] + '，' + t.weak[d[lo].slot] + '。';
+}
+module.exports = { lineupDetail, commentFor };
+/**
+ * Grading simulator (spec 7). Pure JS; runs identically on the client and
+ * in the cloud functions.
+ *
+ *   simulate(lineup, seed, contentVersion, configVersion, opts?) ->
+ *     { record:{w,l}, battles[], events[], band, morale, scores, lineup }
+ *
+ * `lineup` is [{slot, generalId}] in any order (or {slot: generalId}).
+ * `opts.events === false` switches the three events off (used by the
+ * monotonicity tests: before events a stronger lineup never does worse).
+ *
+ * Randomness (all from the seed, never from player choices):
+ *   battle stream  sub(seed,'battle'): 6 guaranteed types + 6 random, shuffled;
+ *                  then per battle i: u_i (shared luck), j_i (opponent jitter)
+ *   event stream   sub(seed,'event'):  5 wavering rolls (by SLOT, so a higher
+ *                  信 never triggers more often), battle pick, template
+ *                  picks for the three events
+ * A battle is won iff P_i > D_i + tau*logit(u_i), which is exactly
+ * u_i < 1/(1+exp(-(P_i-D_i)/tau)), so a stronger lineup never loses a
+ * battle a weaker one wins (before events).
+ */
+const { sub, int, shuffle } = require('./rng');
+const { getContent, SLOTS } = require('./content');
+const { getConfig, bandFor, defaultConfigVersion } = require('./config');
+const NS = 5;
+function logit(p) {
+  return Math.log(p / (1 - p));
+}
+/** Per-seed constants: everything that does not depend on the lineup. */
+
+点将台 V1.0.0 源程序                                           第 28 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+function makeScenario(seed, contentVersion, configVersion) {
+  const content = getContent(contentVersion);
+  if (!content) throw new Error('unknown contentVersion ' + contentVersion);
+  const config = getConfig(configVersion || defaultConfigVersion(contentVersion));
+  if (!config) throw new Error('unknown configVersion ' + configVersion);
+  const nb = config.battles;
+  const types = config.battleTypes;
+  const rng = sub(seed, 'battle');
+  const order = [];
+  for (let t = 0; t < types.length; t++) order.push(t);
+  shuffle(rng, order);
+  while (order.length < nb) order.push(int(rng, types.length));
+  shuffle(rng, order);
+  const typeIdx = order;
+  const u = new Array(nb);
+  const j = new Array(nb);
+  const D = new Array(nb);
+  const need = new Array(nb);
+  const evNeedStrat = new Array(nb);
+  const evNeedUnst = new Array(nb);
+  const ev = config.events;
+  for (let i = 0; i < nb; i++) {
+    u[i] = rng();
+    j[i] = (rng() * 2 - 1) * config.jitter;
+    D[i] = config.curve[i] + j[i];
+    need[i] = u[i] <= 0 ? -Infinity : D[i] + config.tau * logit(u[i]);
+    evNeedStrat[i] = D[i] + config.tau * logit(ev.stratagem.pMin);
+    evNeedUnst[i] = D[i] + config.tau * logit(ev.unstoppable.pMin);
+  }
+  const bw = typeIdx.map((t) => types[t].w);
+  const erng = sub(seed, 'event');
+  const wr = [];
+  for (let s = 0; s < NS; s++) wr.push(erng());
+  const wb = erng();
+  const wt = erng();
+  const st = erng();
+  const ut = erng();
+  const stratTypes = ev.stratagem.types.map((k) => types.findIndex((t) => t.key === k));
+  const unstTypes = ev.unstoppable.types.map((k) => types.findIndex((t) => t.key === k));
+  const isStratType = typeIdx.map((t) => stratTypes.indexOf(t) >= 0);
+  const isUnstType = typeIdx.map((t) => unstTypes.indexOf(t) >= 0);
+  return {
+    seed,
+    content,
+    config,
+    nb,
+    typeIdx,
+    bw,
+    u,
+    j,
+
+点将台 V1.0.0 源程序                                           第 29 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    D,
+    need,
+    evNeedStrat,
+    evNeedUnst,
+    isStratType,
+    isUnstType,
+    wr,
+    wb,
+    wt,
+    st,
+    ut,
+  };
+}
+/**
+ * Lineup -> general ids in slot order (null if incomplete/unknown). `ids.facs` holds the faction ea
+    ch general was
+ * drafted from (cohesion, spec 7.2); an entry without `faction` counts as its primary faction.
+ */
+function normLineup(content, lineup) {
+  const ids = new Array(NS);
+  const facs = new Array(NS);
+  if (Array.isArray(lineup)) {
+    for (const e of lineup) {
+      const si = SLOTS.indexOf(e && e.slot);
+      if (si < 0) return null;
+      ids[si] = e.generalId;
+      facs[si] = e.faction || null;
+    }
+  } else if (lineup && typeof lineup === 'object') {
+    for (let s = 0; s < NS; s++) ids[s] = lineup[SLOTS[s]];
+  } else return null;
+  for (let s = 0; s < NS; s++) {
+    if (content.indexOf[ids[s]] === undefined) return null;
+    if (!facs[s]) facs[s] = content.byId[ids[s]].faction;
+  }
+  ids.facs = facs;
+  return ids;
+}
+/** Morale multiplier M and its parts for 5 general indexes in slot order. */
+function moraleOf(content, config, gIdx, lordScore, facs) {
+  const m = config.morale;
+  const ids = gIdx.map((i) => content.roster[i]);
+  const bonds = [];
+  for (const b of content.bonds) {
+    let all = true;
+    for (const mem of b.members) if (ids.indexOf(mem) < 0) all = false;
+    if (all) bonds.push(b);
+  }
+  const counts = {};
+  let top = 0;
+
+点将台 V1.0.0 源程序                                           第 30 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  for (const i of gIdx) {
+    const f = facs ? facs[gIdx.indexOf(i)] : content.generals[i].faction;
+    counts[f] = (counts[f] || 0) + 1;
+    if (counts[f] > top) top = counts[f];
+  }
+  const cohesion = top >= 5 ? m.cohesion5 : top >= 4 ? m.cohesion4 : 0;
+  let bondBonus = 0;
+  for (const b of bonds) bondBonus += b.bonus === undefined ? m.perBond : b.bonus;
+  const raw = m.base + m.perLord * lordScore + bondBonus + cohesion;
+  return { total: Math.min(m.cap, raw), base: m.base, lord: m.perLord * lordScore, bondKeys: bonds.m
+    ap((b) => b.key), bonds: bonds.map((b) => b.label), bondBonus, cohesion, capped: raw > m.cap };
+}
+/** Fast morale for the search (no allocations beyond the loop). */
+function moraleTotal(content, config, gIdx, lordScore, facs) {
+  return moraleOf(content, config, gIdx, lordScore, facs).total;
+}
+/**
+ * Natural outcomes for team power vector. Fills `P` and `win` (length nb).
+ * Returns number of natural wins.
+ */
+function naturalOutcomes(scn, S, M, P, win) {
+  let w = 0;
+  const bw = scn.bw;
+  for (let i = 0; i < scn.nb; i++) {
+    const b = bw[i];
+    const p = M * (b[0] * S[0] + b[1] * S[1] + b[2] * S[2] + b[3] * S[3] + b[4] * S[4]);
+    P[i] = p;
+    const ok = p > scn.need[i];
+    win[i] = ok;
+    if (ok) w++;
+  }
+  return w;
+}
+/**
+ * Apply the three events to natural outcomes. `final` is filled with the
+ * final win flags; returns the event descriptor {wavering, strat, unst}
+ * (battle indexes or -1, plus the slot of the wavering general).
+ */
+function applyEvents(scn, S, P, win, final, xin, zhiJunshi, yongMeng) {
+  const ev = scn.config.events;
+  const nb = scn.nb;
+  const out = { wavering: -1, waverSlot: -1, strat: -1, unst: -1 };
+  for (let i = 0; i < nb; i++) final[i] = win[i];
+  // 临阵生变: first triggered by slot order
+  for (let s = 0; s < NS; s++) {
+    const x = xin[s];
+    if (x <= ev.wavering.maxXin && scn.wr[s] < (ev.wavering.base - x) * ev.wavering.perPoint) {
+      let n = 0;
+      for (let i = 0; i < nb; i++) if (win[i]) n++;
+      if (n > 0) {
+
+点将台 V1.0.0 源程序                                           第 31 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  startRun: { limit: 20 },
+  submitRun: { limit: 20 },
+  createChallenge: { limit: 20 },
+  subscribeChallenge: { limit: 20 },
+  joinGroup: { limit: 20 },
+  track: { limit: 300, cost: (event) => (event && Array.isArray(event.events) ? Math.max(1, Math.min
+    (event.events.length, 50)) : 1) },
+};
+/** handler option for function `name`: {bucket, limit, cost?} */
+function rateOf(name) {
+  const l = LIMITS[name];
+  if (!l) throw new Error('no rate limit defined for ' + name);
+  return Object.assign({ bucket: name }, l);
+}
+module.exports = { LIMITS, rateOf };
+'use strict';
+// Subscribe-message send for "好友接下了你的战书" (spec 8.13, 14.2). Best effort: never throws, never
+// changes a submitRun response, at most SEND_CAP_MS of waiting. One grant = at most one message.
+const store = require('./store');
+const appconfig = require('./appconfig');
+const { now, BJT_MS } = require('./util');
+const SEND_CAP_MS = 2000;
+function two(n) { return String(n).padStart(2, '0'); }
+function bjtTime(ms) {
+  const d = new Date(ms + BJT_MS);
+  return `${d.getUTCFullYear()}-${two(d.getUTCMonth() + 1)}-${two(d.getUTCDate())} ${two(d.getUTCHou
+    rs())}:${two(d.getUTCMinutes())}`;
+}
+const recText = (r) => (r ? `${r.w}胜${r.l}负` : '');
+/** Atomically claim the grant (used:false -> true). Returns the grant if THIS call claimed it, else
+     null. */
+async function claim(challengeId, t) {
+  let claimed = null;
+  await store.db().runTransaction(async (tx) => {
+    claimed = null;
+    const g = await store.getDocT(tx, 'sub_grants', challengeId);
+    if (!g || g.used) return;
+    await tx.collection('sub_grants').doc(challengeId).update({ data: { used: true, claimedAt: t } }
+    );
+    claimed = g;
+  });
+  return claimed;
+}
+async function sendOnce(challenge, answererRecord) {
+  try {
+    const t = now();
+    const grant = await claim(challenge._id, t);
+    if (!grant || !grant.tmplId || grant.ownerOpenid !== challenge.ownerOpenid) return { sent: false
+     };
+    const { fields } = await appconfig.subscribeConfig();
+
+点将台 V1.0.0 源程序                                           第 32 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    const data = {
+      [fields.title]: { value: '好友接下了你的战书' },
+      [fields.theirRecord]: { value: recText(answererRecord) },
+      [fields.myRecord]: { value: recText(challenge.record) },
+      [fields.time]: { value: bjtTime(t) },
+    };
+    const msg = { touser: grant.ownerOpenid, templateId: grant.tmplId, page: `index?c=${challenge._i
+    d}`, data };
+    if (process.env.SUBSCRIBE_MP_STATE) msg.miniprogramState = process.env.SUBSCRIBE_MP_STATE;
+    let errCode = null;
+    try {
+      const api = store.cloud.openapi && store.cloud.openapi.subscribeMessage;
+      if (!api || typeof api.send !== 'function') throw Object.assign(new Error('openapi unavailable
+    '), { errCode: 'NO_OPENAPI' });
+      let timer;
+      const cap = new Promise((_r, rej) => { timer = setTimeout(() => rej(Object.assign(new Error('s
+    end timeout'), { errCode: 'TIMEOUT' })), SEND_CAP_MS); });
+      try { await Promise.race([api.send(msg), cap]); } finally { clearTimeout(timer); }
+    } catch (e) {
+      errCode = e && e.errCode !== undefined ? e.errCode : 'ERR';
+    }
+    try {
+      await store.db().collection('sub_grants').doc(challenge._id).update({ data: errCode === null ?
+     { sentAt: now() } : { sendErrCode: String(errCode) } });
+    } catch (e) { /* bookkeeping only */ }
+    await store.writeEvent('server', 'subscribe_send', { ok: errCode === null, errCode: errCode === 
+    null ? null : String(errCode) });
+    return { sent: errCode === null };
+  } catch (e) {
+    console.warn('[notify] failed', store.errText(e));
+    return { sent: false };
+  }
+}
+module.exports = { sendOnce, bjtTime, SEND_CAP_MS };
+'use strict';
+// daily_progress helpers: progressive token delivery (spec 5.2).
+const { fail } = require('./util');
+const core = require('./coreapi');
+/** canonical form of a whitelisted action, for exact prefix comparison */
+function canon(a) {
+  return JSON.stringify([a.round, a.type, a.generalId || null, a.slot || null, a.source || null]);
+}
+/** is `a` an exact prefix of `b`? (the core's rule: validate.extendsPrefix) */
+function isPrefix(a, b) {
+  return core.extendsPrefix(a, b);
+}
+function progressId(dateKey, openid) {
+  return `${dateKey}_${openid}`;
+}
+/** rounds[0..released) only: the single place a response may slice a sheet */
+
+点将台 V1.0.0 源程序                                           第 33 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+function releasedRounds(rounds, released) {
+  if (!Array.isArray(rounds) || !Number.isInteger(released) || released < 1) fail('NOT_STARTED', 'no
+     rounds released');
+  return rounds.slice(0, Math.min(5, released));
+}
+module.exports = { canon, isPrefix, progressId, releasedRounds };
+'use strict';
+// Business rules shared by startRun / submitRun / getChallenge.
+const core = require('./coreapi');
+const store = require('./store');
+const { fail, addDaysKey, bjtDayStartMs, GRACE_MS } = require('./util');
+/** 'open' (today), 'grace' (yesterday, before D+1 00:30 BJT), 'late', or 'future' */
+function windowState(dateKey, nowMs) {
+  const today = core.dateKeyAt(nowMs);
+  if (dateKey === today) return 'open';
+  if (dateKey > today) return 'future';
+  if (dateKey === addDaysKey(today, -1) && nowMs < bjtDayStartMs(today) + GRACE_MS) return 'grace';
+  return 'late';
+}
+/** Load a challenge usable by `openid`: throws CHALLENGE_EXPIRED / OWN_CHALLENGE. */
+async function loadAnswerableChallenge(id, openid, nowMs) {
+  const ch = await store.getDoc('challenges', id);
+  if (!ch || nowMs > ch.expiresAt) fail('CHALLENGE_EXPIRED', 'challenge expired or missing');
+  try { core.roster(ch.contentVersion); } catch (e) { fail('CHALLENGE_EXPIRED', 'content version ret
+    ired'); }
+  if (ch.ownerOpenid === openid) fail('OWN_CHALLENGE', 'own challenge');
+  return ch;
+}
+/** Has this user already answered this challenge? (runs index: challengeId + openid) */
+async function priorAnswer(openid, id) {
+  const r = await store.db().collection('runs').where({ openid, challengeId: id }).limit(1).get();
+  return r.data[0] || null;
+}
+/** Would a challenge on a daily seed count as the caller's daily attempt right now (startRun side)?
+     */
+async function challengeCountsAsDaily(ch, openid, nowMs) {
+  if (ch.mode !== 'daily' || !ch.dateKey) return false;
+  if (core.dateKeyAt(nowMs) !== ch.dateKey) return false;
+  return !(await store.getDoc('daily_results', `${ch.dateKey}_${openid}`));
+}
+/**
+ * Spoiler lock: anything that could reveal a good lineup for a DAILY seed (the stored optimum, or a
+    nother
+ * player's lineup on that seed) is withheld while the date is still playable (today, or yesterday i
+    nside the
+ * grace window) unless the caller already has their ranked result for that date.
+ */
+async function dailyLocked(dateKey, openid, nowMs) {
+  if (!dateKey) return false;
+  const ws = windowState(dateKey, nowMs);
+
+点将台 V1.0.0 源程序                                           第 34 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  if (ws !== 'open' && ws !== 'grace') return false;
+  return !(await store.getDoc('daily_results', `${dateKey}_${openid}`));
+}
+/** daily date (if any) a run's seed belongs to: by recorded dateKey, else by seed match (free runs)
+     */
+async function dailyDateOfRun(run) {
+  if (run.dateKey) return run.dateKey;
+  const r = await store.db().collection('daily_seeds').where({ seed: run.seed }).limit(1).get();
+  return r.data[0] ? r.data[0]._id : null;
+}
+module.exports = { windowState, loadAnswerableChallenge, priorAnswer, challengeCountsAsDaily, dailyL
+    ocked, dailyDateOfRun };
+'use strict';
+// Secrets come from the cloud environment's variables only; nothing is stored in the repo.
+const { fail } = require('./util');
+/** the pepper keys the HMACs of group refs and challenge ids: a short one is brute-forceable from t
+    he public outputs (L5) */
+const MIN_PEPPER_LENGTH = 32;
+function pepper() {
+  const p = process.env.GROUP_REF_PEPPER;
+  if (typeof p !== 'string' || p.length < MIN_PEPPER_LENGTH) fail('SERVER_CONFIG', 'GROUP_REF_PEPPER
+     is not configured (>= ' + MIN_PEPPER_LENGTH + ' characters)');
+  return p;
+}
+module.exports = { MIN_PEPPER_LENGTH, pepper };
+'use strict';
+// Database, identity and handler helpers shared by every function.
+const cloud = require('wx-server-sdk');
+const { AppError, fail, now, isPlainObject } = require('./util');
+/** hard cap of any paged read (queryAll): a runaway collection cannot exhaust memory or the functio
+    n timeout */
+const MAX_QUERY_ROWS = 20000;
+let inited = false;
+function init() {
+  if (!inited) {
+    cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
+    inited = true;
+  }
+}
+function db() {
+  init();
+  return cloud.database();
+}
+function _() {
+  return db().command;
+}
+function errText(e) {
+  return `${e && e.errCode !== undefined ? e.errCode : ''} ${(e && (e.errMsg || e.message)) || ''}`;
+}
+/** duplicate _id on add */
+
+点将台 V1.0.0 源程序                                           第 35 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+function isDup(e) {
+  return /duplicate|already exist|-502001|E11000|unique/i.test(errText(e));
+}
+function isNotFound(e) {
+  return /not exist|not found|-502002|does not exist/i.test(errText(e));
+}
+function unwrapDoc(r) {
+  if (!r) return null;
+  const d = r.data;
+  if (Array.isArray(d)) return d[0] || null;
+  return d || null;
+}
+async function getDoc(col, id) {
+  try {
+    return unwrapDoc(await db().collection(col).doc(id).get());
+  } catch (e) {
+    if (isNotFound(e)) return null;
+    throw e;
+  }
+}
+async function getDocT(t, col, id) {
+  try {
+    return unwrapDoc(await t.collection(col).doc(id).get());
+  } catch (e) {
+    if (isNotFound(e)) return null;
+    throw e;
+  }
+}
+/** add with a fixed _id; returns false if it already existed */
+async function addIfAbsent(col, data) {
+  try {
+    await db().collection(col).add({ data });
+    return true;
+  } catch (e) {
+    if (isDup(e)) return false;
+    throw e;
+  }
+}
+/** Page through a query (cloud functions return <= 100 by default, <= 1000 max per call). Capped at
+     MAX_QUERY_ROWS. */
+async function queryAll(col, where, { field, max = MAX_QUERY_ROWS } = {}) {
+  const PAGE = 1000;
+  const out = [];
+  for (let skip = 0; out.length < max; skip += PAGE) {
+    let q = db().collection(col).where(where).orderBy('_id', 'asc').skip(skip).limit(PAGE);
+    if (field) q = q.field(field);
+    const r = await q.get();
+    out.push(...r.data);
+    if (r.data.length < PAGE) break;
+  }
+
+点将台 V1.0.0 源程序                                           第 36 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  return out.slice(0, max);
+}
+/** Analytics must never break a game function. */
+async function writeEvent(openid, name, props, sessionId) {
+  try {
+    await db().collection('events').add({
+      data: { openid: openid || 'server', sessionId: sessionId || null, name, props: props || {}, ts
+    : now(), clientTs: null },
+    });
+  } catch (e) {
+    console.warn('writeEvent failed', name, errText(e));
+  }
+}
+const sampled = new Map(); // key -> last write ms (per function instance)
+/**
+ * Server-side analytics event for a per-CALL code path (board_list ...): at most one per `key` per 
+    `everyMs` per
+ * instance, so a hot function cannot turn every request into a database write. Never throws.
+ */
+async function writeEventSampled(key, everyMs, name, props) {
+  const t = now();
+  const last = sampled.get(key);
+  if (last !== undefined && t - last < everyMs) return false;
+  if (sampled.size > 500) sampled.clear();
+  sampled.set(key, t);
+  await writeEvent('server', name, props);
+  return true;
+}
+/** a transaction that lost a write conflict (the real database aborts the loser; callers under a bu
+    rst see this) */
+function isConflict(e) {
+  return /conflict|aborted|retry/i.test(errText(e));
+}
+/**
+ * Per-openid fixed-window (1 minute) limiter. Transactional get+set on one deterministic doc.
+ * Throws RATE_LIMITED. `cost` = units consumed by this call. A transaction that keeps conflicting m
+    eans a burst on this
+ * very counter, which is also a rate-limit verdict (fail closed), never an INTERNAL error.
+ */
+async function rateLimit(openid, bucket, cost, limitPerMin) {
+  const minute = Math.floor(now() / 60000);
+  const id = `${bucket}_${openid}_${minute}`;
+  try {
+    await db().runTransaction(async (t) => {
+      const cur = await getDocT(t, 'rate_limits', id);
+      const count = cur ? cur.count : 0;
+      if (count + cost > limitPerMin) throw new AppError('RATE_LIMITED', 'rate limited');
+      await t.collection('rate_limits').doc(id).set({ data: { bucket, openid, count: count + cost, e
+    xpireAt: now() + 3600e3 } });
+    });
+
+点将台 V1.0.0 源程序                                           第 37 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  } catch (e) {
+    if (!(e instanceof AppError) && isConflict(e)) throw new AppError('RATE_LIMITED', 'rate limited 
+    (contended)');
+    throw e;
+  }
+}
+/** a timer trigger delivers {Type:'Timer', TriggerName, Time, Message}; a client call carries an OP
+    ENID and is refused first */
+function isTimerEvent(event) {
+  return isPlainObject(event) && event.Type === 'Timer' && typeof event.TriggerName === 'string' && 
+    event.TriggerName.length > 0 && event.TriggerName.length <= 128;
+}
+/**
+ * Wrap a handler: identity comes ONLY from the trusted context OPENID.
+ *  auth:false      timer functions (no OPENID expected)
+ *  serverOnly:true the call must have NO OPENID (a client call carries one) AND carry the timer mar
+    ker
+ *                  (event.Type === 'Timer' with a TriggerName). A console test invocation must send
+     it explicitly (README).
+ *  rate:{bucket, limit, cost?}  per-openid fixed-window limit (common/limits.js), checked FIRST, be
+    fore any read in the function
+ */
+function handler(fn, { auth = true, serverOnly = false, rate = null } = {}) {
+  return async (event) => {
+    const startedAt = now();
+    try {
+      init();
+      const wx = cloud.getWXContext() || {};
+      const openid = wx.OPENID || null;
+      if (auth && !openid) fail('UNAUTHENTICATED', 'no openid in context');
+      if (serverOnly && (openid || !isTimerEvent(event))) fail('FORBIDDEN', 'server-only function');
+      if (rate && openid) {
+        const cost = typeof rate.cost === 'function' ? rate.cost(event) : rate.cost || 1;
+        await rateLimit(openid, rate.bucket, cost, rate.limit);
+      }
+      return await fn(event && typeof event === 'object' ? event : {}, { openid, startedAt });
+    } catch (e) {
+      if (e instanceof AppError || (e && e.code && e.extra !== undefined)) {
+        return { ok: false, code: e.code, message: e.message, ...(e.extra || {}) };
+      }
+      console.error('unhandled', errText(e), e && e.stack);
+      return { ok: false, code: 'INTERNAL', message: 'internal error' };
+    }
+  };
+}
+module.exports = {
+  cloud, db, _, isDup, isNotFound, getDoc, getDocT, addIfAbsent, queryAll,
+  writeEvent, writeEventSampled, rateLimit, handler, isTimerEvent, errText, MAX_QUERY_ROWS,
+};
+'use strict';
+
+点将台 V1.0.0 源程序                                           第 38 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+// Streaks (spec 8.9, 14.3 step 8). The server is the only place a streak is computed.
+// Published dates = daily_seeds documents, so a day with no seed is skipped automatically.
+const store = require('./store');
+const rules = require('./rules');
+/** the `n` latest published dates strictly before `dateKey`, newest first */
+async function prevPublished(dateKey, n = 1) {
+  const _ = store._();
+  const r = await store.db().collection('daily_seeds').where({ _id: _.lt(dateKey) }).orderBy('_id', 
+    'desc').limit(n).field({ _id: true }).get();
+  return r.data.map((d) => d._id);
+}
+/** earliest published date strictly after `dateKey`, or null */
+async function nextPublished(dateKey) {
+  const _ = store._();
+  const r = await store.db().collection('daily_seeds').where({ _id: _.gt(dateKey) }).orderBy('_id', 
+    'asc').limit(1).field({ _id: true }).get();
+  return r.data[0] ? r.data[0]._id : null;
+}
+/**
+ * Apply a new ranked result for `dateKey` inside the ranked transaction `t`.
+ * `ctx` = {prev, next} read just before the transaction (queries are not allowed inside one).
+ * -> {streak (this result's), current, best}
+ */
+async function applyRanked(t, openid, dateKey, ctx, nowMs) {
+  const ps = (await store.getDocT(t, 'player_stats', openid)) || {};
+  const prevRes = ctx.prev ? await store.getDocT(t, 'daily_results', `${ctx.prev}_${openid}`) : null
+    ;
+  const streakD = prevRes ? (prevRes.streak || 1) + 1 : 1;
+  const last = ps.lastDailyDate || null;
+  let cur = ps.curStreak || 0;
+  let lastDate = last;
+  if (!last || last < dateKey) {
+    cur = streakD;
+    lastDate = dateKey;
+  } else if (last > dateKey && ctx.next && ctx.next === last) {
+    // grace-window submit for D after the player already played D+1: the two days join up
+    const nextRes = await store.getDocT(t, 'daily_results', `${last}_${openid}`);
+    if (nextRes) {
+      cur = (nextRes.streak || 1) + streakD;
+      await t.collection('daily_results').doc(`${last}_${openid}`).update({ data: { streak: cur } })
+    ;
+    }
+  }
+  const best = Math.max(ps.bestStreak || 0, cur, streakD);
+  await t.collection('player_stats').doc(openid).set({
+    data: {
+      ...ps, curStreak: cur, bestStreak: best, lastDailyDate: lastDate, totalDailies: (ps.totalDaili
+    es || 0) + 1,
+      flags7d: ps.flags7d || 0, suspect: !!ps.suspect, updatedAt: nowMs,
+    },
+
+点将台 V1.0.0 源程序                                           第 39 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  });
+  return { streak: streakD, current: cur, best };
+}
+/** Current streak as shown on home: alive through today if the last ranked date is today, the previ
+    ous
+ *  published date, or (inside its still-open grace window) the one before that. */
+async function currentFor(ps, today, nowMs) {
+  const best = (ps && ps.bestStreak) || 0;
+  if (!ps || !ps.lastDailyDate || !ps.curStreak) return { current: 0, best };
+  const last = ps.lastDailyDate;
+  if (last === today) return { current: ps.curStreak, best };
+  const [p1, p2] = await prevPublished(today, 2);
+  if (last === p1) return { current: ps.curStreak, best };
+  if (p1 && last === p2 && rules.windowState(p1, nowMs) === 'grace') return { current: ps.curStreak,
+     best };
+  return { current: 0, best };
+}
+module.exports = { prevPublished, nextPublished, applyRanked, currentFor };
+'use strict';
+// Shared helpers. This folder is the source of truth; scripts/sync-core.js copies it
+// into every function folder (cloud functions deploy one folder each).
+const crypto = require('crypto');
+const SLOTS = ['zhugong', 'junshi', 'xianfeng', 'mengjiang', 'shoujiang'];
+const DAY_MS = 86400000;
+const BJT_MS = 8 * 3600e3;
+const GRACE_MS = 30 * 60e3; // D+1 00:30 BJT
+const RETENTION_DAYS = 180; // D7
+class AppError extends Error {
+  constructor(code, message, extra) {
+    super(message || code);
+    this.code = code;
+    this.extra = extra || null;
+  }
+}
+function fail(code, message, extra) {
+  throw new AppError(code, message, extra);
+}
+function sha256hex(s) {
+  return crypto.createHash('sha256').update(String(s)).digest('hex');
+}
+function hmacHex(key, s) {
+  return crypto.createHmac('sha256', key).update(String(s)).digest('hex');
+}
+// ---- date keys (all "now" keys come from core date.js via coreapi; these are pure helpers) ----
+function isDateKey(s) {
+  if (typeof s !== 'string' || !/^\d{8}$/.test(s)) return false;
+  const ms = Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8));
+  return keyFromUtcMidnight(ms) === s;
+}
+function keyFromUtcMidnight(ms) {
+
+点将台 V1.0.0 源程序                                           第 40 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  return new Date(ms).toISOString().slice(0, 10).replace(/-/g, '');
+}
+function utcMidnight(key) {
+  return Date.UTC(+key.slice(0, 4), +key.slice(4, 6) - 1, +key.slice(6, 8));
+}
+function addDaysKey(key, n) {
+  return keyFromUtcMidnight(utcMidnight(key) + n * DAY_MS);
+}
+function daysBetween(a, b) {
+  return Math.round((utcMidnight(b) - utcMidnight(a)) / DAY_MS);
+}
+/** ms timestamp of 00:00 Beijing time on the given date key */
+function bjtDayStartMs(key) {
+  return utcMidnight(key) - BJT_MS;
+}
+// ---- ids ----
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+/** first 40 bits of a hex digest as 8 base32 chars */
+function base32From(hex) {
+  const buf = Buffer.from(hex.slice(0, 10), 'hex');
+  let bits = 0n;
+  for (const b of buf) bits = (bits << 8n) | BigInt(b);
+  let out = '';
+  for (let i = 7; i >= 0; i--) out += B32[Number((bits >> BigInt(i * 5)) & 31n)];
+  return out;
+}
+function randomSeed() {
+  return crypto.randomBytes(4).readUInt32BE(0);
+}
+// ---- misc ----
+function isInt(n, min, max) {
+  return Number.isInteger(n) && n >= min && n <= max;
+}
+function isPlainObject(o) {
+  return o !== null && typeof o === 'object' && !Array.isArray(o);
+}
+function now() {
+  return Date.now();
+}
+/** configured timeout (seconds) from function.config.json, in ms. Never hard-coded in logic. */
+function configuredTimeoutMs() {
+  try {
+    const c = require('../function.config.json');
+    if (c && c.timeout > 0) return c.timeout * 1000;
+  } catch (e) { /* fall through */ }
+  return 3000; // platform default
+}
+module.exports = {
+  SLOTS, DAY_MS, BJT_MS, GRACE_MS, RETENTION_DAYS,
+  AppError, fail, sha256hex, hmacHex,
+
+点将台 V1.0.0 源程序                                           第 41 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  isDateKey, keyFromUtcMidnight, utcMidnight, addDaysKey, daysBetween, bjtDayStartMs,
+  base32From, randomSeed, isInt, isPlainObject, now, configuredTimeoutMs,
+};
+'use strict';
+// cleanup: timer trigger (config.json, 04:00 BJT). D7 retention: 180 days.
+// Deletes runs, daily_starts, daily_results, challenges, events older than 180 days and group_membe
+    rs
+// whose lastSeen is older than 180 days; keeps daily_stats (aggregate). Also trims expired rate_lim
+    its.
+// Idempotent: a re-run finds nothing new. Server-only (rejects calls that carry an OPENID).
+const core = require('./common/coreapi');
+const store = require('./common/store');
+const { now, addDaysKey, DAY_MS, RETENTION_DAYS, configuredTimeoutMs, bjtDayStartMs } = require('./c
+    ommon/util');
+const { KINDS } = require('./common/anomaly');
+const MISMATCH_ALERT = 0.005;
+const TARGETS = [
+  { col: 'runs', field: 'submittedAt' },
+  { col: 'daily_starts', field: 'startedAt' },
+  { col: 'daily_results', field: 'submittedAt' },
+  { col: 'challenges', field: 'createdAt' },
+  { col: 'events', field: 'ts' },
+  { col: 'daily_progress', field: 'updatedAt' },
+  { col: 'sub_grants', field: 'grantedAt' },
+  { col: 'challenge_answers', field: 'createdAt' },
+  { col: 'anomalies', field: 'ts' },
+  { col: 'player_stats', field: 'updatedAt' },
+];
+async function purge(col, cond, deadline) {
+  let total = 0;
+  while (now() < deadline) {
+    const r = await store.db().collection(col).where(cond).remove();
+    const n = (r && r.stats && r.stats.removed) || 0;
+    total += n;
+    if (n === 0) break;
+  }
+  return total;
+}
+/**
+ * Daily anomaly roll-up (spec 14.5): for yesterday, count submitted runs and flags by kind, write o
+    ne server
+ * `anomaly_daily` event (idempotent per date), and log [ALERT] when mismatch > 0.5% of runs (client
+    /server drift).
+ */
+async function rollUp(todayKey) {
+  const _ = store._();
+  const dateKey = addDaysKey(todayKey, -1);
+  const from = bjtDayStartMs(dateKey);
+  const to = bjtDayStartMs(todayKey);
+  const col = (n) => store.db().collection(n);
+
+点将台 V1.0.0 源程序                                           第 42 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  // CLAIM the day first (add of the fixed _id): a double-fired timer or two overlapping runs write 
+    ONE anomaly_daily event.
+  // A run that dies after the claim releases it below, so the next timer retries the day.
+  const markerId = 'rollup_' + dateKey;
+  if (!(await store.addIfAbsent('meta', { _id: markerId, dateKey, startedAt: now() }))) return { dat
+    eKey, skipped: true };
+  try {
+    return await rollUpClaimed(dateKey, from, to);
+  } catch (e) {
+    try { await col('meta').doc(markerId).remove(); } catch (e2) { /* the next run finds the marker 
+    and skips: observation only */ }
+    throw e;
+  }
+}
+async function rollUpClaimed(dateKey, from, to) {
+  const _ = store._();
+  const col = (n) => store.db().collection(n);
+  const runs = (await col('runs').where({ submittedAt: _.gte(from).and(_.lt(to)) }).count()).total;
+  const flags = {};
+  for (const k of KINDS) flags[k] = (await col('anomalies').where({ kind: k, ts: _.gte(from).and(_.l
+    t(to)) }).count()).total;
+  const mismatchRate = runs > 0 ? flags.mismatch / runs : 0;
+  const alert = runs > 0 && mismatchRate > MISMATCH_ALERT;
+  if (alert) console.error(`[ALERT] mismatch rate ${(mismatchRate * 100).toFixed(2)}% on ${dateKey} 
+    (${flags.mismatch}/${runs}): likely client/server content or config version skew`);
+  await store.writeEvent('server', 'anomaly_daily', { dateKey, runs, ...flags, mismatchRate: Math.ro
+    und(mismatchRate * 10000) / 10000, alert });
+  return { dateKey, runs, flags, alert };
+}
+exports.main = store.handler(async (event, { startedAt }) => {
+  const _ = store._();
+  const nowMs = now();
+  const deadline = startedAt + 0.7 * configuredTimeoutMs();
+  const cutoffMs = nowMs - RETENTION_DAYS * DAY_MS;
+  const cutoffKey = addDaysKey(core.dateKeyAt(nowMs), -RETENTION_DAYS);
+  const removed = {};
+  for (const t of TARGETS) removed[t.col] = await purge(t.col, { [t.field]: _.lt(cutoffMs) }, deadli
+    ne);
+  removed.group_members = await purge('group_members', { lastSeen: _.lt(cutoffKey) }, deadline);
+  removed.rate_limits = await purge('rate_limits', { expireAt: _.lt(nowMs) }, deadline);
+  let anomalyDaily = null;
+  try { anomalyDaily = await rollUp(core.dateKeyAt(nowMs)); } catch (e) { console.warn('[cleanup] ro
+    ll-up failed', store.errText(e)); }
+  return { ok: true, cutoffKey, removed, anomalyDaily };
+}, { auth: false, serverOnly: true });
+'use strict';
+// createChallenge: one challenge per validated run. The id is a keyed hash of the run, so repeated
+// calls return the same id (add with a fixed _id; duplicate -> existing).
+const core = require('./common/coreapi');
+const store = require('./common/store');
+
+点将台 V1.0.0 源程序                                           第 43 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+const limits = require('./common/limits');
+const secrets = require('./common/secrets');
+const input = require('./common/input');
+const { fail, now, hmacHex, base32From, DAY_MS } = require('./common/util');
+const EXPIRY_DAYS = 7;
+const ID_TRIES = 4;
+exports.main = store.handler(async (event, { openid }) => {
+  const runId = input.clientRunId(event.runId);
+  const run = await store.getDoc('runs', `${openid}_${runId}`);
+  if (!run) fail('RUN_NOT_FOUND', 'only your own validated run can be challenged');
+  const k = secrets.pepper(); // single secret, domain-separated below; SERVER_CONFIG when missing o
+    r < 32 chars
+  const nowMs = now();
+  // If the run was on a daily seed (daily, or a challenge on a daily seed) the challenge is 'daily'
+     mode.
+  const daily = !!run.dateKey;
+  const rounds = daily ? (await store.getDoc('daily_seeds', run.dateKey) || {}).rounds : null;
+  const sheet = rounds || core.buildSheet(run.seed, run.contentVersion);
+  for (let n = 0; n < ID_TRIES; n++) {
+    const id = base32From(hmacHex(k, `challenge:${run._id}#${n}`));
+    const doc = {
+      _id: id, ownerOpenid: openid, runId, mode: daily ? 'daily' : 'free', seed: run.seed,
+      dateKey: run.dateKey || null, rounds: sheet, record: run.serverRecord, lineup: run.lineup,
+      contentVersion: run.contentVersion, configVersion: run.configVersion,
+      createdAt: nowMs, expiresAt: nowMs + EXPIRY_DAYS * DAY_MS, answerCount: 0, bestAnswer: null,
+    };
+    if (await store.addIfAbsent('challenges', doc)) return { ok: true, challengeId: id };
+    const ex = await store.getDoc('challenges', id);
+    if (ex && ex.ownerOpenid === openid && ex.runId === runId) return { ok: true, challengeId: id };
+    // hash collision with a different run: try the next derivation
+  }
+  fail('INTERNAL', 'could not allocate challenge id');
+}, { rate: limits.rateOf('createChallenge') });
+'use strict';
+// genDaily: timer trigger (config.json, 23:00 BJT) that writes the NEXT day's seed.
+// Idempotent: fixed _id per date; a double-fired trigger or a racing lazy getDaily creates one
+// document and consumes at most one bank entry (spec §5.2).
+// Server-only: a call carrying an OPENID (i.e. from the mini game) is rejected.
+const core = require('./common/coreapi');
+const store = require('./common/store');
+const { ensureDaily } = require('./common/daily');
+const { now, addDaysKey, isDateKey, fail, configuredTimeoutMs } = require('./common/util');
+exports.main = store.handler(async (event, { startedAt }) => {
+  // Console/manual invocations may pass {dateKey}; the timer passes nothing useful.
+  let dateKey;
+  if (event && event.dateKey !== undefined) {
+    if (!isDateKey(event.dateKey)) fail('INVALID_ACTIONS', 'bad dateKey');
+    dateKey = event.dateKey;
+  } else {
+    dateKey = addDaysKey(core.dateKeyAt(now()), 1);
+
+点将台 V1.0.0 源程序                                           第 44 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  }
+  const r = await ensureDaily(dateKey, { startedAt, timeoutMs: configuredTimeoutMs() });
+  if (r.created) {
+    const d = r.doc;
+    await store.writeEvent('server', 'daily_gen', {
+      dateKey, source: d.source, attempts: d.attempts, genMs: d.genMs,
+      relaxed: !!(d.gates && d.gates.relaxed), bankLeft: r.bankLeft == null ? null : r.bankLeft,
+    });
+  }
+  return { ok: true, dateKey, created: r.created, source: r.doc.source };
+}, { auth: false, serverOnly: true });
+'use strict';
+// getBoard: server-authoritative leaderboard rows (spec §11.4, §11.5, C3).
+// Rows are [h, w, s, x?] with h = sha256(openid|salt)[0..12); raw openids never leave the server.
+// Lineups (x) only for a caller with a ranked result for the date. groupRef only for members.
+const core = require('./common/coreapi');
+const store = require('./common/store');
+const limits = require('./common/limits');
+const input = require('./common/input');
+const { fail, now, sha256hex, addDaysKey, bjtDayStartMs } = require('./common/util');
+const CACHE_MS = 60 * 1000;
+const cache = new Map(); // key -> {at, value}; per function instance, server memory only
+function cacheGet(key, nowMs) {
+  const c = cache.get(key);
+  return c && nowMs - c.at < CACHE_MS ? c.value : null;
+}
+function cacheSet(key, value, nowMs) {
+  if (cache.size > 200) cache.clear();
+  cache.set(key, { at: nowMs, value });
+}
+const FIELDS = { openid: true, w: true, submittedAt: true, lineupIdx: true, streak: true };
+/** all of the date's results (only called when total <= cap) */
+async function loadAll(dateKey, nowMs) {
+  const k = `all:${dateKey}`;
+  const hit = cacheGet(k, nowMs);
+  if (hit) return { ...hit, cached: true };
+  const cap = core.boardListCap();
+  const total = (await store.db().collection('daily_results').where({ dateKey }).count()).total;
+  const value = { total, rows: total <= cap ? await store.queryAll('daily_results', { dateKey }, { f
+    ield: FIELDS, max: cap + 1 }) : null };
+  cacheSet(k, value, nowMs);
+  return { ...value, cached: false };
+}
+/** results of a group's members (group mode, over the cap) */
+async function loadGroup(dateKey, groupRef, nowMs) {
+  const k = `g:${dateKey}:${groupRef}`;
+  const hit = cacheGet(k, nowMs);
+  if (hit) return { rows: hit, cached: true };
+  const cap = core.boardListCap();
+  const members = await store.queryAll('group_members', { groupRef }, { field: { openid: true }, max
+
+点将台 V1.0.0 源程序                                           第 45 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    : cap });
+  const ids = [...new Set(members.map((m) => `${dateKey}_${m.openid}`))];
+  const _ = store._();
+  const rows = [];
+  for (let i = 0; i < ids.length && rows.length < cap; i += 50) {
+    const r = await store.db().collection('daily_results').where({ _id: _.in(ids.slice(i, i + 50)) }
+    ).field(FIELDS).limit(50).get();
+    rows.push(...r.data);
+  }
+  cacheSet(k, rows, nowMs);
+  return { rows, cached: false };
+}
+exports.main = store.handler(async (event, { openid }) => {
+  const kind = event.kind;
+  if (kind !== 'group' && kind !== 'friend') fail('INVALID_ACTIONS', 'bad kind');
+  const dateKey = input.optDateKey(event.dateKey);
+  if (!dateKey) fail('INVALID_ACTIONS', 'dateKey required');
+  const nowMs = now();
+  const today = core.dateKeyAt(nowMs);
+  if (dateKey > today || dateKey < addDaysKey(today, -1)) fail('INVALID_ACTIONS', 'board date out of
+     range');
+  let groupRef = null;
+  if (kind === 'group') {
+    groupRef = input.groupRef(event.groupRef);
+    // membership: the caller must have a group_members row carrying this groupRef
+    const m = await store.db().collection('group_members').where({ openid, groupRef }).limit(1).get(
+    );
+    if (!m.data.length) fail('NOT_MEMBER', 'not a member of this group');
+  }
+  const seedDoc = await store.getDoc('daily_seeds', dateKey);
+  if (!seedDoc) fail('SEED_NOT_FOUND', 'no seed for date');
+  const salt = seedDoc.boardSalt;
+  const hashOf = (id) => sha256hex(`${id}|${salt}`).slice(0, 12);
+  const self = await store.getDoc('daily_results', `${dateKey}_${openid}`);
+  const viewerPlayed = !!self;
+  const all = await loadAll(dateKey, nowMs);
+  let mode;
+  let raw;
+  let cached = all.cached;
+  if (all.total <= core.boardListCap()) {
+    mode = 'full';
+    raw = all.rows.slice();
+    if (self && !raw.some((r) => r.openid === openid)) raw.push(self); // 60 s cache must never hide
+     the caller
+  } else if (kind === 'group') {
+    mode = 'group';
+    const g = await loadGroup(dateKey, groupRef, nowMs);
+    raw = g.rows.slice();
+    cached = g.cached;
+    if (self && !raw.some((r) => r.openid === openid)) raw.push(self);
+
+点将台 V1.0.0 源程序                                           第 46 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  } else {
+    mode = 'selfOnly';
+    raw = self ? [self] : [];
+  }
+  const dayStart = bjtDayStartMs(dateKey);
+  const rows = raw
+    .map((r) => {
+      const row = [hashOf(r.openid), r.w, Math.max(0, Math.floor((r.submittedAt - dayStart) / 1000))
+    ];
+      row.push(viewerPlayed && Array.isArray(r.lineupIdx) ? r.lineupIdx.join(',') : null);
+      if (Number.isInteger(r.streak) && r.streak >= 2) row.push(r.streak); // k: only when >= 2
+      else if (row[3] === null) row.pop(); // keep [h, w, s] when there is nothing to send
+      return row;
+    })
+    .sort((a, b) => b[1] - a[1] || a[2] - b[2] || (a[0] < b[0] ? -1 : 1))
+    .slice(0, core.boardListCap());
+  const out = {
+    ok: true, dateKey, issueNo: seedDoc.issueNo, contentVersion: seedDoc.contentVersion, salt,
+    variant: seedDoc.variant || core.variantFor(dateKey), selfHash: hashOf(openid), mode, viewerPlay
+    ed, rows,
+  };
+  // sampled (M3): one server event per date, kind and mode per minute per instance, not one databas
+    e write per board response
+  await store.writeEventSampled(`board_list:${dateKey}:${kind}:${mode}`, 60 * 1000, 'board_list', {
+    dateKey, kind, mode, rows: rows.length, bytes: JSON.stringify(rows).length, cached,
+  });
+  return out;
+}, { rate: limits.rateOf('getBoard') });
+'use strict';
+// getChallenge: §13 challenge-entry model plus rounds. The sharer's lineup is withheld until the
+// caller has answered (a runs row with this challengeId and the caller's openid exists).
+const core = require('./common/coreapi');
+const store = require('./common/store');
+const limits = require('./common/limits');
+const input = require('./common/input');
+const rules = require('./common/rules');
+const { now, fail } = require('./common/util');
+exports.main = store.handler(async (event, { openid }) => {
+  const id = input.challengeId(event.challengeId);
+  const nowMs = now();
+  const ch = await store.getDoc('challenges', id);
+  if (!ch || nowMs > ch.expiresAt) fail('CHALLENGE_EXPIRED', 'challenge expired or missing', { statu
+    s: 'expired' });
+  let variant = 'standard';
+  if (ch.mode === 'daily' && ch.dateKey) {
+    const sd = await store.getDoc('daily_seeds', ch.dateKey);
+    variant = (sd && sd.variant) || core.variantFor(ch.dateKey);
+  }
+  const base = { ok: true, mode: ch.mode, theirRecord: ch.record, dateKey: ch.dateKey || null, varia
+    nt };
+
+点将台 V1.0.0 源程序                                           第 47 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  if (ch.ownerOpenid === openid) {
+    const grant = await store.getDoc('sub_grants', id);
+    return {
+      ...base, status: 'own', answerCount: ch.answerCount, bestAnswer: ch.bestAnswer, countsAsDaily:
+     false, isFriendly: true,
+      subscribe: { granted: !!grant },
+    };
+  }
+  const answered = await rules.priorAnswer(openid, id);
+  if (answered) {
+    const locked = await rules.dailyLocked(ch.mode === 'daily' ? ch.dateKey : null, openid, nowMs);
+    return {
+      ...base, status: 'answered', theirLineup: locked ? null : ch.lineup, lineupLocked: locked, myR
+    ecord: answered.serverRecord,
+      countsAsDaily: false, isFriendly: true,
+    };
+  }
+  const countsAsDaily = await rules.challengeCountsAsDaily(ch, openid, nowMs);
+  // progressive delivery (spec 5.2): a challenge that counts as today's daily gets its rounds from 
+    startRun/getRound
+  const out = { ...base, status: 'ready', countsAsDaily, isFriendly: !countsAsDaily };
+  if (!countsAsDaily) out.rounds = ch.rounds;
+  return out;
+}, { rate: limits.rateOf('getChallenge') });
+'use strict';
+// getDaily: today's status for the caller. Creates the seed lazily if genDaily missed.
+// v1 (PO-8): NO rounds. Tokens come only from startRun (round 1) and getRound (round by round), so 
+    a client
+// never holds a future round. Never returns the seed, the best lineup or any battle data (spec 5.2,
+     AC 19, 86).
+const core = require('./common/coreapi');
+const store = require('./common/store');
+const limits = require('./common/limits');
+const streak = require('./common/streak');
+const appconfig = require('./common/appconfig');
+const { ensureDaily } = require('./common/daily');
+const { now, configuredTimeoutMs } = require('./common/util');
+exports.main = store.handler(async (event, { openid, startedAt }) => {
+  const serverNow = now();
+  const dateKey = core.dateKeyAt(serverNow);
+  const { doc } = await ensureDaily(dateKey, { startedAt, timeoutMs: configuredTimeoutMs() });
+  let myStatus = 'none';
+  let myRecord;
+  const result = await store.getDoc('daily_results', `${dateKey}_${openid}`);
+  if (result) {
+    myStatus = 'done';
+    myRecord = { w: result.w, l: result.l };
+  } else if (await store.getDoc('daily_starts', `${dateKey}_${openid}`)) {
+    myStatus = 'started';
+  }
+
+点将台 V1.0.0 源程序                                           第 48 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const ps = await store.getDoc('player_stats', openid);
+  const myStreak = await streak.currentFor(ps, dateKey, serverNow);
+  let features;
+  try {
+    features = await appconfig.features();
+  } catch (e) {
+    features = { ads: { banner: { enabled: false, adUnitId: '' }, interstitial: core.interstitialDef
+    aults() } };
+  }
+  const out = {
+    ok: true, dateKey, issueNo: doc.issueNo, variant: doc.variant || core.variantFor(dateKey), serve
+    rNow, myStatus,
+    myStreak, features,
+  };
+  if (myRecord) out.myRecord = myRecord;
+  return out;
+}, { rate: limits.rateOf('getDaily') });
+'use strict';
+// getHistory: the caller's last <= 30 published issues (spec 8.9, 14.2, AC 82).
+// Spoiler rules: `best` only once the date's submit window has closed (D+1 00:30 BJT); for an open 
+    date the
+// caller's own lineup/record appear only if they have played it, and the distribution only after th
+    ey played.
+// Never returns a seed, rounds, or any other player's data.
+const core = require('./common/coreapi');
+const store = require('./common/store');
+const limits = require('./common/limits');
+const rules = require('./common/rules');
+const { isInt, fail, now } = require('./common/util');
+const MAX = 30;
+const MIN_DIST = 30;
+function bestOf(seedDoc) {
+  try {
+    if (!seedDoc.best) return null;
+    const lineup = core.normaliseLineup(seedDoc.best.lineup);
+    if (!lineup) return null;
+    // lineupFac: the cell each general was drafted from (content 2 cohesion / seal colour), when th
+    e stored best carries it
+    const out = { lineupIdx: core.lineupToIdx(lineup, seedDoc.contentVersion), record: seedDoc.best.
+    record || { w: 12, l: 0 } };
+    if (lineup.every((l) => l.faction)) out.lineupFac = lineup.map((l) => l.faction);
+    return out;
+  } catch (e) {
+    return null;
+  }
+}
+exports.main = store.handler(async (event, { openid }) => {
+  let limit = MAX;
+  if (event.limit !== undefined && event.limit !== null) {
+    if (!isInt(event.limit, 1, MAX)) fail('INVALID_ACTIONS', 'bad limit');
+
+点将台 V1.0.0 源程序                                           第 49 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    limit = event.limit;
+  }
+  const nowMs = now();
+  const _ = store._();
+  const seeds = (await store.db().collection('daily_seeds').where({ _id: _.lte(core.dateKeyAt(nowMs)
+    ) }).orderBy('_id', 'desc').limit(limit).get()).data;
+  const keys = seeds.map((s) => s._id);
+  let results = [];
+  let stats = [];
+  if (keys.length) {
+    results = (await store.db().collection('daily_results').where({ _id: _.in(keys.map((k) => `${k}_
+    ${openid}`)) }).limit(MAX).get()).data;
+    stats = (await store.db().collection('daily_stats').where({ _id: _.in(keys) }).limit(MAX).get())
+    .data;
+  }
+  const mine = new Map(results.map((r) => [r.dateKey, r]));
+  const dist = new Map(stats.map((s) => [s._id, s]));
+  const items = seeds.map((s) => {
+    const closed = rules.windowState(s._id, nowMs) === 'late';
+    const item = {
+      dateKey: s._id, issueNo: s.issueNo, variant: s.variant || core.variantFor(s._id), status: clos
+    ed ? 'closed' : 'open',
+    };
+    const r = mine.get(s._id);
+    const st = dist.get(s._id);
+    if (r) {
+      item.mine = { w: r.w, l: r.l, lineupIdx: r.lineupIdx, lineupFac: r.lineupFac || null };
+      const band = core.bandOf(s.configVersion, r.w);
+      if (band) item.mine.band = band;
+      if (st && st.total >= MIN_DIST) {
+        const atOrBetter = st.hist.slice(r.w).reduce((a, b) => a + b, 0);
+        item.mine.rarity = { pct: Math.round((atOrBetter / st.total) * 1000) / 10, total: st.total }
+    ;
+      }
+    }
+    if (st && st.total >= MIN_DIST && (closed || r)) {
+      item.total = st.total;
+      item.hist = st.hist;
+    }
+    if (closed) {
+      const best = bestOf(s);
+      if (best) item.best = best;
+    }
+    return item;
+  });
+  const ps = await store.getDoc('player_stats', openid);
+  return { ok: true, items, bestStreak: (ps && ps.bestStreak) || 0 };
+}, { rate: limits.rateOf('getHistory') });
+'use strict';
+// getReplay: best lineup for the caller's own completed run (复盘). Own runs only; for the daily
+
+点将台 V1.0.0 源程序                                           第 50 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+// this is therefore only reachable after the daily result exists (a run row is written on submit).
+const core = require('./common/coreapi');
+const store = require('./common/store');
+const limits = require('./common/limits');
+const input = require('./common/input');
+const rules = require('./common/rules');
+const { fail, now } = require('./common/util');
+exports.main = store.handler(async (event, { openid }) => {
+  const runId = input.clientRunId(event.runId);
+  const run = await store.getDoc('runs', `${openid}_${runId}`); // id is derived from the context op
+    enid
+  if (!run) fail('RUN_NOT_FOUND', 'no such run');
+  // The best lineup of a daily seed is the daily optimum: locked until the caller's ranked daily ex
+    ists or the date is over.
+  if (await rules.dailyLocked(await rules.dailyDateOfRun(run), openid, now())) fail('REPLAY_LOCKED',
+     'finish the daily first');
+  let best = run.best;
+  if (!best) {
+    const r = core.bestLineup(run.seed, run.contentVersion, run.finalTokens, run.configVersion);
+    if (!r) return { ok: true, best: null }; // five distinct generals cannot be drafted from these 
+    tokens
+    best = { lineup: core.normaliseLineup(r.lineup) || r.lineup, record: r.record };
+    await store.db().collection('runs').doc(run._id).update({ data: { best } });
+  }
+  return { ok: true, best };
+}, { rate: limits.rateOf('getReplay') });
+'use strict';
+// getRound: progressive daily token delivery (spec 5.2, 14.2, AC 86). Returns round n+1 only for ac
+    tions
+// that are a valid partial run ending exactly at round n's pick AND extend the frozen daily_progres
+    s prefix.
+//  - never returns a round >= released+1, never the seed or the best lineup;
+//  - idempotent: the same prefix returns the same round, and a stale (shorter) prefix returns an al
+    ready
+//    released round;
+//  - clients cannot skip: round n+1 needs round n to have been released (released >= n) and n valid
+     picks.
+const core = require('./common/coreapi');
+const store = require('./common/store');
+const limits = require('./common/limits');
+const input = require('./common/input');
+const rules = require('./common/rules');
+const progress = require('./common/progress');
+const anomaly = require('./common/anomaly');
+const { now, fail } = require('./common/util');
+exports.main = store.handler(async (event, { openid }) => {
+  const clientRunId = input.clientRunId(event.clientRunId);
+  const dateKey = input.optDateKey(event.dateKey);
+  if (!dateKey) fail('INVALID_ACTIONS', 'dateKey required');
+  const actions = input.actions(event.actions);
+
+点将台 V1.0.0 源程序                                           第 51 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const nowMs = now();
+  const ws = rules.windowState(dateKey, nowMs);
+  if (ws === 'future') fail('INVALID_ACTIONS', 'date in the future');
+  if (ws === 'late') fail('LATE_SUBMIT', 'daily expired');
+  const pid = progress.progressId(dateKey, openid);
+  const p = await store.getDoc('daily_progress', pid);
+  if (!p) fail('NOT_STARTED', 'call startRun first');
+  if (await store.getDoc('daily_results', `${dateKey}_${openid}`)) fail('ALREADY_PLAYED', 'daily alr
+    eady played');
+  // the sheet and versions of the attempt (challenge counting as the daily uses its own pinned copy
+    )
+  let seedDoc = await store.getDoc('daily_seeds', dateKey);
+  if (!seedDoc) fail('SEED_NOT_FOUND', 'no seed for date');
+  let { seed, contentVersion, configVersion, rounds } = seedDoc;
+  const mode = p.mode === 'challenge' ? 'challenge' : 'daily';
+  if (p.mode === 'challenge' && p.challengeId) {
+    const ch = await store.getDoc('challenges', p.challengeId);
+    if (ch && ch.seed === seed) ({ contentVersion, configVersion, rounds } = ch);
+  }
+  const rp = core.replayPartial(seed, contentVersion, actions, mode, rounds, configVersion);
+  if (!rp.ok) fail('INVALID_ACTIONS', String(rp.error).slice(0, 120));
+  const n = rp.picks; // 1..4: the round whose pick the actions end with
+  const next = n + 1;
+  const stored = p.actions || [];
+  if (progress.isPrefix(stored, actions)) {
+    // extends (or equals) the frozen prefix
+    if (p.released < n) fail('INVALID_ACTIONS', 'rounds out of order'); // cannot skip a round
+    if (p.released >= next && stored.length === actions.length) {
+      return { ok: true, round: next, data: rounds[n], released: p.released };
+    }
+    let released = p.released;
+    await store.db().runTransaction(async (t) => {
+      const cur = await store.getDocT(t, 'daily_progress', pid);
+      if (!cur) fail('NOT_STARTED', 'call startRun first');
+      if (!progress.isPrefix(cur.actions || [], actions) || cur.released < n) fail('INVALID_ACTIONS'
+    , 'prefix changed');
+      released = Math.max(cur.released, next);
+      await t.collection('daily_progress').doc(pid).update({ data: { actions, released, updatedAt: n
+    owMs } });
+    });
+    return { ok: true, round: next, data: rounds[n], released };
+  }
+  if (progress.isPrefix(actions, stored) && next <= p.released) {
+    // stale retry of an earlier call: same answer as then (rounds before `released` are already the
+     client's)
+    return { ok: true, round: next, data: rounds[n], released: p.released };
+  }
+  await anomaly.flag(openid, clientRunId, dateKey, 'prefix', { where: 'getRound', picks: n });
+  return fail('INVALID_ACTIONS', 'actions do not extend the stored prefix');
+}, { rate: limits.rateOf('getRound') });
+
+点将台 V1.0.0 源程序                                           第 52 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+'use strict';
+// joinGroup: group context from the cloudID of wx.getGroupEnterInfo (spec §9.2, §11.3).
+// M1: the client sends the RAW cloudID string and the SERVER resolves it with cloud.getOpenData({ l
+    ist: [cloudID] })
+// (wx-server-sdk; https://developers.weixin.qq.com/minigame/dev/wxcloud/reference-sdk-api/open/Clou
+    d.getOpenData.html).
+// Nothing the client could have shaped is trusted: `event.groupData` / any decrypted-looking object
+     is never read, so a
+// modified client cannot join a group whose openGId it merely knows. No platform secret is needed. 
+    Returns an opaque
+// groupRef; never an openid. wx.getShareInfo is never used.
+const store = require('./common/store');
+const limits = require('./common/limits');
+const input = require('./common/input');
+const secrets = require('./common/secrets');
+const { fail, now, sha256hex, isPlainObject } = require('./common/util');
+const core = require('./common/coreapi');
+const GROUP_CHAT_TYPES = [3, 4]; // 3 group chat, 4 WeCom-interop group (phase0-platform.md 2.4)
+/**
+ * The decrypted payload of one getOpenData list item, or null. Studio standard (same in every app):
+     the SDK reference
+ * lists `{cloudID, data}`, so `data` must be a plain object; a truthy `errCode` (defensive: the doc
+    s list none) or a
+ * foreign cloudID makes it null.
+ */
+function payloadOf(item, cloudID) {
+  if (!isPlainObject(item)) return null;
+  if (item.errCode || item.errcode) return null;
+  if (item.cloudID !== undefined && item.cloudID !== cloudID) return null;
+  return isPlainObject(item.data) ? item.data : null;
+}
+/**
+ * {openGId} of a group payload, else {code}. CTO ruling (studio-wide): the documented payload may n
+    ot carry `chat_type`
+ * at all, so it may be ABSENT (null counts as absent); when present it must be 3 or 4. `opengid` mu
+    st be a non-empty
+ * string of <= 128 chars; a payload with `open_single_roomid` and no `opengid` (a single chat) is N
+    OT_GROUP.
+ */
+function groupOf(data) {
+  if (!data) return { code: 'BAD_CLOUDID' };
+  const ct = data.chat_type === null ? undefined : data.chat_type;
+  const chatType = ct === undefined ? undefined : typeof ct === 'number' ? ct : typeof ct === 'strin
+    g' && /^\d+$/.test(ct) ? Number(ct) : NaN;
+  const g = data.opengid;
+  if (typeof g !== 'string' || g.length < 1 || g.length > 128) return { code: 'NOT_GROUP' };
+  if (chatType !== undefined && !GROUP_CHAT_TYPES.includes(chatType)) return { code: 'NOT_GROUP' };
+  return { openGId: g };
+}
+async function resolveCloudId(cloudID) {
+
+点将台 V1.0.0 源程序                                           第 53 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  if (typeof store.cloud.getOpenData !== 'function') fail('SERVER_CONFIG', 'cloud.getOpenData unavai
+    lable');
+  let res;
+  try {
+    res = await store.cloud.getOpenData({ list: [cloudID] });
+  } catch (e) {
+    fail('BAD_CLOUDID', 'cloudID could not be resolved');
+  }
+  const list = res && Array.isArray(res.list) ? res.list : [];
+  return list.length === 1 ? payloadOf(list[0], cloudID) : null;
+}
+exports.main = store.handler(async (event, { openid }) => {
+  const cloudID = input.cloudID(event.cloudID); // BAD_CLOUDID before anything touches the platform
+  const g = groupOf(await resolveCloudId(cloudID));
+  if (!g.openGId) fail(g.code, g.code === 'NOT_GROUP' ? 'not a group chat' : 'cloudID invalid or exp
+    ired');
+  const openGId = g.openGId;
+  const groupRef = sha256hex(openGId + secrets.pepper()).slice(0, 16);
+  const dateKey = core.dateKeyAt(now());
+  const id = `${openGId}_${openid}`;
+  // upsert with a deterministic _id: add first, on duplicate refresh lastSeen
+  const created = await store.addIfAbsent('group_members', {
+    _id: id, openGId, openid, groupRef, firstSeen: dateKey, lastSeen: dateKey,
+  });
+  if (!created) {
+    await store.db().collection('group_members').doc(id).update({ data: { lastSeen: dateKey, groupRe
+    f } });
+  }
+  const out = { ok: true, groupRef };
+  // Only if the device spike forces the groupid route for getGroupCloudStorage (spec §9.2 step 6).
+  if (process.env.JOINGROUP_RETURN_OPENGID === '1') out.groupid = openGId;
+  return out;
+}, { rate: limits.rateOf('joinGroup') });
+exports.payloadOf = payloadOf;
+exports.groupOf = groupOf;
+'use strict';
+// startRun: anchors the one daily attempt (daily_starts, deterministic _id) for ranked runs.
+// v1: for a ranked daily (or a challenge that counts as today's daily) also creates daily_progress
+// (released 1) and returns exactly the rounds released so far (spec 5.2, AC 86). A resumed attempt
+// (reinstall, second device) gets every released round plus the frozen action prefix.
+const core = require('./common/coreapi');
+const store = require('./common/store');
+const limits = require('./common/limits');
+const input = require('./common/input');
+const rules = require('./common/rules');
+const progress = require('./common/progress');
+const { now, fail } = require('./common/util');
+exports.main = store.handler(async (event, { openid }) => {
+  input.clientRunId(event.clientRunId); // validated; the run row itself is created by submitRun
+  const mode = input.mode(event.mode);
+
+点将台 V1.0.0 源程序                                           第 54 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const nowMs = now();
+  const today = core.dateKeyAt(nowMs);
+  if (mode === 'free') return { ok: true, resumed: false };
+  let dateKey;
+  let challenge = null;
+  let countsAsDaily = true;
+  let seedDoc;
+  if (mode === 'daily') {
+    dateKey = input.optDateKey(event.dateKey) || today;
+    if (dateKey !== today) fail('INVALID_ACTIONS', 'daily can only be started for today');
+    seedDoc = await store.getDoc('daily_seeds', dateKey);
+    if (!seedDoc) fail('SEED_NOT_FOUND', 'no seed for today');
+  } else {
+    const ch = await rules.loadAnswerableChallenge(input.challengeId(event.challengeId), openid, now
+    Ms);
+    countsAsDaily = await rules.challengeCountsAsDaily(ch, openid, nowMs);
+    if (!countsAsDaily) return { ok: true, resumed: false, countsAsDaily: false };
+    dateKey = ch.dateKey;
+    challenge = ch;
+    seedDoc = await store.getDoc('daily_seeds', dateKey);
+    if (!seedDoc) fail('SEED_NOT_FOUND', 'no seed for today');
+  }
+  if (await store.getDoc('daily_results', `${dateKey}_${openid}`)) {
+    return { ok: true, resumed: true, countsAsDaily: mode === 'daily' ? true : false };
+  }
+  const created = await store.addIfAbsent('daily_starts', {
+    _id: `${dateKey}_${openid}`, openid, dateKey, startedAt: nowMs, clientRunId: event.clientRunId,
+  });
+  // daily_progress: add of the deterministic id; an existing row (resume, or a daily and a challeng
+    e start
+  // racing) is returned as is. The first start decides the progress mode.
+  const pid = progress.progressId(dateKey, openid);
+  await store.addIfAbsent('daily_progress', {
+    _id: pid, openid, dateKey, clientRunId: event.clientRunId, mode: challenge ? 'challenge' : 'dail
+    y',
+    challengeId: challenge ? challenge._id : null, actions: [], released: 1, updatedAt: nowMs,
+  });
+  const p = await store.getDoc('daily_progress', pid);
+  const sheet = challenge && p.mode === 'challenge' && p.challengeId === challenge._id ? challenge.r
+    ounds : seedDoc.rounds;
+  const out = {
+    ok: true, resumed: !created || p.released > 1 || p.actions.length > 0, countsAsDaily,
+    released: p.released, rounds: progress.releasedRounds(sheet, p.released),
+  };
+  if (out.resumed) {
+    out.actions = p.actions;
+    out.clientRunId = p.clientRunId; // the attempt's original run id (a second device adopts it)
+  }
+  return out;
+}, { rate: limits.rateOf('startRun') });
+
+点将台 V1.0.0 源程序                                           第 55 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+'use strict';
+// submitRun: full server-side validation (spec §14.3). The server simulation is authoritative.
+const core = require('./common/coreapi');
+const store = require('./common/store');
+const limits = require('./common/limits');
+const input = require('./common/input');
+const rules = require('./common/rules');
+const progress = require('./common/progress');
+const anomaly = require('./common/anomaly');
+const streak = require('./common/streak');
+const notify = require('./common/notify');
+const { now, fail } = require('./common/util');
+/** Build the client response from a stored run. Rarity is read live for ranked runs. */
+async function respond(run) {
+  const out = {
+    ok: true, runId: run.clientRunId, record: run.serverRecord, battles: run.result.battles,
+    events: run.result.events, band: run.result.band, morale: run.result.morale,
+    ranked: run.ranked, rarity: null,
+  };
+  if (run.ranked && run.streak) out.streak = { current: run.streak.current, best: run.streak.best };
+  if (run.ranked && run.dateKey) {
+    const st = await store.getDoc('daily_stats', run.dateKey);
+    if (st && st.total >= 30) {
+      const atOrBetter = st.hist.slice(run.serverRecord.w).reduce((a, b) => a + b, 0);
+      out.rarity = { pct: Math.round((atOrBetter / st.total) * 1000) / 10, total: st.total };
+    }
+  }
+  if (run.challengeId) {
+    const ch = await store.getDoc('challenges', run.challengeId);
+    if (ch) {
+      // the sharer's lineup on a still-playable daily seed is a spoiler until the caller has their 
+    ranked daily
+      const locked = await rules.dailyLocked(ch.mode === 'daily' ? ch.dateKey : null, run.openid, no
+    w());
+      out.challengeCompare = { theirRecord: ch.record, theirLineup: locked ? null : ch.lineup, lineu
+    pLocked: locked, myRecord: run.serverRecord };
+    }
+  }
+  return out;
+}
+/** A ranked result already exists: same clientRunId -> idempotent success, otherwise ALREADY_PLAYED
+    . */
+async function alreadyPlayed(openid, prior, clientRunId) {
+  const priorRun = await store.getDoc('runs', `${openid}_${prior.runId}`);
+  if (prior.runId === clientRunId && priorRun) return respond(priorRun);
+  return fail('ALREADY_PLAYED', 'daily already played', priorRun ? { result: await respond(priorRun)
+     } : {});
+}
+/**
+ * Inside the run's transaction: count this caller's FIRST answer to the challenge. The marker doc (
+
+点将台 V1.0.0 源程序                                           第 56 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    deterministic _id
+ * <challengeId>_<openid>) makes it once per caller; answerCount and bestAnswer are updated from the
+     document as read
+ * INSIDE the transaction. Returns true if this call counted.
+ */
+async function recordAnswer(t, challengeId, openid, record) {
+  const markerId = `${challengeId}_${openid}`;
+  if (await store.getDocT(t, 'challenge_answers', markerId)) return false;
+  const ch = await store.getDocT(t, 'challenges', challengeId);
+  if (!ch) return false; // purged meanwhile: nothing to count
+  const upd = { answerCount: store._().inc(1) };
+  if (!ch.bestAnswer || record.w > ch.bestAnswer.w) upd.bestAnswer = record;
+  await t.collection('challenge_answers').doc(markerId).set({ data: { challengeId, openid, createdAt
+    : now() } });
+  await t.collection('challenges').doc(challengeId).update({ data: upd });
+  return true;
+}
+async function ensureStats(dateKey) {
+  await store.addIfAbsent('daily_stats', { _id: dateKey, hist: new Array(13).fill(0), total: 0 });
+}
+exports.main = store.handler(async (event, { openid }) => {
+  // ---- 1. input validation (identity is NEVER read from input) ----
+  const clientRunId = input.clientRunId(event.clientRunId);
+  const mode = input.mode(event.mode);
+  const actions = input.actions(event.actions);
+  const clientRecord = input.optRecord(event.clientRecord);
+  const runDocId = `${openid}_${clientRunId}`;
+  const nowMs = now();
+  // ---- 2. idempotency: same clientRunId returns the stored result, never double counts ----
+  const existing = await store.getDoc('runs', runDocId);
+  if (existing) return respond(existing);
+  // ---- 3. resolve seed / versions / ranking eligibility per mode ----
+  let seed;
+  let contentVersion;
+  let configVersion;
+  let dateKey = null;
+  let ranked = false;
+  let challenge = null;
+  let challengeId = null;
+  let replayMode = mode;
+  let rounds;
+  if (mode === 'daily') {
+    dateKey = input.optDateKey(event.dateKey);
+    if (!dateKey) fail('INVALID_ACTIONS', 'dateKey required for daily');
+    const seedDoc = await store.getDoc('daily_seeds', dateKey);
+    if (!seedDoc) fail('SEED_NOT_FOUND', 'no seed for date');
+    const ws = rules.windowState(dateKey, nowMs);
+    if (ws === 'future') fail('INVALID_ACTIONS', 'date in the future');
+    if (ws === 'late') fail('LATE_SUBMIT', 'daily expired');
+    const start = await store.getDoc('daily_starts', `${dateKey}_${openid}`);
+
+点将台 V1.0.0 源程序                                           第 57 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    if (!start) fail('NOT_STARTED', 'daily was never started');
+    const prior = await store.getDoc('daily_results', `${dateKey}_${openid}`);
+    if (prior) return alreadyPlayed(openid, prior, clientRunId);
+    seed = seedDoc.seed; contentVersion = seedDoc.contentVersion; configVersion = seedDoc.configVers
+    ion;
+    rounds = seedDoc.rounds;
+    ranked = true;
+  } else if (mode === 'challenge') {
+    challengeId = input.challengeId(event.challengeId);
+    challenge = await rules.loadAnswerableChallenge(challengeId, openid, nowMs);
+    seed = challenge.seed; contentVersion = challenge.contentVersion; configVersion = challenge.conf
+    igVersion;
+    rounds = challenge.rounds;
+    dateKey = challenge.dateKey || null;
+    if (challenge.mode === 'daily' && dateKey) {
+      // The run IS the caller's daily attempt only if the daily was started (startRun) inside the
+      // submit window and no daily result exists. Otherwise a friendly match (never ranked).
+      const ws = rules.windowState(dateKey, nowMs);
+      if (ws === 'open' || ws === 'grace') {
+        const start = await store.getDoc('daily_starts', `${dateKey}_${openid}`);
+        const prior = await store.getDoc('daily_results', `${dateKey}_${openid}`);
+        ranked = !!start && !prior;
+      }
+    }
+  } else {
+    seed = input.seedU32(event.seed);
+    const cv = input.optContentVersion(event.contentVersion);
+    const v = core.currentVersions();
+    contentVersion = cv || v.contentVersion;
+    configVersion = core.configVersionFor(contentVersion);
+    core.roster(contentVersion); // unknown version -> INVALID_ACTIONS
+    rounds = core.buildSheet(seed, contentVersion, configVersion);
+  }
+  // ---- 3b. (v1) ranked: progressive prefix. All 5 rounds must have been released and the actions 
+    must
+  //          extend the frozen prefix exactly; otherwise INVALID_ACTIONS plus observe-only flags. -
+    ---
+  const invalid = async (msg, kind) => {
+    if (ranked) {
+      if (kind) await anomaly.flag(openid, clientRunId, dateKey, kind, { where: 'submitRun' });
+      await anomaly.flag(openid, clientRunId, dateKey, 'invalid_ranked', { reason: String(msg).slice
+    (0, 60) });
+    }
+    return fail('INVALID_ACTIONS', String(msg).slice(0, 120));
+  };
+  if (ranked) {
+    const prog = await store.getDoc('daily_progress', progress.progressId(dateKey, openid));
+    if (!prog || prog.released !== 5) await invalid('rounds not fully released', 'prefix');
+    else if (!progress.isPrefix(prog.actions || [], actions)) await invalid('actions do not extend t
+    he frozen prefix', 'prefix');
+
+点将台 V1.0.0 源程序                                           第 58 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  }
+  // ---- 4. replay actions against the rebuilt sheet ----
+  const rp = core.replay(seed, contentVersion, actions, replayMode, configVersion);
+  if (!rp.ok) await invalid(rp.error || 'invalid actions');
+  const lineup = core.normaliseLineup(rp.lineup);
+  if (!lineup) await invalid('lineup must be 5 distinct generals in 5 slots');
+  // ---- 5. simulate: the server record is authoritative ----
+  const sim = core.simulate(lineup, seed, contentVersion, configVersion);
+  const record = { w: sim.record.w, l: sim.record.l };
+  const mismatch = !!clientRecord && (clientRecord.w !== record.w || clientRecord.l !== record.l);
+  if (mismatch) {
+    console.warn('[submitRun] record mismatch', JSON.stringify({ client: clientRecord, server: recor
+    d, mode, dateKey }));
+    await store.writeEvent(openid, 'error', { where: 'submitRun', code: 'MISMATCH', client: clientRe
+    cord, server: record });
+    await anomaly.flag(openid, clientRunId, dateKey, 'mismatch', { client: clientRecord, server: rec
+    ord });
+  }
+  const start = ranked ? await store.getDoc('daily_starts', `${dateKey}_${openid}`) : null;
+  const finalTokens = core.finalTokens(rounds, actions, rp);
+  const run = {
+    _id: runDocId, openid, clientRunId, mode, dateKey, seed, challengeId, actions,
+    serverRecord: record, clientRecord, mismatch, ranked, contentVersion, configVersion,
+    lineupIdx: core.lineupToIdx(lineup, contentVersion), lineup,
+    finalTokens,
+    result: { record, battles: sim.battles, events: sim.events, band: sim.band, morale: sim.morale }
+    ,
+    startedAt: start ? start.startedAt : null, submittedAt: nowMs,
+  };
+  // ---- 6. persist ----
+  // The run, the ranked result / streak / stats AND the challenge answer bookkeeping commit in ONE 
+    transaction, so a retry or a
+  // second device racing the same call can neither double count an answer nor lower the challenge's
+     best answer.
+  let firstAnswer = false;
+  try {
+    if (ranked || challenge) {
+      let sctx = null;
+      if (ranked) {
+        await ensureStats(dateKey);
+        sctx = { prev: (await streak.prevPublished(dateKey))[0] || null, next: await streak.nextPubl
+    ished(dateKey) };
+      }
+      const _ = store._();
+      await store.db().runTransaction(async (t) => {
+        firstAnswer = false; // a retried transaction starts over
+        if (ranked) {
+          const st = await streak.applyRanked(t, openid, dateKey, sctx, nowMs);
+          run.streak = { current: st.current, best: st.best, thisResult: st.streak };
+        }
+
+点将台 V1.0.0 源程序                                           第 59 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+        await t.collection('runs').add({ data: run });
+        if (ranked) {
+          await t.collection('daily_results').add({
+            data: {
+              _id: `${dateKey}_${openid}`, dateKey, openid, runId: clientRunId, w: record.w, l: reco
+    rd.l,
+              submittedAt: nowMs, lineupIdx: run.lineupIdx, lineupFac: core.lineupFactions(lineup, a
+    ctions, finalTokens),
+              streak: run.streak.thisResult, contentVersion,
+            },
+          });
+          await t.collection('daily_stats').doc(dateKey).update({ data: { total: _.inc(1), [`hist.${
+    record.w}`]: _.inc(1) } });
+        }
+        if (challenge) firstAnswer = await recordAnswer(t, challengeId, openid, record);
+      });
+    } else {
+      await store.db().collection('runs').add({ data: run });
+    }
+  } catch (e) {
+    if (!store.isDup(e)) throw e;
+    // lost a race: either the same clientRunId (idempotent) or a second distinct daily
+    const again = await store.getDoc('runs', runDocId);
+    if (again) return respond(again);
+    const prior = ranked ? await store.getDoc('daily_results', `${dateKey}_${openid}`) : null;
+    if (prior) return alreadyPlayed(openid, prior, clientRunId);
+    throw e;
+  }
+  if (ranked && start && nowMs - start.startedAt < core.anomalyMinMs()) {
+    await anomaly.flag(openid, clientRunId, dateKey, 'fast', { ms: nowMs - start.startedAt });
+  }
+  const response = await respond(run);
+  // ---- 8. (v1) opt-in answer notice: best effort, <= 2 s, never changes the response ----
+  if (challenge && firstAnswer) await notify.sendOnce(challenge, record);
+  return response;
+}, { rate: limits.rateOf('submitRun') });
+'use strict';
+// subscribeChallenge: stores the opt-in grant after the client's own requestSubscribeMessage `accep
+    t`
+// (spec 8.13, 14.2). Owner only. The template id comes from server config (app_config, else env
+// SUBSCRIBE_TEMPLATE_ID), never from the client. One grant per challenge (add of the fixed _id).
+const store = require('./common/store');
+const limits = require('./common/limits');
+const input = require('./common/input');
+const appconfig = require('./common/appconfig');
+const { now, fail } = require('./common/util');
+exports.main = store.handler(async (event, { openid }) => {
+  const id = input.challengeId(event.challengeId);
+  const ch = await store.getDoc('challenges', id);
+  if (!ch || now() > ch.expiresAt) fail('CHALLENGE_EXPIRED', 'challenge expired or missing');
+
+点将台 V1.0.0 源程序                                           第 60 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  if (ch.ownerOpenid !== openid) fail('NOT_OWNER', 'only the challenge owner can subscribe');
+  const { tmplId } = await appconfig.subscribeConfig();
+  if (!tmplId) fail('NO_TEMPLATE', 'subscribe message is not configured');
+  await store.addIfAbsent('sub_grants', {
+    _id: id, ownerOpenid: openid, tmplId, grantedAt: now(), used: false,
+  });
+  return { ok: true, granted: true };
+}, { rate: limits.rateOf('subscribeChallenge') });
+'use strict';
+// track: batched analytics (spec §15). <= 50 events per call, rate limited per openid (300 events a
+     minute).
+// Identity is the context OPENID. Unknown event names are dropped (the batch never fails).
+// L2: props are an ALLOWLIST per event: only the keys core/events.js CATALOGUE[name] lists (plus CO
+    MMON), each checked for
+// its type or enum; every other key is dropped, so a modified client cannot store free text, identi
+    fiers or oversized
+// values (AC 60: events never contain an openGId or groupRef). The event itself is still stored wit
+    hout the rejected keys.
+const store = require('./common/store');
+const limits = require('./common/limits');
+const { fail, now, isPlainObject, isInt } = require('./common/util');
+const events = require('./core/events');
+const MAX_BATCH = 50;
+const MAX_PROPS_BYTES = 1024;
+const SESSION_RE = /^[A-Za-z0-9_-]{1,64}$/;
+exports.main = store.handler(async (event, { openid }) => {
+  const list = event.events;
+  if (!Array.isArray(list) || list.length === 0 || list.length > MAX_BATCH) fail('INVALID_ACTIONS', 
+    `events must be 1-${MAX_BATCH}`);
+  const ts = now();
+  const docs = [];
+  for (const e of list) {
+    if (!isPlainObject(e) || typeof e.name !== 'string') continue; // drop unknown, never fail the b
+    atch
+    const raw = isPlainObject(e.props) ? e.props : {};
+    const props = events.cleanProps(e.name, raw);
+    if (!props) continue; // not a client-sendable event (server-only names included)
+    // the client sends sessionId inside props; accept the top-level field first, store it top-level
+     only
+    const rawSession = e.sessionId !== undefined ? e.sessionId : raw.sessionId;
+    if (JSON.stringify(props).length > MAX_PROPS_BYTES) continue;
+    docs.push({
+      openid, sessionId: typeof rawSession === 'string' && SESSION_RE.test(rawSession) ? rawSession 
+    : null, name: e.name, props, ts,
+      clientTs: isInt(e.clientTs, 0, 4102444800000) ? e.clientTs : null,
+    });
+  }
+  await Promise.all(docs.map((data) => store.db().collection('events').add({ data })));
+  return { ok: true, accepted: docs.length };
+}, { rate: limits.rateOf('track') });

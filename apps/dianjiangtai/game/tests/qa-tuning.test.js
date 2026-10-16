@@ -3,7 +3,7 @@
 // the core player models but a DIFFERENT seed namespace and our own tallies (not simstats' report).
 // QA_SEEDS (default 30000) sets the sample size; 100000 reproduces the report scale.
 // v1 amendment (contentVersion 2): the same hard targets are measured for BOTH content versions, each with its own
-// configVersion (content 1 / config 1 stays intact for old seeds; content 2 / config 2 is the live pair).
+// configVersion (content 1 / config 1 stays intact for old seeds; content 2 / config 3 is the live pair (config 2 was retuned for V1-2)).
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { hash32, sub } = require('../core/rng');
@@ -16,7 +16,7 @@ const { gateCheck } = require('../core/gates');
 const N = +(process.env.QA_SEEDS || 30000);
 const PAIRS = [
   { cv: 1, cfg: 1 },
-  { cv: 2, cfg: 2 },
+  { cv: 2, cfg: 3 },
 ];
 
 for (const { cv, cfg } of PAIRS) {
@@ -77,21 +77,21 @@ for (const { cv, cfg } of PAIRS) {
   });
 }
 
-test('accepted daily seeds (content 2 / config 2): optimal reaches 12-0 on 100%, gate record is reproducible, acceptDailySeed stores a 12-0 best (AC 21, 55, 74)', { timeout: 600000 }, () => {
+test('accepted daily seeds (content 2 / config 3): optimal reaches 12-0 on 100%, gate record is reproducible, acceptDailySeed stores a 12-0 best (AC 21, 55, 74)', { timeout: 600000 }, () => {
   // found by scanning the gate on a candidate stream the real bank does not use (hash32('bank:2:' + i), i >= 900000000)
-  const accepted = [1989661826, 3598505694, 2259125502];
+  const accepted = [162040956, 1989661826, 2259125502];
   const { acceptDailySeed } = require('../core/gates');
   const { simulate } = require('../core/sim');
   for (const s of accepted) {
-    const a = gateCheck(s, 2, 2);
-    assert.deepEqual(a, gateCheck(s, 2, 2), 'gateCheck deterministic');
+    const a = gateCheck(s, 2, 3);
+    assert.deepEqual(a, gateCheck(s, 2, 3), 'gateCheck deterministic');
     assert.deepEqual(a.optimal, { w: 12, l: 0 });
     assert.equal(a.pass.all, true, 'seed ' + s + ' still passes the gate (regenerate the list after any retune)');
     assert.equal(a.relaxed, false);
-    const r = acceptDailySeed(s, { contentVersion: 2, configVersion: 2 });
+    const r = acceptDailySeed(s, { contentVersion: 2, configVersion: 3 });
     assert.equal(r.accepted, true);
     assert.deepEqual(r.gates, a);
-    assert.deepEqual(simulate(r.best.lineup, s, 2, 2).record, { w: 12, l: 0 }, 'the stored best lineup (with drafted factions) scores 12-0');
+    assert.deepEqual(simulate(r.best.lineup, s, 2, 3).record, { w: 12, l: 0 }, 'the stored best lineup (with drafted factions) scores 12-0');
     for (const e of r.best.lineup) assert.ok(e.faction);
   }
 });

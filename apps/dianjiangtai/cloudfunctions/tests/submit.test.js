@@ -284,6 +284,7 @@ test('startRun: daily only for today; resumed flag; free needs no start', async 
 });
 
 test('submitRun is rate limited per openid', async () => {
+  h.limits = true;
   const seed = 99;
   const rounds = require(require('path').join(h.root, 'getDaily', 'core', 'sheet.js')).buildSheet(seed, CV);
   const a = bestActions(rounds);
@@ -292,7 +293,7 @@ test('submitRun is rate limited per openid', async () => {
     const r = await h.call('submitRun', { mode: 'free', clientRunId: runId(), seed, actions: a }, { openid: 'spammer' });
     if (r.code === 'RATE_LIMITED') limited++;
   }
-  assert.equal(limited, 5);
+  assert.equal(limited, 15, '20 submits a minute');
   assert.equal((await h.call('submitRun', { mode: 'free', clientRunId: runId(), seed, actions: a }, { openid: 'other' })).ok, true);
 });
 

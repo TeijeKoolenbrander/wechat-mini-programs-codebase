@@ -1,43 +1,43 @@
 # simstats report
 
-contentVersion 2, configVersion 2, gateVersion 1, node v24.15.0, 8 worker(s)
-seeds 100000 (offset 0); tau 0.7; jitter 0.35; poolCap 8; pMin 0.672; curve [7.36, 7.624, 7.887, 8.151, 8.415, 8.678, 8.942, 9.205, 9.469, 9.733, 9.996, 10.26]
+contentVersion 2, configVersion 3, gateVersion 1, node v24.15.0, 8 worker(s)
+seeds 100000 (offset 0); tau 0.7; jitter 0.35; poolCap 8; pMin 0.672; curve [7.665, 7.899, 8.132, 8.366, 8.6, 8.833, 9.067, 9.3, 9.534, 9.768, 10.001, 10.235]
 
-models simulated in 15.5 s
+models simulated in 82.7 s
 
 ## Player models (free play, 1 free re-spin per dimension)
 
 | model | mean wins | median | 12-0 | target |
 |---|---|---|---|---|
-| random | 1.50 | 1 | 0.00% | 12-0 < 0.01% |
-| naive | 6.05 | 6 | 0.17% | 12-0 < 0.2% |
-| greedy | 7.66 | 8 | 0.56% | 12-0 <= 1% |
-| sensible | 6.86 | 7 | 0.33% | median 6-7, 12-0 0.2-0.5% |
+| random | 1.23 | 1 | 0.00% | 12-0 < 0.01% |
+| naive | 5.61 | 6 | 0.14% | 12-0 < 0.2% |
+| greedy | 7.32 | 7 | 0.44% | 12-0 <= 1% |
+| sensible | 6.47 | 7 | 0.26% | median 6-7, 12-0 0.2-0.5% |
 
-- NOTE random mean 1.50, naive mean 6.05, greedy mean 7.66 (soft: reported, never gating, D15)
-- PASS greedy 12-0 0.56% <= 1%
+- NOTE random mean 1.23, naive mean 5.61, greedy mean 7.32 (soft: reported, never gating, D15)
+- PASS greedy 12-0 0.44% <= 1%
 - PASS random 12-0 0.00% < 0.01%
-- PASS naive 12-0 0.17% < 0.2%
-- PASS sensible 12-0 0.33% in 0.2-0.5%
+- PASS naive 12-0 0.14% < 0.2%
+- PASS sensible 12-0 0.26% in 0.2-0.5%
 - PASS sensible median 7 in 6-7
 
 ## Sensible band shares vs 7.5 targets
 
 | band | wins | share | target | ok |
 |---|---|---|---|---|
-| 一统天下 | 12 | 0.33% | 0.20% - 0.50% | yes |
-| 霸业将成 | 10-11 | 8.90% | 6.00% - 10.00% | yes |
-| 雄踞一方 | 8-9 | 30.66% | 22.00% - 32.00% | yes |
-| 三分鼎立 | 6-7 | 35.03% | 25.00% - 36.00% | yes |
-| 偏安一方 | 4-5 | 19.09% | 15.00% - 25.00% | yes |
-| 兵微将寡 | 2-3 | 5.43% | 5.00% - 12.00% | yes |
-| 一败涂地 | 0-1 | 0.55% | 0.00% - 2.00% | yes |
+| 一统天下 | 12 | 0.26% | 0.20% - 0.50% | yes |
+| 霸业将成 | 10-11 | 6.92% | 6.00% - 10.00% | yes |
+| 雄踞一方 | 8-9 | 26.04% | 22.00% - 32.00% | yes |
+| 三分鼎立 | 6-7 | 34.81% | 25.00% - 36.00% | yes |
+| 偏安一方 | 4-5 | 22.65% | 15.00% - 25.00% | yes |
+| 兵微将寡 | 2-3 | 8.22% | 5.00% - 12.00% | yes |
+| 一败涂地 | 0-1 | 1.10% | 0.00% - 2.00% | yes |
 
 Cumulative share of sensible runs reaching w wins or better (config.freeRarity):
 
-`[1, 0.9993, 0.9945, 0.9784, 0.9402, 0.8665, 0.7494, 0.5875, 0.399, 0.2205, 0.0924, 0.0256, 0.0033]`
+`[1, 0.9984, 0.989, 0.9621, 0.9067, 0.8138, 0.6803, 0.5119, 0.3322, 0.1775, 0.0718, 0.0199, 0.0026]`
 
-Events fired in 24.10% of sensible runs (target 15-30%).
+Events fired in 24.32% of sensible runs (target 15-30%).
 
 ## Cell frequencies over seeds (AC 6: tiers never change draw odds)
 
@@ -69,37 +69,37 @@ Runs drafting at least one multi-appearance general: 88.51%; picks drafted from 
 
 ## Optimal (复盘) rates and arguability
 
-Optimal over primary tokens (no re-spins), 3000 seeds: 12-0 on 1.97%.
-Optimal over the sensible player's final tokens (what 复盘 shows), 3000 seeds: 12-0 on 2.03%.
-- NOTE optimal 12-0 on 1.97% of free seeds (soft; about 1-2% is accepted under D15)
+Optimal over primary tokens (no re-spins), 3000 seeds: 12-0 on 1.53%.
+Optimal over the sensible player's final tokens (what 复盘 shows), 3000 seeds: 12-0 on 1.57%.
+- NOTE optimal 12-0 on 1.53% of free seeds (soft; about 1-2% is accepted under D15)
 2590 of 3000 runs (86.33%) exceed search.heavySets (5000) distinct sets and are served by getReplay first (spec 7.4).
 
-- PASS most frequent general in optimal lineups: 刘备 in 34.50% (<= 60%)
-- 主公: 23 different best occupants; top: 刘备 34.47%, 陆抗 10.13%, 皇甫嵩 9.53%
-- 军师: 35 different best occupants; top: 周瑜 18.03%, 司马懿 17.67%, 诸葛亮 12.67%
-- 先锋: 45 different best occupants; top: 张辽 27.30%, 关羽 13.00%, 孙坚 11.97%
-- 猛将: 31 different best occupants; top: 文鸯 23.13%, 关羽 13.20%, 甘宁 11.87%
-- 守将: 47 different best occupants; top: 满宠 26.07%, 罗宪 16.83%, 曹操 11.50%
+- PASS most frequent general in optimal lineups: 刘备 in 34.77% (<= 60%)
+- 主公: 24 different best occupants; top: 刘备 34.73%, 陆抗 10.10%, 皇甫嵩 9.50%
+- 军师: 34 different best occupants; top: 周瑜 18.03%, 司马懿 17.43%, 诸葛亮 12.63%
+- 先锋: 43 different best occupants; top: 张辽 27.53%, 关羽 12.63%, 孙坚 11.90%
+- 猛将: 30 different best occupants; top: 文鸯 22.87%, 关羽 13.43%, 甘宁 11.63%
+- 守将: 46 different best occupants; top: 满宠 26.17%, 罗宪 16.87%, 曹操 11.47%
 
-Bonds in optimal lineups: taoyuan 3.23%, jiangdong 2.23%, longfeng 0.57%, suwei 1.43%, xiliang 0.03%, shiyuan 3.90%, shenting 0.73%, xiapi 0.00%, hebei 0.00%, pingluan 0.13%, ershi 0.00%, pingwu 0.03%, henei 0.00%, fuzi_guan 0.43%, fuzi_lu 2.80%, houji 0.07%
+Bonds in optimal lineups: taoyuan 3.23%, jiangdong 2.20%, longfeng 0.60%, suwei 1.37%, xiliang 0.03%, shiyuan 4.03%, shenting 0.73%, xiapi 0.00%, hebei 0.00%, pingluan 0.07%, ershi 0.07%, pingwu 0.03%, henei 0.00%, fuzi_guan 0.50%, fuzi_lu 2.80%, houji 0.03%
 
 ## 复盘 search timing
 
-1200 searches (node v24.15.0, this machine, one thread): p50 49.3 ms, p90 144.2 ms, p99 449.7 ms, max 1224.5 ms; distinct sets p50 14080, max 32768; lineup evaluations p50 1552, p99 138779.
-Client-side 复盘 (<= 5000 distinct sets, 16.50% of searches): p50 10.4 ms, p99 92.2 ms, max 93.8 ms.
-Heavy (server getReplay first, 83.50% of searches): p50 57.2 ms, p99 488.8 ms, max 1224.5 ms (cloud function timeout 10 s).
-Constructed worst case (five biggest distinct cells): 32256 distinct sets, 211211 lineup evaluations, 547.5 ms.
-- NOTE largest heavySets keeping this sample's client max under 250 ms: 13000
-- PASS client-side 复盘 max 93.8 ms < 300 ms in node (p99 92.2 ms; heavy token sets go to getReplay)
-- PASS heavy / worst-case search 548 ms is far inside the 10 s getReplay timeout
+1200 searches (node v24.15.0, this machine, one thread): p50 40.6 ms, p90 131.3 ms, p99 362.0 ms, max 1140.6 ms; distinct sets p50 14080, max 32768; lineup evaluations p50 1467, p99 111850.
+Client-side 复盘 (<= 5000 distinct sets, 16.50% of searches): p50 10.2 ms, p99 58.5 ms, max 65.4 ms.
+Heavy (server getReplay first, 83.50% of searches): p50 48.3 ms, p99 371.5 ms, max 1140.6 ms (cloud function timeout 10 s).
+Constructed worst case (five biggest distinct cells): 32256 distinct sets, 136777 lineup evaluations, 393.7 ms.
+- NOTE largest heavySets keeping this sample's client max under 250 ms: 7000
+- PASS client-side 复盘 max 65.4 ms < 300 ms in node (p99 58.5 ms; heavy token sets go to getReplay)
+- PASS heavy / worst-case search 394 ms is far inside the 10 s getReplay timeout
 
 ## Daily gates
 
-Seeds where perfect play reaches 12-0: 1.68%.
-gateCheck over 4000 candidate seeds: accepted 0.55%; optimal failed 98.32%; mean greedy 12-0 rate 15.97%; mean random 12-0 rate 0.00%.
-gateCheck time per seed (under 8-way parallel load): median 65.2 ms, p99 565.5 ms.
-Probability that at least one of 50 candidates is accepted: 24.10%.
-- NOTE strict daily gate acceptance 0.55%: about 182 candidates per accepted seed, so the offline seed bank (--bank) is mandatory
+Seeds where perfect play reaches 12-0: 1.35%.
+gateCheck over 4000 candidate seeds: accepted 0.43%; optimal failed 98.65%; mean greedy 12-0 rate 14.03%; mean random 12-0 rate 0.00%.
+gateCheck time per seed (under 8-way parallel load): median 54.3 ms, p99 416.6 ms.
+Probability that at least one of 50 candidates is accepted: 19.18%.
+- NOTE strict daily gate acceptance 0.43%: about 235 candidates per accepted seed, so the offline seed bank (--bank) is mandatory
 - PASS the gate accepts some seeds (the offline bank can be filled)
 
 

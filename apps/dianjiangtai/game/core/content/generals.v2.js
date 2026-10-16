@@ -360,7 +360,7 @@ module.exports = {
    "portraitId": null,
    "monogram": "云",
    "blurb": "一身是胆，忠勇无双。",
-   "statNote": "信10：终身无二主；智6：以勇略见长而非谋主；增「从公孙瓒」群-QX 出场（原为简化）；约200 归刘备。",
+   "statNote": "信10：终身无二主；智6：以勇略见长而非谋主；早年随公孙瓒，约200 归刘备。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 2
   },
@@ -406,7 +406,7 @@ module.exports = {
    "portraitId": null,
    "monogram": "超",
    "blurb": "锦马超，冲阵无前。",
-   "statNote": "勇10：渭水之战几擒曹操；信4：反复于诸侯之间；QX/CB 关中时期改归群（潼关 211）；214 归刘备。",
+   "statNote": "勇10：渭水之战几擒曹操；信4：反复于诸侯之间；曾为关中诸侯，211 潼关兵败，214 归刘备。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 2
   },
@@ -449,7 +449,7 @@ module.exports = {
    "portraitId": null,
    "monogram": "忠",
    "blurb": "老当益壮，定军斩将。",
-   "statNote": "勇9：定军山斩夏侯渊；智5：以勇名而非谋略；增「从刘表」群-QX；约209 归刘备；定军山 219。",
+   "statNote": "勇9：定军山斩夏侯渊；智5：以勇名而非谋略；早年从刘表，约209 归刘备；219 定军山。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 2
   },
@@ -493,7 +493,7 @@ module.exports = {
    "portraitId": null,
    "monogram": "维",
    "blurb": "文武兼资，继志北伐。",
-   "statNote": "智8：屡出祁山，善用奇兵；信8：诸葛亮遗志之继承者；增天水仕魏（至 228）与归晋时期北伐（至 263）。",
+   "statNote": "智8：屡出祁山，善用奇兵；信8：诸葛亮遗志之继承者；本仕魏天水，228 归蜀，北伐至263。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 2
   },
@@ -1273,7 +1273,7 @@ module.exports = {
    "portraitId": null,
    "monogram": "郃",
    "blurb": "巧变知兵，长于野战。",
-   "statNote": "智7：善于临阵应变；严8：用兵有法度；HJ 改为群（从韩馥讨黄巾），QX 从袁绍至 200，后归曹。",
+   "statNote": "智7：善于临阵应变；严8：用兵有法度；早年从韩馥，后随袁绍，200 官渡后归曹。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 2
   },
@@ -1312,7 +1312,7 @@ module.exports = {
    "portraitId": null,
    "monogram": "惇",
    "blurb": "拔矢啖睛，刚烈忠贞。",
-   "statNote": "信9：自始追随曹操；勇8：拔矢啖睛而战不止；增 HJ（「太祖初起，惇常为裨将」189）；卒于220。",
+   "statNote": "信9：自始追随曹操；勇8：拔矢啖睛而战不止；189 随曹操起兵（「太祖初起，惇常为裨将」）；卒于220。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 2
   },
@@ -1358,7 +1358,7 @@ module.exports = {
    "portraitId": null,
    "monogram": "辽",
    "blurb": "威震逍遥津。",
-   "statNote": "勇9：合肥以八百破十万；严9：夜定军中之乱；增群 HJ/QX（丁原、何进、董卓、吕布，至 198）；合肥 215。",
+   "statNote": "勇9：合肥以八百破十万；严9：夜定军中之乱；早年历事丁原、何进、董卓、吕布，198 归曹；合肥 215。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 2
   },
@@ -1509,7 +1509,7 @@ module.exports = {
    "portraitId": null,
    "monogram": "懿",
    "blurb": "隐忍多谋，善守善断。",
-   "statNote": "智10：擒孟达、拒诸葛；信5：城府极深；增魏 GJ（辽东 238）与晋 GJ（高平陵 249）。",
+   "statNote": "智10：擒孟达、拒诸葛；信5：城府极深；238 平辽东，249 高平陵之变后执掌朝政。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 2
   },
@@ -2031,7 +2031,7 @@ module.exports = {
    "portraitId": null,
    "monogram": "艾",
    "blurb": "偷渡阴平，直取成都。",
-   "statNote": "263 阴平入蜀；卒于264（未仕晋，PO-3）。",
+   "statNote": "263 阴平入蜀；卒于264。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 2
   },
@@ -3332,7 +3332,7 @@ module.exports = {
    "portraitId": null,
    "monogram": "布",
    "blurb": "飞将无双，反复难恃。",
-   "statNote": "勇10：辕门射戟、虎牢独战；信2：三易其主；增 HJ（189 为丁原主簿）；先后从丁原、董卓，皆在群营；卒于198。",
+   "statNote": "勇10：辕门射戟、虎牢独战；信2：三易其主；189 为丁原主簿；先后从丁原、董卓；卒于198。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 2
   },
@@ -3402,7 +3402,7 @@ module.exports = {
    "portraitId": null,
    "monogram": "获",
    "blurb": "南中豪帅，七擒七纵。",
-   "statNote": "勇8：南中夷汉所服；智4：易被诱敌之计。",
+   "statNote": "勇8：南中各族所服；智4：易被诱敌之计。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 2
   },

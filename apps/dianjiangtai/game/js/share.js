@@ -43,16 +43,41 @@ function challengeQuery(id) {
   return 'c=' + id;
 }
 
+/** decodeURIComponent that never throws: a malformed escape (a lone %) keeps the raw text */
+function safeDecode(x) {
+  try {
+    return decodeURIComponent(x);
+  } catch (e) {
+    return x;
+  }
+}
+
+/**
+ * Launch query -> plain object. The query comes from outside the game (a share card, a scanned code), so it never throws:
+ * malformed escapes keep their raw text and anything unexpected yields what was parsed so far. __proto__ keys are skipped.
+ */
 function parseQuery(q) {
   const out = {};
-  if (!q) return out;
-  if (typeof q === 'object') return Object.assign({}, q);
-  String(q)
-    .split('&')
-    .forEach((kv) => {
-      const i = kv.indexOf('=');
-      if (i > 0) out[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
-    });
+  try {
+    if (!q) return out;
+    if (typeof q === 'object') {
+      Object.keys(q).forEach((k) => {
+        if (k !== '__proto__') out[k] = q[k];
+      });
+      return out;
+    }
+    String(q)
+      .split('&')
+      .forEach((kv) => {
+        const i = kv.indexOf('=');
+        if (i > 0) {
+          const key = safeDecode(kv.slice(0, i));
+          if (key !== '__proto__') out[key] = safeDecode(kv.slice(i + 1));
+        }
+      });
+  } catch (e) {
+    /* keep what was parsed */
+  }
   return out;
 }
 
@@ -63,13 +88,13 @@ function parseQuery(q) {
  * `join` = true when joinGroup should run (a ticket is present on an s=r or c= card).
  */
 function parseEnter(options) {
-  const o = options || {};
+  const o = options && typeof options === 'object' ? options : {};
   const q = parseQuery(o.query);
   const hasTicket = !!o.shareTicket;
   const base = { hasShareTicket: hasTicket, shareTicket: o.shareTicket || null, scene: o.scene, chatType: o.chatType, join: false };
   if (q.wxad_fallback_share === '1') return Object.assign(base, { kind: 'fallbackShare' });
   if (q.c !== undefined) {
-    if (!/^[0-9A-Za-z]{8}$/.test(q.c)) return Object.assign(base, { kind: 'malformed' });
+    if (typeof q.c !== 'string' || !/^[0-9A-Za-z]{8}$/.test(q.c)) return Object.assign(base, { kind: 'malformed' });
     return Object.assign(base, { kind: 'challenge', challengeId: q.c, join: hasTicket });
   }
   if (q.s === 'r') return Object.assign(base, { kind: 'result', join: hasTicket });
@@ -164,8 +189,9 @@ function createShare(opts) {
       if (!wx.getGroupEnterInfo) return resolve(fail('error', 'unsupported'));
       wx.getGroupEnterInfo({
         success: (info) => {
-          if (!info || !info.cloudID) return resolve(fail('error', 'nocloudid'));
-          api.joinGroup({ groupData: wx.cloud && wx.cloud.CloudID ? wx.cloud.CloudID(info.cloudID) : info.cloudID }).then((r) => {
+          if (!info || typeof info.cloudID !== 'string' || !info.cloudID) return resolve(fail('error', 'nocloudid'));
+          // the RAW cloudID string only (M1): the server resolves it with cloud.getOpenData, so the openGId can never be client-shaped
+          api.joinGroup({ cloudID: info.cloudID }).then((r) => {
             if (r && r.ok && r.groupRef) {
               analytics.track('group_join', Object.assign({ result: 'ok' }, props));
               resolve({ status: 'ok', groupRef: r.groupRef, errCode: undefined });

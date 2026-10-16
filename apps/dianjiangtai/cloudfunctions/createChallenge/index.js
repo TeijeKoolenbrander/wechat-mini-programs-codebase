@@ -3,24 +3,19 @@
 // calls return the same id (add with a fixed _id; duplicate -> existing).
 const core = require('./common/coreapi');
 const store = require('./common/store');
+const limits = require('./common/limits');
+const secrets = require('./common/secrets');
 const input = require('./common/input');
 const { fail, now, hmacHex, base32From, DAY_MS } = require('./common/util');
 
 const EXPIRY_DAYS = 7;
 const ID_TRIES = 4;
 
-function key() {
-  const k = process.env.GROUP_REF_PEPPER; // single secret, domain-separated below
-  if (!k) fail('SERVER_CONFIG', 'GROUP_REF_PEPPER not configured');
-  return k;
-}
-
 exports.main = store.handler(async (event, { openid }) => {
   const runId = input.clientRunId(event.runId);
-  await store.rateLimit(openid, 'challenge', 1, 20);
   const run = await store.getDoc('runs', `${openid}_${runId}`);
   if (!run) fail('RUN_NOT_FOUND', 'only your own validated run can be challenged');
-  const k = key();
+  const k = secrets.pepper(); // single secret, domain-separated below; SERVER_CONFIG when missing or < 32 chars
   const nowMs = now();
   // If the run was on a daily seed (daily, or a challenge on a daily seed) the challenge is 'daily' mode.
   const daily = !!run.dateKey;
@@ -41,4 +36,4 @@ exports.main = store.handler(async (event, { openid }) => {
     // hash collision with a different run: try the next derivation
   }
   fail('INTERNAL', 'could not allocate challenge id');
-});
+}, { rate: limits.rateOf('createChallenge') });

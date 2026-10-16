@@ -14,7 +14,7 @@ const CF = path.join(__dirname, '..');
 let h;
 beforeEach(() => {
   h = createHarness({ now: T0 });
-  h.setEnv('GROUP_REF_PEPPER', 'test-pepper-not-a-secret');
+  h.setEnv('GROUP_REF_PEPPER', 'test-pepper-not-a-secret-0123456789abcdef');
 });
 afterEach(() => h.teardown());
 
@@ -170,6 +170,8 @@ test('no AppSecret, session_key or access_token anywhere in app source (AC: no A
       let src = fs.readFileSync(p, 'utf8');
       // the public AppID is required in project.config.json ("appid" field only)
       if (e.name === 'project.config.json') src = src.replace(/("appid"\s*:\s*)"wx[0-9a-f]{16}"/g, '$1"<public-appid>"');
+      // the release switch and its doc name the public AppIDs (test and release): an AppID is not a secret
+      if (e.name === 'RELEASE.md' || e.name === 'release-config.js') src = src.replace(/wx[0-9a-f]{16}/g, '<public-appid>');
       if (/app_?secret\s*[:=]\s*['"][0-9a-f]{16,}|secret\s*[:=]\s*['"][0-9a-f]{32}['"]|access_token\s*[:=]\s*['"]/i.test(src)) bad.push('secret-like: ' + p);
       if (/\bwx[0-9a-f]{16}\b/.test(src) && !/test|touristappid/i.test(p)) bad.push('appid literal: ' + p);
     }

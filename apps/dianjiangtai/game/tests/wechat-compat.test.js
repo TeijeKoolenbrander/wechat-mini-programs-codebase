@@ -23,6 +23,7 @@ function shippedFiles() {
   })(GAME);
   return out.filter((f) => {
     const rel = path.relative(GAME, f).split(path.sep);
+    if (rel.join('/') === 'project.private.config.json') return false; // DevTools-local, gitignored, never uploaded
     return ['game.js', 'core', 'js', 'opendata'].includes(rel[0]) && rel.length >= 1 && !/^(tests|tools|node_modules)$/.test(rel[0]);
   });
 }

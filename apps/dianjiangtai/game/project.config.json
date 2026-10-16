@@ -1,6 +1,7 @@
 {
   "appid": "wxcd03c1b62d7eb0e0",
   "compileType": "game",
+  "cloudfunctionRoot": "cloudfunctions-deploy/",
   "projectname": "dianjiangtai-game",
   "libVersion": "latest",
   "setting": {
@@ -53,6 +54,14 @@
       },
       {
         "value": "js/render/CONTRACT.md",
+        "type": "file"
+      },
+      {
+        "value": "cloudfunctions-deploy",
+        "type": "folder"
+      },
+      {
+        "value": "RELEASE.md",
         "type": "file"
       }
     ],

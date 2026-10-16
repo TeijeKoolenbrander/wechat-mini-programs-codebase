@@ -207,7 +207,7 @@ test('no portrait image files in the app (AC 58)', () => {
   const bad = [];
   (function walk(d) {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      if (e.name === 'node_modules') continue;
+      if (e.name === 'node_modules' || e.name === 'cloudfunctions-deploy') continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) walk(p);
       else if (/\.(png|jpe?g|webp|gif)$/i.test(e.name) && /portrait|(^|[\\/_])p_/i.test(e.name)) bad.push(p);

@@ -1,7 +1,10 @@
 'use strict';
 // Database, identity and handler helpers shared by every function.
 const cloud = require('wx-server-sdk');
-const { AppError, fail, now } = require('./util');
+const { AppError, fail, now, isPlainObject } = require('./util');
+
+/** hard cap of any paged read (queryAll): a runaway collection cannot exhaust memory or the function timeout */
+const MAX_QUERY_ROWS = 20000;
 
 let inited = false;
 function init() {
@@ -62,8 +65,8 @@ async function addIfAbsent(col, data) {
   }
 }
 
-/** Page through a query (cloud functions return <= 100 by default, <= 1000 max per call). */
-async function queryAll(col, where, { field, max = 100000 } = {}) {
+/** Page through a query (cloud functions return <= 100 by default, <= 1000 max per call). Capped at MAX_QUERY_ROWS. */
+async function queryAll(col, where, { field, max = MAX_QUERY_ROWS } = {}) {
   const PAGE = 1000;
   const out = [];
   for (let skip = 0; out.length < max; skip += PAGE) {
@@ -87,27 +90,60 @@ async function writeEvent(openid, name, props, sessionId) {
   }
 }
 
+const sampled = new Map(); // key -> last write ms (per function instance)
+/**
+ * Server-side analytics event for a per-CALL code path (board_list ...): at most one per `key` per `everyMs` per
+ * instance, so a hot function cannot turn every request into a database write. Never throws.
+ */
+async function writeEventSampled(key, everyMs, name, props) {
+  const t = now();
+  const last = sampled.get(key);
+  if (last !== undefined && t - last < everyMs) return false;
+  if (sampled.size > 500) sampled.clear();
+  sampled.set(key, t);
+  await writeEvent('server', name, props);
+  return true;
+}
+
+/** a transaction that lost a write conflict (the real database aborts the loser; callers under a burst see this) */
+function isConflict(e) {
+  return /conflict|aborted|retry/i.test(errText(e));
+}
+
 /**
  * Per-openid fixed-window (1 minute) limiter. Transactional get+set on one deterministic doc.
- * Throws RATE_LIMITED. `cost` = units consumed by this call.
+ * Throws RATE_LIMITED. `cost` = units consumed by this call. A transaction that keeps conflicting means a burst on this
+ * very counter, which is also a rate-limit verdict (fail closed), never an INTERNAL error.
  */
 async function rateLimit(openid, bucket, cost, limitPerMin) {
   const minute = Math.floor(now() / 60000);
   const id = `${bucket}_${openid}_${minute}`;
-  await db().runTransaction(async (t) => {
-    const cur = await getDocT(t, 'rate_limits', id);
-    const count = cur ? cur.count : 0;
-    if (count + cost > limitPerMin) throw new AppError('RATE_LIMITED', 'rate limited');
-    await t.collection('rate_limits').doc(id).set({ data: { bucket, openid, count: count + cost, expireAt: now() + 3600e3 } });
-  });
+  try {
+    await db().runTransaction(async (t) => {
+      const cur = await getDocT(t, 'rate_limits', id);
+      const count = cur ? cur.count : 0;
+      if (count + cost > limitPerMin) throw new AppError('RATE_LIMITED', 'rate limited');
+      await t.collection('rate_limits').doc(id).set({ data: { bucket, openid, count: count + cost, expireAt: now() + 3600e3 } });
+    });
+  } catch (e) {
+    if (!(e instanceof AppError) && isConflict(e)) throw new AppError('RATE_LIMITED', 'rate limited (contended)');
+    throw e;
+  }
+}
+
+/** a timer trigger delivers {Type:'Timer', TriggerName, Time, Message}; a client call carries an OPENID and is refused first */
+function isTimerEvent(event) {
+  return isPlainObject(event) && event.Type === 'Timer' && typeof event.TriggerName === 'string' && event.TriggerName.length > 0 && event.TriggerName.length <= 128;
 }
 
 /**
  * Wrap a handler: identity comes ONLY from the trusted context OPENID.
- * auth:false for timer functions; serverOnly:true additionally rejects any call that carries an
- * OPENID (i.e. a client-originated call), so timers cannot be triggered from the mini game.
+ *  auth:false      timer functions (no OPENID expected)
+ *  serverOnly:true the call must have NO OPENID (a client call carries one) AND carry the timer marker
+ *                  (event.Type === 'Timer' with a TriggerName). A console test invocation must send it explicitly (README).
+ *  rate:{bucket, limit, cost?}  per-openid fixed-window limit (common/limits.js), checked FIRST, before any read in the function
  */
-function handler(fn, { auth = true, serverOnly = false } = {}) {
+function handler(fn, { auth = true, serverOnly = false, rate = null } = {}) {
   return async (event) => {
     const startedAt = now();
     try {
@@ -115,7 +151,11 @@ function handler(fn, { auth = true, serverOnly = false } = {}) {
       const wx = cloud.getWXContext() || {};
       const openid = wx.OPENID || null;
       if (auth && !openid) fail('UNAUTHENTICATED', 'no openid in context');
-      if (serverOnly && openid) fail('FORBIDDEN', 'server-only function');
+      if (serverOnly && (openid || !isTimerEvent(event))) fail('FORBIDDEN', 'server-only function');
+      if (rate && openid) {
+        const cost = typeof rate.cost === 'function' ? rate.cost(event) : rate.cost || 1;
+        await rateLimit(openid, rate.bucket, cost, rate.limit);
+      }
       return await fn(event && typeof event === 'object' ? event : {}, { openid, startedAt });
     } catch (e) {
       if (e instanceof AppError || (e && e.code && e.extra !== undefined)) {
@@ -129,5 +169,5 @@ function handler(fn, { auth = true, serverOnly = false } = {}) {
 
 module.exports = {
   cloud, db, _, isDup, isNotFound, getDoc, getDocT, addIfAbsent, queryAll,
-  writeEvent, rateLimit, handler, errText,
+  writeEvent, writeEventSampled, rateLimit, handler, isTimerEvent, errText, MAX_QUERY_ROWS,
 };

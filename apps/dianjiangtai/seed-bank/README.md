@@ -4,7 +4,7 @@ Output folder for the offline daily seed bank (spec 5.2). The files here are **s
 
 Simplest and safest: generate straight into a folder outside the repo (for example `--bank-file $TMPDIR/bank-cv2-60d.json`) and pass that path to `prepare-bank.js`. Then no bank file ever sits under `apps/dianjiangtai/`, the `qa-trust` AC 54 test stays green, and nothing can be committed by accident. The commands below write into this folder instead, which also works because the ignore file here covers it (delete the file after the import).
 
-Generate (contentVersion 2, configVersion 2, strict gate: optimal = 12-0, greedy window, random window):
+Generate (contentVersion 2, configVersion 3, strict gate: optimal = 12-0, greedy window, random window):
 
 ```
 node apps/dianjiangtai/game/tools/simstats.js --seeds 1000 --optseeds 100 --gateseeds 100 --timeseeds 10 \

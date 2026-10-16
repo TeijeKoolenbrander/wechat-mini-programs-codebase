@@ -16,7 +16,7 @@ const { createOdc } = require('./odc');
 const { createAudio } = require('./audio');
 const { createController } = require('./controller');
 const { loadRenderers } = require('./renderers');
-const build = require('./build-config');
+const buildConfig = require('./build-config');
 const { getConfig, LATEST_CONFIG_VERSION } = require('../core/config');
 const { getContent, LATEST_CONTENT_VERSION } = require('../core/content');
 
@@ -39,6 +39,8 @@ function menuRect() {
 
 function boot() {
   const R = loadRenderers();
+  // test seam: the headless harness boots an explicit build (dev or cloud) through its fake wx, whatever mode the config file is in
+  const build = Object.assign({}, buildConfig, (wx && wx.__dianjiangtaiTest && wx.__dianjiangtaiTest.build) || {});
   const info = windowInfo();
   const dpr = info.pixelRatio || 1;
 
@@ -66,9 +68,9 @@ function boot() {
     dirty = true;
   };
 
-  const api = createApi({ wx, mode: build.cloudEnv ? 'cloud' : 'mock', env: build.cloudEnv });
+  const api = createApi({ wx, mode: build.cloudEnv ? 'cloud' : 'mock', env: build.cloudEnv, fnPrefix: build.fnPrefix });
   const analytics = createAnalytics({ wx, api, store, config, contentVersion: content.contentVersion, appVersion: build.appVersion, platform: info.platform, setInterval, clearInterval });
-  const ads = createAds({ wx, config, store, analytics, adUnits: build.adUnits, stub: { enabled: build.stubAds }, onChange: invalidate });
+  const ads = createAds({ wx, config, store, analytics, adUnits: build.adUnits, stub: { enabled: !!build.stubAds && !build.cloudEnv }, onChange: invalidate });
   const share = createShare({ wx, api, analytics });
   const privacy = createPrivacy({ wx, store, analytics });
   const subscribe = createSubscribe({ wx, api, store, analytics });
@@ -79,6 +81,7 @@ function boot() {
   };
   const odc = createOdc(wx);
   const audio = createAudio(wx, store.state.muted);
+  audio.preload();
 
   if (R.shareCard) {
     // always the standard look, whatever the display mode: one consistent card for a group (spec 8.10)

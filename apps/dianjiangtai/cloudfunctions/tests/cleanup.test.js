@@ -34,7 +34,7 @@ const ids = (c) => h.db.all(c).filter((d) => d.name !== 'anomaly_daily').map((d)
 
 test('180-day retention deletes old rows, keeps recent rows and daily_stats (AC 57)', async () => {
   seedData();
-  const r = await h.call('cleanup', { Type: 'Timer' }, {});
+  const r = await h.call('cleanup', { Type: 'Timer', TriggerName: 'test' }, {});
   assert.equal(r.ok, true);
   for (const c of ['runs', 'daily_starts', 'daily_results', 'challenges', 'events']) {
     assert.deepEqual(ids(c), ['new_' + { runs: 'run', daily_starts: 'start', daily_results: 'res', challenges: 'ch', events: 'ev' }[c]], c);

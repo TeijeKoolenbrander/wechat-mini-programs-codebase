@@ -66,6 +66,14 @@ class FakeDb {
     this.command = command;
     this._lock = Promise.resolve();
     this.stats = { reads: 0 };
+    // test hook: (collection, op) => Error|null|undefined, called before every operation; a returned Error is thrown (failure injection)
+    this.failOn = null;
+  }
+  _touch(name, op) {
+    if (this.failOn) {
+      const e = this.failOn(name, op);
+      if (e) throw e;
+    }
   }
   _col(name) { return (this.cols[name] = this.cols[name] || new Map()); }
   /** test helpers */
@@ -93,6 +101,7 @@ class FakeDb {
 class Coll {
   constructor(db, name, map, inTxn) { this.db = db; this.name = name; this.map = map; this.inTxn = inTxn; }
   async add({ data }) {
+    this.db._touch(this.name, 'add');
     if (Array.isArray(data)) throw new Error('fake-db: batch add unsupported (mirrors server SDK usage)');
     const id = data._id || `auto${this.map.size + 1}_${Math.random().toString(36).slice(2, 8)}`;
     if (this.map.has(id)) throw dupError();
@@ -103,22 +112,24 @@ class Coll {
     const self = this;
     return {
       async get() {
+        self.db._touch(self.name, 'get');
         const d = self.map.get(id);
         if (!d) throw notFound(id);
         return { data: clone(d) };
       },
-      async set({ data }) { self.map.set(id, clone({ ...data, _id: id })); return { stats: { updated: 1 } }; },
+      async set({ data }) { self.db._touch(self.name, 'set'); self.map.set(id, clone({ ...data, _id: id })); return { stats: { updated: 1 } }; },
       async update({ data }) {
+        self.db._touch(self.name, 'update');
         const d = self.map.get(id);
         if (!d) return { stats: { updated: 0 } };
         applyUpdate(d, data);
         return { stats: { updated: 1 } };
       },
-      async remove() { return { stats: { removed: self.map.delete(id) ? 1 : 0 } }; },
+      async remove() { self.db._touch(self.name, 'remove'); return { stats: { removed: self.map.delete(id) ? 1 : 0 } }; },
     };
   }
   where(w) { return new Query(this, w); }
-  async count() { return new Query(this, {}).count(); }
+  async count() { this.db._touch(this.name, 'count'); return new Query(this, {}).count(); }
 }
 
 class Query {
@@ -136,6 +147,7 @@ class Query {
     return rows;
   }
   async get() {
+    this.coll.db._touch(this.coll.name, 'query');
     let rows = this._rows().slice(this._skip, this._skip + this._limit).map(clone);
     if (this._field) {
       rows = rows.map((r) => {
@@ -147,7 +159,7 @@ class Query {
     this.coll.db.stats.reads += rows.length;
     return { data: rows };
   }
-  async count() { return { total: this._rows().length }; }
+  async count() { this.coll.db._touch(this.coll.name, 'count'); return { total: this._rows().length }; }
   async remove() {
     const rows = this._rows().slice(0, 1000);
     for (const r of rows) this.coll.map.delete(r._id);

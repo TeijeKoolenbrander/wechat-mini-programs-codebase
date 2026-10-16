@@ -2,6 +2,7 @@
 // submitRun: full server-side validation (spec §14.3). The server simulation is authoritative.
 const core = require('./common/coreapi');
 const store = require('./common/store');
+const limits = require('./common/limits');
 const input = require('./common/input');
 const rules = require('./common/rules');
 const progress = require('./common/progress');
@@ -9,8 +10,6 @@ const anomaly = require('./common/anomaly');
 const streak = require('./common/streak');
 const notify = require('./common/notify');
 const { now, fail } = require('./common/util');
-
-const SUBMITS_PER_MIN = 30;
 
 /** Build the client response from a stored run. Rarity is read live for ranked runs. */
 async function respond(run) {
@@ -45,6 +44,23 @@ async function alreadyPlayed(openid, prior, clientRunId) {
   return fail('ALREADY_PLAYED', 'daily already played', priorRun ? { result: await respond(priorRun) } : {});
 }
 
+/**
+ * Inside the run's transaction: count this caller's FIRST answer to the challenge. The marker doc (deterministic _id
+ * <challengeId>_<openid>) makes it once per caller; answerCount and bestAnswer are updated from the document as read
+ * INSIDE the transaction. Returns true if this call counted.
+ */
+async function recordAnswer(t, challengeId, openid, record) {
+  const markerId = `${challengeId}_${openid}`;
+  if (await store.getDocT(t, 'challenge_answers', markerId)) return false;
+  const ch = await store.getDocT(t, 'challenges', challengeId);
+  if (!ch) return false; // purged meanwhile: nothing to count
+  const upd = { answerCount: store._().inc(1) };
+  if (!ch.bestAnswer || record.w > ch.bestAnswer.w) upd.bestAnswer = record;
+  await t.collection('challenge_answers').doc(markerId).set({ data: { challengeId, openid, createdAt: now() } });
+  await t.collection('challenges').doc(challengeId).update({ data: upd });
+  return true;
+}
+
 async function ensureStats(dateKey) {
   await store.addIfAbsent('daily_stats', { _id: dateKey, hist: new Array(13).fill(0), total: 0 });
 }
@@ -61,7 +77,6 @@ exports.main = store.handler(async (event, { openid }) => {
   // ---- 2. idempotency: same clientRunId returns the stored result, never double counts ----
   const existing = await store.getDoc('runs', runDocId);
   if (existing) return respond(existing);
-  await store.rateLimit(openid, 'submit', 1, SUBMITS_PER_MIN);
 
   // ---- 3. resolve seed / versions / ranking eligibility per mode ----
   let seed;
@@ -146,9 +161,6 @@ exports.main = store.handler(async (event, { openid }) => {
     await anomaly.flag(openid, clientRunId, dateKey, 'mismatch', { client: clientRecord, server: record });
   }
 
-  let priorAnswer = null;
-  if (challengeId) priorAnswer = await rules.priorAnswer(openid, challengeId);
-
   const start = ranked ? await store.getDoc('daily_starts', `${dateKey}_${openid}`) : null;
   const finalTokens = core.finalTokens(rounds, actions, rp);
   const run = {
@@ -161,23 +173,35 @@ exports.main = store.handler(async (event, { openid }) => {
   };
 
   // ---- 6. persist ----
+  // The run, the ranked result / streak / stats AND the challenge answer bookkeeping commit in ONE transaction, so a retry or a
+  // second device racing the same call can neither double count an answer nor lower the challenge's best answer.
+  let firstAnswer = false;
   try {
-    if (ranked) {
-      await ensureStats(dateKey);
+    if (ranked || challenge) {
+      let sctx = null;
+      if (ranked) {
+        await ensureStats(dateKey);
+        sctx = { prev: (await streak.prevPublished(dateKey))[0] || null, next: await streak.nextPublished(dateKey) };
+      }
       const _ = store._();
-      const sctx = { prev: (await streak.prevPublished(dateKey))[0] || null, next: await streak.nextPublished(dateKey) };
       await store.db().runTransaction(async (t) => {
-        const st = await streak.applyRanked(t, openid, dateKey, sctx, nowMs);
-        run.streak = { current: st.current, best: st.best, thisResult: st.streak };
+        firstAnswer = false; // a retried transaction starts over
+        if (ranked) {
+          const st = await streak.applyRanked(t, openid, dateKey, sctx, nowMs);
+          run.streak = { current: st.current, best: st.best, thisResult: st.streak };
+        }
         await t.collection('runs').add({ data: run });
-        await t.collection('daily_results').add({
-          data: {
-            _id: `${dateKey}_${openid}`, dateKey, openid, runId: clientRunId, w: record.w, l: record.l,
-            submittedAt: nowMs, lineupIdx: run.lineupIdx, lineupFac: core.lineupFactions(lineup, actions, finalTokens),
-            streak: st.streak, contentVersion,
-          },
-        });
-        await t.collection('daily_stats').doc(dateKey).update({ data: { total: _.inc(1), [`hist.${record.w}`]: _.inc(1) } });
+        if (ranked) {
+          await t.collection('daily_results').add({
+            data: {
+              _id: `${dateKey}_${openid}`, dateKey, openid, runId: clientRunId, w: record.w, l: record.l,
+              submittedAt: nowMs, lineupIdx: run.lineupIdx, lineupFac: core.lineupFactions(lineup, actions, finalTokens),
+              streak: run.streak.thisResult, contentVersion,
+            },
+          });
+          await t.collection('daily_stats').doc(dateKey).update({ data: { total: _.inc(1), [`hist.${record.w}`]: _.inc(1) } });
+        }
+        if (challenge) firstAnswer = await recordAnswer(t, challengeId, openid, record);
       });
     } else {
       await store.db().collection('runs').add({ data: run });
@@ -192,22 +216,11 @@ exports.main = store.handler(async (event, { openid }) => {
     throw e;
   }
 
-  // ---- 7. challenge answer bookkeeping (first answer by this caller only; best effort) ----
-  if (challenge && !priorAnswer) {
-    try {
-      const _ = store._();
-      const upd = { answerCount: _.inc(1) };
-      if (!challenge.bestAnswer || record.w > challenge.bestAnswer.w) upd.bestAnswer = record;
-      await store.db().collection('challenges').doc(challengeId).update({ data: upd });
-    } catch (e) {
-      console.warn('challenge bookkeeping failed', store.errText(e));
-    }
-  }
   if (ranked && start && nowMs - start.startedAt < core.anomalyMinMs()) {
     await anomaly.flag(openid, clientRunId, dateKey, 'fast', { ms: nowMs - start.startedAt });
   }
   const response = await respond(run);
   // ---- 8. (v1) opt-in answer notice: best effort, <= 2 s, never changes the response ----
-  if (challenge && !priorAnswer) await notify.sendOnce(challenge, record);
+  if (challenge && firstAnswer) await notify.sendOnce(challenge, record);
   return response;
-});
+}, { rate: limits.rateOf('submitRun') });

@@ -28,6 +28,14 @@ const adapter = require('./core-adapter');
 
 const ME = 'mock-openid-me';
 const HISTORY_MAX = 30;
+const CLOUD_ID_RE = /^[A-Za-z0-9_-]{8,512}$/;
+
+// Per-openid fixed-window (1 minute) limits, the same numbers as cloudfunctions/common/limits.js (a cloudfunctions test checks they
+// agree). Reads about 60/min, writes about 20/min, getBoard 30, track 300 EVENTS/min.
+const RATE_LIMITS = {
+  getDaily: 60, getHistory: 60, getChallenge: 60, getReplay: 60, getRound: 60, getBoard: 30, startRun: 20, submitRun: 20,
+  createChallenge: 20, subscribeChallenge: 20, joinGroup: 20, track: 300,
+};
 
 function err(code, msg) {
   return { ok: false, code, message: msg || code };
@@ -54,6 +62,7 @@ function createMockServer(opts) {
     anomalies: [],
     bests: {},
     unpublished: {},
+    rateWin: {}, // <function>_<minute> -> calls used (the mock has one player)
   };
   const srv = { offline: false, db, calls: [], appConfig: opts.appConfig || null };
 
@@ -351,12 +360,20 @@ function createMockServer(opts) {
       return { ok: true, granted: true };
     },
 
+    // joinGroup takes ONLY the raw cloudID string (the real function resolves it with cloud.getOpenData and never trusts a
+    // client-shaped object; event.groupData is ignored). srv.openData is the mock's platform: cloudID -> {opengid, chat_type}
+    // or {errCode} (expired / invalid). A cloudID nobody registered resolves to a group chat whose id is the cloudID itself, so the
+    // game runs in the dev tools without a platform. srv.resolveOpenData is the hook tests replace to script the platform.
     joinGroup(d) {
-      const g = d && d.groupData;
-      const data = g && g.mockData ? g.mockData : g;
-      if (!data || !data.opengid) return { ok: false, code: data && data.code ? data.code : 40097 };
-      if (data.chat_type !== undefined && data.chat_type !== 3 && data.chat_type !== 4) return { ok: false, code: 'NOT_GROUP' };
-      const ref = hash32('pepper:' + data.opengid).toString(16).padStart(8, '0') + hash32(data.opengid + ':p').toString(16).padStart(8, '0');
+      const cid = d && d.cloudID;
+      if (typeof cid !== 'string' || !CLOUD_ID_RE.test(cid)) return err('BAD_CLOUDID');
+      const entry = srv.resolveOpenData(cid);
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry) || entry.errCode) return err('BAD_CLOUDID');
+      const ct = entry.chat_type === null ? undefined : entry.chat_type;
+      const chatType = ct === undefined ? undefined : typeof ct === 'number' ? ct : typeof ct === 'string' && /^\d+$/.test(ct) ? Number(ct) : NaN;
+      if (typeof entry.opengid !== 'string' || entry.opengid.length < 1 || entry.opengid.length > 128) return err('NOT_GROUP');
+      if (chatType !== undefined && chatType !== 3 && chatType !== 4) return err('NOT_GROUP');
+      const ref = hash32('pepper:' + entry.opengid).toString(16).padStart(8, '0') + hash32(entry.opengid + ':p').toString(16).padStart(8, '0');
       db.groups[ref] = db.groups[ref] || {};
       db.members[ref + '_' + ME] = true;
       return { ok: true, groupRef: ref };
@@ -463,11 +480,24 @@ function createMockServer(opts) {
     },
   };
 
+  srv.openData = {};
+  srv.resolveOpenData = (cid) => (Object.prototype.hasOwnProperty.call(srv.openData, cid) ? srv.openData[cid] : { opengid: cid, chat_type: 3 });
+  /** set srv.rateLimits = false to switch the per-minute limiter off in a test */
+  srv.rateLimits = true;
+
   /** Call a function by name. Never throws. */
   srv.call = function (name, data) {
     srv.calls.push({ name, data });
     if (srv.offline) return err('NETWORK', 'offline');
     if (!fns[name]) return err('NO_SUCH_FUNCTION');
+    // checked FIRST, before the function does any work (as store.handler does on the server)
+    if (srv.rateLimits && RATE_LIMITS[name]) {
+      const cost = name === 'track' ? Math.max(1, Math.min(data && Array.isArray(data.events) ? data.events.length : 1, 50)) : 1;
+      const key = name + '_' + Math.floor(now() / 60000);
+      const used = db.rateWin[key] || 0;
+      if (used + cost > RATE_LIMITS[name]) return err('RATE_LIMITED', 'rate limited');
+      db.rateWin[key] = used + cost;
+    }
     try {
       return fns[name](data || {});
     } catch (e) {
@@ -478,4 +508,4 @@ function createMockServer(opts) {
   return srv;
 }
 
-module.exports = { createMockServer };
+module.exports = { createMockServer, RATE_LIMITS };
