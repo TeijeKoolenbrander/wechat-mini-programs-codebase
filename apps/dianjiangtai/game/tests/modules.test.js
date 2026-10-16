@@ -38,6 +38,18 @@ function fakeRewarded(wxLog) {
   };
 }
 
+test('api: every call resolves to fnPrefix + name through one table (explicit prefix wins over build-config)', async () => {
+  const names = [];
+  const wx = { cloud: { init() {}, callFunction: (o) => { names.push(o.name); o.success({ result: { ok: true } }); } } };
+  const api = createApi({ wx, mode: 'cloud', env: 'x', fnPrefix: 'dianjiangtai_' });
+  assert.strictEqual(api.fnPrefix, 'dianjiangtai_');
+  for (const n of api.NAMES) {
+    assert.strictEqual(api.FN[n], 'dianjiangtai_' + n);
+    await api[n]({});
+  }
+  assert.deepStrictEqual(names, api.NAMES.map((n) => 'dianjiangtai_' + n));
+});
+
 test('api cloud mode: resolves ok results, never rejects, maps failures and timeouts', async () => {
   const calls = [];
   const wx = {
@@ -53,7 +65,7 @@ test('api cloud mode: resolves ok results, never rejects, maps failures and time
     },
   };
   let timerCb = null;
-  const api = createApi({ wx, mode: 'cloud', env: 'x', setTimeout: (f) => ((timerCb = f), 1), clearTimeout() {} });
+  const api = createApi({ wx, mode: 'cloud', env: 'x', fnPrefix: '', setTimeout: (f) => ((timerCb = f), 1), clearTimeout() {} });
   assert.deepStrictEqual(await api.getDaily({}), { ok: true, dateKey: '20261120' });
   assert.strictEqual((await api.getBoard({})).code, 'NETWORK');
   assert.strictEqual((await api.track({ events: [] })).code, 'BAD_RESPONSE');

@@ -10,7 +10,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function createLoader(root) {
+function createLoader(root, opts) {
+  // opts.hide: game-relative paths that do not exist in this package (to simulate files stripped by packOptions.ignore)
+  const hidden = new Set(((opts && opts.hide) || []).map((p) => path.join(root, p)));
   const cache = new Map();
 
   function resolve(from, request) {
@@ -19,7 +21,7 @@ function createLoader(root) {
     }
     const base = request.startsWith('/') ? path.join(root, request) : path.resolve(path.dirname(from), request);
     const file = base.endsWith('.js') ? base : base + '.js';
-    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+    if (hidden.has(file) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
       throw new Error(`module '${path.relative(root, file)}' is not defined, require args is '${request}'`);
     }
     return file;
@@ -35,7 +37,7 @@ function createLoader(root) {
     return mod.exports;
   }
 
-  return { require: (fromFile, request) => load(resolve(fromFile, request)), load, resolve };
+  return { require: (fromFile, request) => load(resolve(fromFile, request)), load, resolve, loaded: () => Array.from(cache.keys()) };
 }
 
 module.exports = { createLoader };

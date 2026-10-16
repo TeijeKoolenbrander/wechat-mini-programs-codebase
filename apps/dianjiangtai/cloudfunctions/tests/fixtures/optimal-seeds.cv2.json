@@ -54,7 +54,7 @@
    },
    {
     "slot": "shoujiang",
-    "generalId": "g_huangquan",
+    "generalId": "g_manchong",
     "faction": "wei"
    }
   ]
@@ -94,17 +94,17 @@
   "lineup": [
    {
     "slot": "zhugong",
-    "generalId": "g_lukang",
-    "faction": "wu"
-   },
-   {
-    "slot": "junshi",
     "generalId": "g_zhugeliang",
     "faction": "shu"
    },
    {
+    "slot": "junshi",
+    "generalId": "g_zhouyu",
+    "faction": "wu"
+   },
+   {
     "slot": "xianfeng",
-    "generalId": "g_guanping",
+    "generalId": "g_zhaoyun",
     "faction": "shu"
    },
    {
@@ -114,8 +114,38 @@
    },
    {
     "slot": "shoujiang",
-    "generalId": "g_zhouyu",
+    "generalId": "g_lukang",
     "faction": "wu"
+   }
+  ]
+ },
+ {
+  "seed": 1548,
+  "lineup": [
+   {
+    "slot": "zhugong",
+    "generalId": "g_lukang",
+    "faction": "wu"
+   },
+   {
+    "slot": "junshi",
+    "generalId": "g_luxun",
+    "faction": "wu"
+   },
+   {
+    "slot": "xianfeng",
+    "generalId": "g_guanyu",
+    "faction": "shu"
+   },
+   {
+    "slot": "mengjiang",
+    "generalId": "g_zhangfei",
+    "faction": "shu"
+   },
+   {
+    "slot": "shoujiang",
+    "generalId": "g_huangfusong",
+    "faction": "qun"
    }
   ]
  },
@@ -144,7 +174,7 @@
    },
    {
     "slot": "shoujiang",
-    "generalId": "g_zhangni",
+    "generalId": "g_luoxian",
     "faction": "shu"
    }
   ]
@@ -180,62 +210,32 @@
   ]
  },
  {
-  "seed": 1608,
+  "seed": 1816,
   "lineup": [
    {
     "slot": "zhugong",
-    "generalId": "g_manchong",
-    "faction": "wei"
-   },
-   {
-    "slot": "junshi",
-    "generalId": "g_xunyou",
-    "faction": "wei"
-   },
-   {
-    "slot": "xianfeng",
-    "generalId": "g_sunce",
-    "faction": "wu"
-   },
-   {
-    "slot": "mengjiang",
-    "generalId": "g_wenyang",
-    "faction": "qun"
-   },
-   {
-    "slot": "shoujiang",
-    "generalId": "g_xuhuang",
-    "faction": "qun"
-   }
-  ]
- },
- {
-  "seed": 1773,
-  "lineup": [
-   {
-    "slot": "zhugong",
-    "generalId": "g_zhaoyun",
-    "faction": "qun"
-   },
-   {
-    "slot": "junshi",
     "generalId": "g_zhugeliang",
     "faction": "shu"
    },
    {
+    "slot": "junshi",
+    "generalId": "g_pangtong",
+    "faction": "shu"
+   },
+   {
     "slot": "xianfeng",
-    "generalId": "g_zhangliao",
-    "faction": "qun"
+    "generalId": "g_xuchu",
+    "faction": "wei"
    },
    {
     "slot": "mengjiang",
-    "generalId": "g_ganning",
-    "faction": "wu"
+    "generalId": "g_dianwei",
+    "faction": "wei"
    },
    {
     "slot": "shoujiang",
-    "generalId": "g_sunquan",
-    "faction": "wu"
+    "generalId": "g_caoren",
+    "faction": "wei"
    }
   ]
  }

@@ -56,11 +56,11 @@ test('AC 52: share rate, card-open-to-play, runs-per-session and D1 are computab
   // user A: session s1: card_open -> run_start -> 2 runs complete, one shared
   await send('A', 'session_start', { sessionId: 's1', fromCard: 'result' });
   await send('A', 'card_open', { sessionId: 's1', cardKind: 'result' });
-  await send('A', 'run_start', { sessionId: 's1', runId: 'r1', mode: 'free' });
-  await send('A', 'run_complete', { sessionId: 's1', runId: 'r1', mode: 'free', wins: 7 });
-  await send('A', 'share_tap', { sessionId: 's1', runId: 'r1', kind: 'result' });
-  await send('A', 'run_start', { sessionId: 's1', runId: 'r2', mode: 'free' });
-  await send('A', 'run_complete', { sessionId: 's1', runId: 'r2', mode: 'free', wins: 5 });
+  await send('A', 'run_start', { sessionId: 's1', runId: 'run-0001', mode: 'free' });
+  await send('A', 'run_complete', { sessionId: 's1', runId: 'run-0001', mode: 'free', wins: 7 });
+  await send('A', 'share_tap', { sessionId: 's1', runId: 'run-0001', kind: 'result' });
+  await send('A', 'run_start', { sessionId: 's1', runId: 'run-0002', mode: 'free' });
+  await send('A', 'run_complete', { sessionId: 's1', runId: 'run-0002', mode: 'free', wins: 5 });
   // group_invite / menu share taps must NOT count toward the share rate
   await send('A', 'share_tap', { sessionId: 's1', kind: 'group_invite' });
   // user B: card_open but never plays; one session
@@ -68,8 +68,8 @@ test('AC 52: share rate, card-open-to-play, runs-per-session and D1 are computab
   await send('B', 'card_open', { sessionId: 's2', cardKind: 'challenge' });
   // user C: plays 1 run in a session, no share
   await send('C', 'session_start', { sessionId: 's3', fromCard: 'none' });
-  await send('C', 'run_start', { sessionId: 's3', runId: 'r3', mode: 'free' });
-  await send('C', 'run_complete', { sessionId: 's3', runId: 'r3', mode: 'free', wins: 6 });
+  await send('C', 'run_start', { sessionId: 's3', runId: 'run-0003', mode: 'free' });
+  await send('C', 'run_complete', { sessionId: 's3', runId: 'run-0003', mode: 'free', wins: 6 });
   // next Beijing day: A and C return, B does not
   h.setNow(Date.UTC(2026, 10, 4, 4, 0, 0));
   await send('A', 'session_start', { sessionId: 's4', fromCard: 'none' });
@@ -84,7 +84,7 @@ test('AC 52: share rate, card-open-to-play, runs-per-session and D1 are computab
 
 test('events keep the session id the metric queries need, at the top level too',
   async () => {
-    await send('A', 'run_start', { sessionId: 'sess-123', runId: 'r9', mode: 'free' });
+    await send('A', 'run_start', { sessionId: 'sess-123', runId: 'run-0009', mode: 'free' });
     const e = h.db.all('events')[0];
     assert.equal(e.sessionId, 'sess-123');
   });

@@ -3,13 +3,13 @@
 // (spec 8.13, 14.2). Owner only. The template id comes from server config (app_config, else env
 // SUBSCRIBE_TEMPLATE_ID), never from the client. One grant per challenge (add of the fixed _id).
 const store = require('./common/store');
+const limits = require('./common/limits');
 const input = require('./common/input');
 const appconfig = require('./common/appconfig');
 const { now, fail } = require('./common/util');
 
 exports.main = store.handler(async (event, { openid }) => {
   const id = input.challengeId(event.challengeId);
-  await store.rateLimit(openid, 'subscribe', 1, 20);
   const ch = await store.getDoc('challenges', id);
   if (!ch || now() > ch.expiresAt) fail('CHALLENGE_EXPIRED', 'challenge expired or missing');
   if (ch.ownerOpenid !== openid) fail('NOT_OWNER', 'only the challenge owner can subscribe');
@@ -19,4 +19,4 @@ exports.main = store.handler(async (event, { openid }) => {
     _id: id, ownerOpenid: openid, tmplId, grantedAt: now(), used: false,
   });
   return { ok: true, granted: true };
-});
+}, { rate: limits.rateOf('subscribeChallenge') });

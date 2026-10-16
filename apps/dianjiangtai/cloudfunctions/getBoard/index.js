@@ -4,6 +4,7 @@
 // Lineups (x) only for a caller with a ranked result for the date. groupRef only for members.
 const core = require('./common/coreapi');
 const store = require('./common/store');
+const limits = require('./common/limits');
 const input = require('./common/input');
 const { fail, now, sha256hex, addDaysKey, bjtDayStartMs } = require('./common/util');
 
@@ -111,8 +112,9 @@ exports.main = store.handler(async (event, { openid }) => {
     ok: true, dateKey, issueNo: seedDoc.issueNo, contentVersion: seedDoc.contentVersion, salt,
     variant: seedDoc.variant || core.variantFor(dateKey), selfHash: hashOf(openid), mode, viewerPlayed, rows,
   };
-  await store.writeEvent(openid, 'board_list', {
+  // sampled (M3): one server event per date, kind and mode per minute per instance, not one database write per board response
+  await store.writeEventSampled(`board_list:${dateKey}:${kind}:${mode}`, 60 * 1000, 'board_list', {
     dateKey, kind, mode, rows: rows.length, bytes: JSON.stringify(rows).length, cached,
   });
   return out;
-});
+}, { rate: limits.rateOf('getBoard') });

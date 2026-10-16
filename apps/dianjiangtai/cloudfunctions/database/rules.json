@@ -1,5 +1,24 @@
 {
-  "_comment": "Cloud database security rules, one entry per collection. Every collection is deny-all for clients: the mini game never touches the database directly; all access is through cloud functions, which run with admin rights and bypass these rules. Paste each value into the console (Database > collection > Permissions > Custom rules). See README 'Database security rules' for why each collection needs deny-all.",
+  "_comment": "Cloud database security rules, one entry per collection. Every collection is deny-all for clients: the mini game never touches the database directly; all access is through cloud functions, which run with admin rights and bypass these rules. Paste each value into the console (Database > collection > Permissions > Custom rules). See README 'Database security rules' for why each collection needs deny-all. Cloud STORAGE has its own deny-all rule in ../storage/rules.json.",
+  "_rationale": {
+    "daily_seeds": "holds the daily seed, the full sheet and the best lineup (the answer key); a client read would spoil the daily (spec C5)",
+    "daily_seed_bank": "future seeds and their 12-0 lineups; a client read would spoil every coming day",
+    "runs": "validated runs with lineups and the stored best; a client write would forge results and challenges",
+    "daily_starts": "the one anchored daily attempt per player; a client write would reset or fake an attempt",
+    "daily_results": "source of the boards and streaks (openid keyed); a client write would forge ranks",
+    "group_members": "openGId and openid pairs gate the group boards (personal data)",
+    "challenges": "challenge owner, record, lineup (withheld until answered) and the sheet; a client read leaks openids and lineups",
+    "challenge_answers": "one marker per answerer and challenge so answers are counted once; a client write would inflate counts",
+    "daily_stats": "score distribution behind the rarity text; a client write would skew every percentile",
+    "events": "analytics with openid; written only through the validated track function",
+    "rate_limits": "per-openid counters; a client write would reset its own limit",
+    "meta": "internal markers (launch date, roll-up claims)",
+    "player_stats": "streaks, bests and anomaly flags (personal data)",
+    "daily_progress": "progressive round delivery and the frozen action prefix; a client read or write defeats anti-lookahead",
+    "sub_grants": "subscribe-message grants (openid + template)",
+    "anomalies": "observe-only abuse flags; must not be visible to the people being observed",
+    "app_config": "remote config (ads caps, subscribe template); functions expose only the safe subset via getDaily"
+  },
   "daily_seeds": {
     "read": false,
     "write": false
@@ -25,6 +44,10 @@
     "write": false
   },
   "challenges": {
+    "read": false,
+    "write": false
+  },
+  "challenge_answers": {
     "read": false,
     "write": false
   },

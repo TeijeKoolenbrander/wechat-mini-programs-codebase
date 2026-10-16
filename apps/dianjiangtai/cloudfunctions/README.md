@@ -25,7 +25,7 @@ Status: code and tests complete and passing against the **real game core** (`app
 
 Every function returns `{ok:true,...}` or `{ok:false, code, message}` and never throws to the client. Codes: the spec's `INVALID_ACTIONS`, `ALREADY_PLAYED`, `SEED_NOT_FOUND`, `CHALLENGE_EXPIRED`, `LATE_SUBMIT`, `RATE_LIMITED`, plus these additions (spec gaps, see below): `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_STARTED` (also `getRound`), `NO_TEMPLATE` and `NOT_OWNER` (`subscribeChallenge`), `OWN_CHALLENGE`, `RUN_NOT_FOUND`, `NOT_MEMBER`, `NOT_GROUP`, `BAD_CLOUDID`, `SERVER_CONFIG`, `INTERNAL`.
 
-Identity is always `cloud.getWXContext().OPENID` (read in `common/store.js` only, enforced by a test). `genDaily` and `cleanup` are timer functions: a call that carries an OPENID (i.e. from the mini game) is rejected with `FORBIDDEN`.
+Identity is always `cloud.getWXContext().OPENID` (read in `common/store.js` only, enforced by a test). `genDaily` and `cleanup` are timer functions: a call is accepted only with NO OPENID **and** the timer marker `event.Type === 'Timer'` with a `TriggerName` (the real triggers supply both); anything else is `FORBIDDEN`. Console test event: `{"Type":"Timer","TriggerName":"manual"}` (genDaily also takes `"dateKey":"YYYYMMDD"`). Every client function is rate limited per openid (`RATE_LIMITED`, see "Rate limits").
 
 ## Layout and the shared core
 
@@ -33,8 +33,9 @@ Identity is always `cloud.getWXContext().OPENID` (read in `common/store.js` only
 cloudfunctions/
   common/            shared helpers (source of truth) -> copied to <fn>/common by sync
   <fn>/index.js, package.json, function.config.json, config.json (timers only)
-  scripts/sync-core.js
+  scripts/sync-core.js, scripts/deploy-pack.js
   database/rules.json
+  storage/rules.json   deny-all cloud storage rule (paste in the console, see Console hardening)
   tests/             node --test; helpers/ has the fake db + harness; fixtures/ has real 12-0 optimum seeds (NOT a bank)
 ```
 
@@ -49,11 +50,21 @@ npm test         # runs everything, incl. the common drift test
 - `<fn>/common/` copies are committed (source: `common/`). `<fn>/core/` copies are **generated, git-ignored**: the core is owned and changed by the game, so committing 11 copies would create constant merge noise. `npm test` runs `sync` first (pretest), so the tests always run against the current real core; `npm run check` (drift) must pass before a deploy. The harness stages its own temp copy of functions + real core, so tests never depend on working-tree state.
 - Only `common/coreapi.js` touches the core. Contract: `apps/dianjiangtai/game/core/README.md`.
 
+## Deploy names and the upload folder (`npm run pack`)
+
+All apps share one cloud environment, so every function is deployed as `dianjiangtai_<name>` (for example `dianjiangtai_getDaily`); folders keep their plain names in the repo. The client resolves names through `fnPrefix` in `game/js/build-config.js` (`dianjiangtai_` once `cloudEnv` is set, empty for the mock) and the single table in `game/js/api.js`; `game/tools/release-config.js` sets both (see `game/RELEASE.md`).
+
+```
+npm run pack     # (alias: npm run stage) sync, drift check, then write game/cloudfunctions-deploy/dianjiangtai_<name>/ + MANIFEST.json
+```
+
+`game/cloudfunctions-deploy/` is git-ignored, listed in `packOptions.ignore`, and is the `cloudfunctionRoot` in `game/project.config.json`, so DevTools lists the prefixed folders under the cloud-function root. Each folder holds `index.js`, `package.json`, `function.config.json`, `config.json` (timers only), `common/` and `core/`. Upload each with "Upload and deploy: cloud install dependencies"; the two timer functions (`dianjiangtai_genDaily`, `dianjiangtai_cleanup`) also need "Upload triggers". Nothing is deployed by the script; it only copies files. Note that collection names are not prefixed here: the database is the app's own once the environment is dedicated; if the shared environment is used, give the collections a prefix first (not done).
+
 ## Environment variables (cloud environment config; never committed)
 
 | Name | Required | Purpose |
 |---|---|---|
-| `GROUP_REF_PEPPER` | yes | secret pepper: `groupRef = sha256(openGId + pepper)[0..16)`; also keys the challenge-id hash. Without it `joinGroup` and `createChallenge` return `SERVER_CONFIG` |
+| `GROUP_REF_PEPPER` | yes, **>= 32 characters** | secret pepper: `groupRef = sha256(openGId + pepper)[0..16)`; also keys the challenge-id hash. Missing or shorter than 32 characters: `joinGroup` and `createChallenge` return `SERVER_CONFIG` (L5) |
 | `TZ` | set to `Asia/Shanghai` | in each `function.config.json`. The code does not depend on it (date keys use core `date.js`), it is belt and braces |
 | `LAUNCH_DATE_KEY` | optional | `YYYYMMDD` of issue 1. If unset, the date of the first seed ever created is stored once in `meta/launch` |
 | `SUBSCRIBE_TEMPLATE_ID` | optional | the one-time subscribe-message template id ("好友接下了你的战书"), used when `app_config.subscribe.tmplId` is absent. Without either, `subscribeChallenge` returns `NO_TEMPLATE`, `getDaily.features.subscribe` is absent and nothing is ever sent. Set on `subscribeChallenge` and `getDaily` (and `submitRun` for the send) |
@@ -68,7 +79,7 @@ No AppSecret, no `session_key`, no `code2Session` anywhere (cloudID decryption n
 2. For each function: upload and deploy (cloud install dependencies), then in the console set the **timeout** and **TZ** from `function.config.json` (the timeouts are explicit values, the platform default of about 3 s is too short; the `genDaily` value is a spike item, E6). `timeout`/`envVariables` in `function.config.json` are our source of truth and are also read by the code (the 70% live-loop cut-off is computed from it); I could not confirm that the WeChat console reads this file itself, so apply it by hand or via the CloudBase CLI. Only `config.json` (triggers) is a verified WeChat format.
 3. Set env var `GROUP_REF_PEPPER` (random, 32+ chars) on `joinGroup`, `createChallenge`, and keep a copy in the team secret store. Rotating it changes every `groupRef` and challenge id (old challenges stay valid, they are looked up by id).
 4. Upload the timer triggers (`genDaily/config.json`, `cleanup/config.json`): one trigger per function, evaluated in UTC+8.
-5. Create the 16 collections (below) and paste the rules from `database/rules.json`; add the indexes.
+5. Create the 17 collections (below) and paste the rules from `database/rules.json`; add the indexes. Then do the **Console hardening** steps below (storage rule, anonymous/web login off, HTTP access off).
 6. Seed bank (the primary daily source, see "Seed bank flow"): generate at least 60 days, import into `daily_seed_bank`, delete the local files. **Never commit them** (spoiler).
 7. v1 setup: (a) deploy the three new functions `getRound`, `getHistory`, `subscribeChallenge`, and redeploy `getDaily`, `startRun`, `submitRun` (its `config.json` now requests the `subscribeMessage.send` openapi permission, approve it in the console), `getChallenge`, `getBoard`, `cleanup`; (b) create `player_stats`, `daily_progress`, `sub_grants`, `anomalies`, `app_config` with the deny-all rules; (c) optional, once the MP console has the one-time template: add a document `app_config/live` = `{"subscribe": {"tmplId": "<template id>", "fields": {"title": "thingN", "theirRecord": "thingN", "myRecord": "thingN", "time": "timeN"}}, "ads": {"banner": {"enabled": false, "adUnitId": ""}, "interstitial": {"enabled": true}}}` (or set env `SUBSCRIBE_TEMPLATE_ID` on `getDaily` and `subscribeChallenge`); the `fields` values must be the keys of the template the founder picked (key names depend on the chosen template; `page: index?c=<id>` is a device-pass item); (d) import the contentVersion 2 seed bank (see "Importing the contentVersion 2 launch bank").
 8. Spike items that touch the backend: the real `genDaily` timeout and measured `gateCheck` time (E6), the `callFunction` response size (sets `boardListCap`, config), the cloudID decrypt (E1), `doc.get()`/duplicate-`add` error text on the real DB (see Risks).
@@ -83,11 +94,12 @@ No AppSecret, no `session_key`, no `code2Session` anywhere (cloudID decryption n
 | `daily_starts` | `<dateKey>_<openid>` | startRun | one daily attempt anchor |
 | `daily_results` | `<dateKey>_<openid>` | submitRun (transaction) | the one ranked result; source of `getBoard` |
 | `group_members` | `<openGId>_<openid>` | joinGroup | server-decrypted group membership |
-| `challenges` | 8-char base32 | createChallenge | answer counters updated by submitRun |
+| `challenges` | 8-char base32 | createChallenge | answer counters updated by submitRun (inside the run's transaction) |
+| `challenge_answers` | `<challengeId>_<openid>` | submitRun (transaction) | one marker per answerer, so `answerCount` / `bestAnswer` and the answer notice count once even when a submit is retried or raced. 180 days |
 | `daily_stats` | `YYYYMMDD` | submitRun (`inc`) | `hist[13]`, `total` |
 | `events` | auto | track, server events | analytics, 180 days |
-| `rate_limits` | `<bucket>_<openid>_<minute>` | submitRun, createChallenge, track | per-minute counters, trimmed by cleanup |
-| `meta` | `launch` | genDaily/getDaily | launch date for issue numbers |
+| `rate_limits` | `<bucket>_<openid>_<minute>` | every client function (`store.handler`) | per-minute counters, trimmed by cleanup |
+| `meta` | `launch`, `rollup_<dateKey>` | genDaily/getDaily, cleanup | launch date for issue numbers; the claim marker that makes the daily anomaly roll-up run once |
 | `player_stats` | `<openid>` | submitRun (ranked transaction), anomaly flags | `curStreak, bestStreak, lastDailyDate, totalDailies, flags7d, flagTs[], suspect, updatedAt`. Streaks (spec 8.9) and the observe-only anomaly roll-up. 180 days after `updatedAt` |
 | `daily_progress` | `<dateKey>_<openid>` | startRun (add), getRound (frozen prefix) | `actions[]` (frozen prefix), `released` 1-5, `mode` daily/challenge, `challengeId?`. 180 days |
 | `sub_grants` | `<challengeId>` | subscribeChallenge (add), submitRun (claim in a transaction) | `ownerOpenid, tmplId, used, sentAt?, sendErrCode?`. 180 days |
@@ -118,9 +130,9 @@ File: `database/rules.json`. **Every collection is `{"read": false, "write": fal
 | `rate_limits` | `expireAt` | cleanup |
 | `daily_progress` | `updatedAt` | cleanup |
 | `sub_grants` | `grantedAt` | cleanup |
+| `challenge_answers` | `createdAt` | cleanup |
 | `anomalies` | `ts`; `kind + ts` | cleanup + roll-up counts |
 | `player_stats` | `updatedAt` | cleanup |
-| `events` | `name + ts` (exists) | roll-up idempotency check reads `name = anomaly_daily` |
 | `runs` | `submittedAt` (exists) | roll-up run count |
 
 `daily_seeds` is read by `_id` ranges (`_id < d`, `_id <= today` ordered desc, `limit`): `_id` is always indexed. `getHistory`/`getBoard` read `daily_results`/`daily_stats` with `_id in [...]` (no extra index).
@@ -142,7 +154,7 @@ node apps/dianjiangtai/cloudfunctions/scripts/prepare-bank.js <tmp>/bank.json <t
 
 ### Importing the contentVersion 2 launch bank (`apps/dianjiangtai/seed-bank/bank-cv2-60d.json`)
 
-The launch bank (>= 60 accepted days for contentVersion 2 / configVersion 2, spec 5.2, PO-17) is **not in git, on purpose**: it lists future daily seeds (a spoiler), and any `bank*.json` under `apps/dianjiangtai/` trips the `qa-trust` test (AC 54), so it lives only while you prepare the import. Regenerate it whenever it is needed (about 5 minutes on 8 cores; the command and flags are in `apps/dianjiangtai/seed-bank/README.md`):
+The launch bank (>= 60 accepted days for contentVersion 2 / configVersion 3, spec 5.2, PO-17) is **not in git, on purpose**: it lists future daily seeds (a spoiler), and any `bank*.json` under `apps/dianjiangtai/` trips the `qa-trust` test (AC 54), so it lives only while you prepare the import. Regenerate it whenever it is needed (about 5 minutes on 8 cores; the command and flags are in `apps/dianjiangtai/seed-bank/README.md`):
 
 ```
 node apps/dianjiangtai/game/tools/simstats.js --seeds 1000 --optseeds 100 --gateseeds 100 --timeseeds 10 --bank 60 --bank-file apps/dianjiangtai/seed-bank/bank-cv2-60d.json
@@ -153,7 +165,7 @@ node apps/dianjiangtai/game/tools/simstats.js --seeds 1000 --optseeds 100 --gate
 node apps/dianjiangtai/cloudfunctions/scripts/prepare-bank.js apps/dianjiangtai/seed-bank/bank-cv2-60d.json <tmp>/bank.import.jsonl
 #    expect "wrote 60 entries ... (0 skipped)". Skipped entries are listed with the reason (version mismatch, not 12-0 ...).
 # 2. cloud console > database > daily_seed_bank > Import > <tmp>/bank.import.jsonl  (file type: JSON Lines, conflict mode: skip)
-# 3. check: the collection has 60 documents with used:false, contentVersion 2, configVersion 2
+# 3. check: the collection has 60 documents with used:false, contentVersion 2, configVersion 3
 # 4. delete <tmp>/bank.import.jsonl AND the local bank-cv2-60d.json (they list future daily seeds: spoilers; never commit them)
 ```
 
@@ -212,3 +224,24 @@ Progressive delivery uses the core's own rules where the core has them: `validat
 - `function.config.json` (timeout, env) is applied by hand, see setup step 2.
 - `daily_seeds.rounds` is public; `best` and `seed` never leave the server.
 - `getBoard` function-memory cache is per instance, so with several warm instances the 60 s window is approximate (cost control only; ranks are always server data).
+
+## Rate limits (security hardening M3)
+
+`common/limits.js` is the one table; `store.handler` charges it right after the identity check and **before** the function body, so a flood is refused before any read. Per-openid fixed window of one minute (doc `<bucket>_<openid>_<minute>` in `rate_limits`, one transaction; a transaction that keeps conflicting also answers `RATE_LIMITED`):
+
+| Limit per minute | Functions |
+|---|---|
+| 60 | `getDaily`, `getHistory`, `getChallenge`, `getReplay`, `getRound` (4 calls a run; headroom for retries and two devices) |
+| 30 | `getBoard` (can fan out into batched reads) |
+| 20 | `startRun`, `submitRun`, `createChallenge`, `subscribeChallenge`, `joinGroup` |
+| 300 events | `track` (cost = events in the batch, a batch holds <= 50) |
+
+The mock server (`game/js/mock-server.js`) applies the same numbers (a test compares them). The client treats `RATE_LIMITED` like a bad connection (retry UI, queued submit, analytics re-queue). Reads are capped (`queryAll` stops at `MAX_QUERY_ROWS` = 20000; the board list at `boardListCap`) and the per-call server event `board_list` is sampled to one per date, kind and mode per minute per instance.
+
+## Console hardening (founder / release checklist, security audit L3)
+
+1. **Cloud storage: deny all.** Console > Cloud Development > Storage > Permissions > Custom rules: paste `storage/rules.json` (`{"read": false, "write": false}`). The game never uses cloud storage (assets ship in the package). Re-check after every environment change.
+2. **Anonymous / web login stays disabled.** Console > Settings > Login authorization: keep anonymous login and every web (Web SDK / H5) login method OFF. They are the only ways to reach the backend without a WeChat OPENID.
+3. **HTTP access service stays disabled** for every function (no HTTP route, no HTTP trigger). An HTTP-exposed function would get no OPENID and an attacker-chosen event body.
+4. **Timers need the timer marker.** `genDaily` / `cleanup` run only for `event.Type === 'Timer'` with a `TriggerName` and no OPENID. The real triggers supply both. **Console test run** (cloud function > cloud test): use the event `{"Type":"Timer","TriggerName":"manual"}`, for `genDaily` optionally with `"dateKey":"YYYYMMDD"`. Without the marker the answer is `FORBIDDEN`. The marker is defence in depth; the real controls are items 2 and 3.
+5. `joinGroup` resolves the raw cloudID with `cloud.getOpenData` (wx-server-sdk >= 2.x, pinned in the function's `package.json`); no extra `config.json` permission is needed, confirm on the device pass (E1). The client sends `{cloudID: <raw string>}`; `event.groupData` is never read.

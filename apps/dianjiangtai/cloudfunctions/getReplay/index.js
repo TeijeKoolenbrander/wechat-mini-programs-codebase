@@ -3,6 +3,7 @@
 // this is therefore only reachable after the daily result exists (a run row is written on submit).
 const core = require('./common/coreapi');
 const store = require('./common/store');
+const limits = require('./common/limits');
 const input = require('./common/input');
 const rules = require('./common/rules');
 const { fail, now } = require('./common/util');
@@ -21,4 +22,4 @@ exports.main = store.handler(async (event, { openid }) => {
     await store.db().collection('runs').doc(run._id).update({ data: { best } });
   }
   return { ok: true, best };
-});
+}, { rate: limits.rateOf('getReplay') });

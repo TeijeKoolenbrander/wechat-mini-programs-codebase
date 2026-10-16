@@ -18,6 +18,7 @@ const TARGETS = [
   { col: 'events', field: 'ts' },
   { col: 'daily_progress', field: 'updatedAt' },
   { col: 'sub_grants', field: 'grantedAt' },
+  { col: 'challenge_answers', field: 'createdAt' },
   { col: 'anomalies', field: 'ts' },
   { col: 'player_stats', field: 'updatedAt' },
 ];
@@ -43,8 +44,21 @@ async function rollUp(todayKey) {
   const from = bjtDayStartMs(dateKey);
   const to = bjtDayStartMs(todayKey);
   const col = (n) => store.db().collection(n);
-  const done = await col('events').where({ openid: 'server', name: 'anomaly_daily', 'props.dateKey': dateKey }).limit(1).get();
-  if (done.data.length) return { dateKey, skipped: true };
+  // CLAIM the day first (add of the fixed _id): a double-fired timer or two overlapping runs write ONE anomaly_daily event.
+  // A run that dies after the claim releases it below, so the next timer retries the day.
+  const markerId = 'rollup_' + dateKey;
+  if (!(await store.addIfAbsent('meta', { _id: markerId, dateKey, startedAt: now() }))) return { dateKey, skipped: true };
+  try {
+    return await rollUpClaimed(dateKey, from, to);
+  } catch (e) {
+    try { await col('meta').doc(markerId).remove(); } catch (e2) { /* the next run finds the marker and skips: observation only */ }
+    throw e;
+  }
+}
+
+async function rollUpClaimed(dateKey, from, to) {
+  const _ = store._();
+  const col = (n) => store.db().collection(n);
   const runs = (await col('runs').where({ submittedAt: _.gte(from).and(_.lt(to)) }).count()).total;
   const flags = {};
   for (const k of KINDS) flags[k] = (await col('anomalies').where({ kind: k, ts: _.gte(from).and(_.lt(to)) }).count()).total;

@@ -6,8 +6,10 @@
 
 const path = require('node:path');
 const { createLoader } = require('./wechat-loader');
+const { DEV_BUILD } = require('./mode');
 
 const ROOT = path.join(__dirname, '..');
+const GROUP_CLOUD_ID = 'cloud-group-1'; // wx.getGroupEnterInfo's cloudID in tests: a raw string of 8-512 url-safe characters
 const SCREEN = { windowWidth: 375, windowHeight: 812, pixelRatio: 3, statusBarHeight: 44 };
 const CAPSULE = { left: 281, right: 368, top: 48, bottom: 80, width: 87, height: 32 };
 
@@ -32,7 +34,7 @@ function boot(t, opts) {
     t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: opts.now || Date.UTC(2026, 10, 20, 4, 0, 0) });
   }
 
-  const log = { text: [], calls: [], storageWrites: 0, cloudWrites: [], shares: [], ads: [], menu: [], console: [], canvases: [] };
+  const log = { text: [], cloudCalls: [], calls: [], storageWrites: 0, cloudWrites: [], shares: [], ads: [], menu: [], console: [], canvases: [] };
   const storage = opts.storage || {};
   const handlers = {};
   let raf = null;
@@ -50,7 +52,10 @@ function boot(t, opts) {
       return cv;
     },
     createImage: () => ({}),
-    createInnerAudioContext: () => ({ play: () => call('audio.play'), stop() {} }),
+    createInnerAudioContext: () => {
+      const a = { src: '', play: () => call('audio.play', a.src), stop() {}, onError() {} };
+      return a;
+    },
     vibrateShort: () => call('vibrateShort'),
     getStorageSync: (k) => storage[k],
     setStorageSync: (k, v) => {
@@ -71,9 +76,8 @@ function boot(t, opts) {
     getGroupEnterInfo: (o) => {
       call('getGroupEnterInfo');
       if (opts.groupEnterFail) return o.fail({ errno: opts.groupEnterFail });
-      o.success({ cloudID: 'cloud-1', encryptedData: 'x', iv: 'y' });
+      o.success({ cloudID: GROUP_CLOUD_ID, encryptedData: 'x', iv: 'y' });
     },
-    cloud: { CloudID: (id) => ({ mockData: opts.groupData || { opengid: 'G1', chat_type: 3 }, id }) },
     // privacy and friend scope
     getPrivacySetting: (o) => o.success({ needAuthorization: p.state !== 'agreed' }),
     requirePrivacyAuthorize: (o) => {
@@ -141,12 +145,31 @@ function boot(t, opts) {
       return { show: () => Promise.resolve() };
     },
     createFeedbackButton: () => ({ show() {}, hide() {}, style: {} }),
+    cloud: {
+      init: (o) => call('cloud.init', o),
+      // opts.cloud = { prefix: 'dianjiangtai_', hang: ['getDaily'] }: wx.cloud.callFunction delegated to an in-memory mock server (created
+      // here, outside the game's module loader) that answers the PLAIN function name; a name without the prefix is not found
+      callFunction: (o) => {
+        const cl = opts.cloud || {};
+        log.cloudCalls.push({ name: o.name, data: o.data });
+        if ((cl.hang || []).some((h) => o.name === (cl.prefix || '') + h)) return;
+        if (!cl.server) return o.fail({ errMsg: 'no server' });
+        if (cl.prefix && !o.name.startsWith(cl.prefix)) return o.fail({ errMsg: 'cloud.callFunction:fail FUNCTION_NOT_FOUND ' + o.name });
+        o.success({ result: cl.server.call(o.name.slice((cl.prefix || '').length), o.data) });
+      },
+    },
+    __dianjiangtaiTest: { build: Object.assign({}, DEV_BUILD, opts.build) },
   };
+  if (opts.cloud && !opts.cloud.server) opts.cloud.server = require('../js/mock-server').createMockServer({ now: () => Date.now() });
   global.wx = wx;
   t.mock.method(console, 'log', (...a) => log.console.push(a.join(' ')));
 
   // WeChat resolution rules (.js only, relative paths, no Node built-ins), fresh module cache per boot
-  const app = createLoader(ROOT).require(path.join(ROOT, 'game.js'), './js/main');
+  const loader = createLoader(ROOT, { hide: opts.hide });
+  const app = loader.require(path.join(ROOT, 'game.js'), './js/main');
+  // the mock server's stand-in for cloud.getOpenData: the raw cloudID the client sends resolves to this group payload (M1)
+  const mockSrv = app.api && (app.api.mock || (opts.cloud && opts.cloud.server));
+  if (mockSrv) mockSrv.openData[GROUP_CLOUD_ID] = opts.groupData || { opengid: 'G1', chat_type: 3 };
   t.after(() => {
     delete global.wx;
     delete global.requestAnimationFrame;
@@ -154,6 +177,7 @@ function boot(t, opts) {
 
   const g = {
     app,
+    loader,
     log,
     wx,
     handlers,

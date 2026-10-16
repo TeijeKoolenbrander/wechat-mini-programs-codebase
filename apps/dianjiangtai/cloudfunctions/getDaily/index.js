@@ -4,6 +4,7 @@
 // never holds a future round. Never returns the seed, the best lineup or any battle data (spec 5.2, AC 19, 86).
 const core = require('./common/coreapi');
 const store = require('./common/store');
+const limits = require('./common/limits');
 const streak = require('./common/streak');
 const appconfig = require('./common/appconfig');
 const { ensureDaily } = require('./common/daily');
@@ -37,4 +38,4 @@ exports.main = store.handler(async (event, { openid, startedAt }) => {
   };
   if (myRecord) out.myRecord = myRecord;
   return out;
-});
+}, { rate: limits.rateOf('getDaily') });

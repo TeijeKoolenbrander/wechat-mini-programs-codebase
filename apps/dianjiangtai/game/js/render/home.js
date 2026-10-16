@@ -175,7 +175,10 @@ function drawLarge(ctx, vm, L, hits, d) {
     }
     boardButtons(ctx, L, hits, vm, x, cy, cw);
   } else {
-    W.scrollBody(ctx, hits, area, bodyH, vm.scrollY, 'home:scroll', () => {
+    // a strip under the list is reserved for the scroll hint, so the hint never covers an entry
+    const hintH = scrollHintH(L);
+    const sarea = { x: area.x, y: area.y, w: area.w, h: Math.max(L.u(60), area.h - hintH) };
+    const sb = W.scrollBody(ctx, hits, sarea, bodyH, vm.scrollY, 'home:scroll', () => {
       let cy = top;
       if (vm.hasGroupContext) {
         groupBanner(ctx, L, hits, x, cy, cw, false);
@@ -183,7 +186,40 @@ function drawLarge(ctx, vm, L, hits, d) {
       }
       boardButtons(ctx, L, hits, vm, x, cy, cw);
     });
+    // scroll affordance: the thin bar is easy to miss, so say it in words while more entries (往期 / 玩法) are below
+    if (sb.maxScroll > 0 && sb.scroll < sb.maxScroll - 2) scrollHint(ctx, L, y - L.u(2));
   }
+}
+
+/** A small pill with a down chevron, centred in the strip ending at `bottom`, below the list. No hit area. */
+function scrollHintH(L) {
+  return T.FS.body + L.u(14) + L.u(4);
+}
+
+function scrollHint(ctx, L, bottom) {
+  const size = T.FS.body;
+  const label = '下滑查看更多';
+  const tw = W.measure(ctx, label, size, 700, true);
+  const h = size + L.u(14);
+  const w = tw + L.u(40);
+  const px = L.W / 2 - w / 2;
+  const py = bottom - h;
+  W.fillRR(ctx, px, py, w, h, h / 2, T.isHC() ? C.paper : 'rgba(243,234,215,0.96)');
+  W.strokeRR(ctx, px, py, w, h, h / 2, T.isHC() ? C.ink : C.lineStrong, T.isHC() ? 2 : 1.5);
+  W.text(ctx, label, px + L.u(14) + tw / 2, py + h / 2 + 1, { size, weight: 700, color: C.ink, align: 'center' });
+  const cx = px + w - L.u(15);
+  const cy = py + h / 2;
+  const k = L.u(5);
+  ctx.save();
+  ctx.strokeStyle = C.seal;
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - k, cy - k / 2);
+  ctx.lineTo(cx, cy + k / 2);
+  ctx.lineTo(cx + k, cy - k / 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function statusFor(d) {

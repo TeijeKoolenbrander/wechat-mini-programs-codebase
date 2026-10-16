@@ -12,7 +12,7 @@ const HAS_V2 = CV >= 2;
 let h;
 beforeEach(() => {
   h = createHarness({ now: T0 });
-  h.setEnv('GROUP_REF_PEPPER', 'test-pepper-not-a-secret');
+  h.setEnv('GROUP_REF_PEPPER', 'test-pepper-not-a-secret-0123456789abcdef');
 });
 afterEach(() => h.teardown());
 

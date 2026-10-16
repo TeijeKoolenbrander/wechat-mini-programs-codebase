@@ -142,8 +142,25 @@ const V2_TUNING = {
 };
 Object.assign(V2, V2_TUNING);
 
-const CONFIGS = { 1: V1, 2: V2 };
-const LATEST_CONFIG_VERSION = 2;
+/**
+ * configVersion 3 (contentVersion 2, the v1 release after QA finding V1-2). configVersion 2's naive 12-0 sat at about 0.185%
+ * against the HARD MAXIMUM of 0.2% (D15: naive < 0.2%, a ceiling, so lower is safer), which failed about half of fresh 100k-seed
+ * windows. Only the opponent curve changed (tau 0.7, jitter 0.35, pMin, morale, bands and gates are as in version 2): the curve
+ * is version 2's raised by 0.14 and tilted by -0.03 per battle about its middle (early battles a touch harder, late ones a
+ * touch easier). That moves naive 12-0 to about 0.14% and sensible 12-0 to about 0.29% (inside 0.2-0.5% with margin on both
+ * sides, the ratio of the two is a property of the roster so both move together), and keeps every band, the median and the
+ * event rate inside their targets (tools/simstats-report-cv2.md). Version 2 stays intact: the server keeps the last 2 versions.
+ * The seed bank must be generated for configVersion 3 (PO-17): gateVersion is unchanged, but bank entries pin configVersion.
+ */
+const V3 = JSON.parse(JSON.stringify(V2));
+V3.configVersion = 3;
+V3.contentVersion = 2;
+V3.curve = [7.665, 7.899, 8.132, 8.366, 8.6, 8.833, 9.067, 9.3, 9.534, 9.768, 10.001, 10.235];
+// sensible-player cumulative shares (tools/simstats-report-cv2.md)
+V3.freeRarity = [1, 0.9984, 0.989, 0.9621, 0.9067, 0.8138, 0.6803, 0.5119, 0.3322, 0.1775, 0.0718, 0.0199, 0.0026];
+
+const CONFIGS = { 1: V1, 2: V2, 3: V3 };
+const LATEST_CONFIG_VERSION = 3;
 
 /** The config a content version is tuned with: 1 -> 1, 2 -> 2. Callers that pass no configVersion get this. */
 function defaultConfigVersion(contentVersion) {

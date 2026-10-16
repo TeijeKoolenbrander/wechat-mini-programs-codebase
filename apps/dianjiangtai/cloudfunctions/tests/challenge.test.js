@@ -9,7 +9,7 @@ const T0 = Date.UTC(2026, 10, 3, 4, 0, 0); // 2026-11-03 12:00 BJT
 let h;
 beforeEach(() => {
   h = createHarness({ now: T0 });
-  h.setEnv('GROUP_REF_PEPPER', 'test-pepper-not-a-secret');
+  h.setEnv('GROUP_REF_PEPPER', 'test-pepper-not-a-secret-0123456789abcdef');
 });
 afterEach(() => h.teardown());
 

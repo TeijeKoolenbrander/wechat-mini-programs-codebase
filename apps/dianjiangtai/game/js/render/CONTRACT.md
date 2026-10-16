@@ -13,7 +13,7 @@ Every screen module `js/render/<screen>.js` exports `draw(ctx, vm, layout) -> hi
 ## Display modes (all screens, spec 8.10)
 
 Every vm carries `display: {largeText:boolean, highContrast:boolean}` (spec 13's `scale`/`palette` are accepted too). Each `draw()` starts by applying it, so the mode is per draw call and nothing leaks between screens. Pass the **same** `display` in the overlay vm (if you omit it, the mode left by the screen's `draw()` still applies). Share and saved cards always use the standard look.
-- **Large text:** body >= 20pt, record >= 48pt, buttons >= 56pt tall. Home keeps the daily card, 自由点将 and the footer pinned and scrolls the group banner and the (2 x 2) board buttons above them (`home:scroll`, `scrollY`). Draft keeps the primary button pinned and scrolls tokens, pool and lineup as one page (`pool:list`, `poolScroll`). Result, history and the sheets scroll.
+- **Large text:** body >= 20pt, record >= 48pt, buttons >= 56pt tall. Home keeps the daily card, 自由点将 and the footer pinned and scrolls the group banner and the (2 x 2) board buttons above them (`home:scroll`, `scrollY`); when that list scrolls, a reserved strip under it shows the pill "下滑查看更多" (no hit area) until the end is reached. Draft keeps the primary button pinned and scrolls tokens, pool and lineup as one page (`pool:list`, `poolScroll`). Result, history and the sheets scroll.
 - **High contrast:** plain white, pure ink, dark faction set with white text, 2pt outlines on fit chips and frames, no paper texture. Contrast is checked by `tests/render.v1.test.js` (text >= 7:1, non-text >= 3:1; default mode >= 4.5:1).
 
 ## Seal portraits (CTO-D1)

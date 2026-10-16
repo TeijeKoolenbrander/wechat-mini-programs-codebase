@@ -9,6 +9,7 @@ const RUN_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const CHALLENGE_ID_RE = /^[A-Z2-7]{8}$/;
 const GENERAL_ID_RE = /^g_[a-z0-9_]{1,40}$/;
 const GROUP_REF_RE = /^[0-9a-f]{16}$/;
+const CLOUD_ID_RE = /^[A-Za-z0-9_-]{8,512}$/;
 
 function clientRunId(v) {
   if (typeof v !== 'string' || !RUN_ID_RE.test(v)) fail('INVALID_ACTIONS', 'bad clientRunId');
@@ -29,6 +30,11 @@ function challengeId(v) {
 }
 function groupRef(v) {
   if (typeof v !== 'string' || !GROUP_REF_RE.test(v)) fail('INVALID_ACTIONS', 'bad groupRef');
+  return v;
+}
+/** the RAW cloudID string of wx.getGroupEnterInfo (M1): a string of 8-512 url-safe characters, nothing else */
+function cloudID(v) {
+  if (typeof v !== 'string' || !CLOUD_ID_RE.test(v)) fail('BAD_CLOUDID', 'cloudID missing or malformed');
   return v;
 }
 function optRecord(v) {
@@ -68,6 +74,6 @@ function seedU32(v) {
 }
 
 module.exports = {
-  MODES, ACTION_TYPES, MAX_ACTIONS, clientRunId, mode, optDateKey, challengeId, groupRef,
+  MODES, ACTION_TYPES, MAX_ACTIONS, clientRunId, mode, optDateKey, challengeId, groupRef, cloudID, CLOUD_ID_RE,
   optRecord, actions, optContentVersion, seedU32, CHALLENGE_ID_RE,
 };

@@ -856,7 +856,7 @@ module.exports = {
    "portraitId": "p_menghuo_v1",
    "monogram": "获",
    "blurb": "南中豪帅，七擒七纵。",
-   "statNote": "勇8：南中夷汉所服；智4：易被诱敌之计。",
+   "statNote": "勇8：南中各族所服；智4：易被诱敌之计。",
    "source": "三国志 / 三国演义（公有领域）",
    "contentVersion": 1
   }

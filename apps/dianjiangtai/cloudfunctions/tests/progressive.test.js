@@ -176,7 +176,7 @@ test('free play, friendly challenges and past-seed challenges still get the full
   const seed = 4242;
   const id = runId();
   await h.call('submitRun', { mode: 'free', clientRunId: id, seed, actions: bestActions(core.buildSheet(seed, CV), { mode: 'free' }) }, { openid: 'owner' });
-  h.setEnv('GROUP_REF_PEPPER', 'pepper-for-tests');
+  h.setEnv('GROUP_REF_PEPPER', 'pepper-for-tests-0123456789abcdef-0123456789');
   const c = await h.call('createChallenge', { runId: id }, { openid: 'owner' });
   const v = await h.call('getChallenge', { challengeId: c.challengeId }, { openid: 'friend' });
   assert.equal(v.rounds.length, 5);
@@ -192,7 +192,7 @@ test('a challenge that counts as the daily goes through startRun/getRound (progr
   await releaseAll(h, 'owner', g.dateKey, acts);
   const id = runId();
   await h.call('submitRun', { mode: 'daily', clientRunId: id, dateKey: g.dateKey, actions: acts }, { openid: 'owner' });
-  h.setEnv('GROUP_REF_PEPPER', 'pepper-for-tests');
+  h.setEnv('GROUP_REF_PEPPER', 'pepper-for-tests-0123456789abcdef-0123456789');
   const c = await h.call('createChallenge', { runId: id }, { openid: 'owner' });
   const view = await h.call('getChallenge', { challengeId: c.challengeId }, { openid: 'friend' });
   assert.equal(view.countsAsDaily, true);

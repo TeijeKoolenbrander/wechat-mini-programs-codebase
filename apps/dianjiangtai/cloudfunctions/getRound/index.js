@@ -7,13 +7,12 @@
 //  - clients cannot skip: round n+1 needs round n to have been released (released >= n) and n valid picks.
 const core = require('./common/coreapi');
 const store = require('./common/store');
+const limits = require('./common/limits');
 const input = require('./common/input');
 const rules = require('./common/rules');
 const progress = require('./common/progress');
 const anomaly = require('./common/anomaly');
 const { now, fail } = require('./common/util');
-
-const ROUNDS_PER_MIN = 60;
 
 exports.main = store.handler(async (event, { openid }) => {
   const clientRunId = input.clientRunId(event.clientRunId);
@@ -25,7 +24,6 @@ exports.main = store.handler(async (event, { openid }) => {
   const ws = rules.windowState(dateKey, nowMs);
   if (ws === 'future') fail('INVALID_ACTIONS', 'date in the future');
   if (ws === 'late') fail('LATE_SUBMIT', 'daily expired');
-  await store.rateLimit(openid, 'round', 1, ROUNDS_PER_MIN);
 
   const pid = progress.progressId(dateKey, openid);
   const p = await store.getDoc('daily_progress', pid);
@@ -70,4 +68,4 @@ exports.main = store.handler(async (event, { openid }) => {
   }
   await anomaly.flag(openid, clientRunId, dateKey, 'prefix', { where: 'getRound', picks: n });
   return fail('INVALID_ACTIONS', 'actions do not extend the stored prefix');
-});
+}, { rate: limits.rateOf('getRound') });

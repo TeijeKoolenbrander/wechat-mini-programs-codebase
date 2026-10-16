@@ -60,7 +60,7 @@ test('genDaily writes the NEXT day, only for server/timer calls', async () => {
   const denied = await h.call('genDaily', {}, { openid: 'someClient' });
   assert.equal(denied.ok, false);
   assert.equal(denied.code, 'FORBIDDEN');
-  const r = await h.call('genDaily', { Type: 'Timer' }, {});
+  const r = await h.call('genDaily', { Type: 'Timer', TriggerName: 'test' }, {});
   assert.equal(r.ok, true);
   assert.equal(r.dateKey, '20261104');
   const doc = h.db.all('daily_seeds')[0];
@@ -76,9 +76,9 @@ test('genDaily writes the NEXT day, only for server/timer calls', async () => {
 test('genDaily double-fire: concurrent invocations create one document and use one bank entry (AC 54, edge 23)', async () => {
   for (const i of [0, 1, 2]) h.db.put('daily_seed_bank', bankEntry(`b${i}`, i));
   const results = await Promise.all([
-    h.call('genDaily', { Type: 'Timer' }, {}),
-    h.call('genDaily', { Type: 'Timer' }, {}),
-    h.call('genDaily', { Type: 'Timer' }, {}),
+    h.call('genDaily', { Type: 'Timer', TriggerName: 'test' }, {}),
+    h.call('genDaily', { Type: 'Timer', TriggerName: 'test' }, {}),
+    h.call('genDaily', { Type: 'Timer', TriggerName: 'test' }, {}),
   ]);
   assert.ok(results.every((r) => r.ok), JSON.stringify(results));
   assert.equal(results.filter((r) => r.created).length, 1);
@@ -87,7 +87,7 @@ test('genDaily double-fire: concurrent invocations create one document and use o
   assert.equal(used.length, 1, 'losing writers roll back and consume no bank entry');
   assert.equal(used[0].usedFor, '20261104');
   assert.equal(h.db.all('daily_seeds')[0].source, 'bank');
-  const again = await h.call('genDaily', { Type: 'Timer' }, {});
+  const again = await h.call('genDaily', { Type: 'Timer', TriggerName: 'test' }, {});
   assert.equal(again.created, false);
   assert.equal(h.db.all('daily_seed_bank').filter((b) => b.used).length, 1);
 });

@@ -16,7 +16,7 @@
  *    interstitial_show; 2004/2005 are logged as errors too
  *  - stub mode (D5): a 3-second "广告位（测试）" overlay with complete/skip;
  *    can simulate rewarded errors and interstitial rejections for QA
- *    (AC 64, 65). Off in production builds (config flag in main.js).
+ *    (AC 64, 65). Only when build-config stubAds is true (dev); never because a unit id is missing (V1-3).
  *
  * Nothing here ever depends on a share (no share-for-reward path exists).
  */
@@ -30,7 +30,9 @@ function createAds(opts) {
   const now = opts.now || (() => Date.now());
   const units = opts.adUnits || {};
   const stubCfg = opts.stub || {};
-  const stub = !!stubCfg.enabled || !units.rewarded;
+  // V1-3 / AC 43 / H4: the test overlay appears ONLY when the build asks for it (stubAds, dev). A release without ad unit ids is
+  // no-fill: the real path below fails to create or load the ad and D6 applies (free once per run, no overlay).
+  const stub = !!stubCfg.enabled;
   const ads = {
     stub,
     /** QA hooks, only used in stub mode: { rewardedError: 1004|1000|null, interstitialError: 2001..2005|null, loadDelayMs } */
@@ -128,6 +130,12 @@ function createAds(opts) {
         log('ad_show', { placement, stub });
         ads.overlay = { kind: 'rewarded', placement, label: '广告位（测试）', startedAt: now(), durationMs: config.ads.stubDelayMs };
         invalidate();
+        return;
+      }
+      if (!units.rewarded || !wx || !wx.createRewardedVideoAd) {
+        // no ad unit built in (流量主 not active yet) or no ad API: no-fill (D6, H4), nothing is shown
+        pending = null;
+        finishError(p, 1004);
         return;
       }
       try {
@@ -241,6 +249,7 @@ function createAds(opts) {
         invalidate();
       });
     }
+    if (!units.interstitial || !wx || !wx.createInterstitialAd) return Promise.resolve(reject(2004));
     try {
       const ad = wx.createInterstitialAd({ adUnitId: units.interstitial });
       return ad

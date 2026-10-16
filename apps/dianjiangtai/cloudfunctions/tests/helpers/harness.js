@@ -36,11 +36,23 @@ function stage() {
 }
 
 let current = { db: null, openid: undefined };
+// the platform's cloud.getOpenData: cloudID -> the decrypted payload object registered by the test (h.groupCloudID / h.openData);
+// an unregistered cloudID answers like an expired one. Every lookup is recorded in openDataCalls.
+let openData = {};
+let openDataCalls = [];
 const fakeSdk = {
   DYNAMIC_CURRENT_ENV: 'test-env',
   init() {},
   database() { return current.db; },
   getWXContext() { return { OPENID: current.openid, APPID: 'wx-test', SOURCE: 'wx_client' }; },
+  async getOpenData({ list }) {
+    openDataCalls.push(list.slice());
+    return {
+      list: list.map((id) => (Object.prototype.hasOwnProperty.call(openData, id)
+        ? { cloudID: id, data: openData[id] }
+        : { cloudID: id, errCode: -601006, errMsg: 'cloudID expired.' })),
+    };
+  },
 };
 const origLoad = Module._load;
 Module._load = function (request, parent, isMain) {
@@ -57,18 +69,41 @@ function createHarness({ now = Date.UTC(2026, 10, 3, 4, 0, 0) } = {}) {
   let t = now;
   Date.now = () => t;
   const env = {};
+  openData = {};
+  openDataCalls = [];
   const h = {
     db,
     root,
     sdk: fakeSdk,
+    openData,
+    openDataCalls,
+    /** per-minute limiter (M3): off unless a test sets h.limits = true (most suites hammer one function inside one fake minute) */
+    limits: false,
+    /** register a decrypted group payload under a fresh valid cloudID and return the cloudID string */
+    groupCloudID(openGId, extra = {}) {
+      const id = 'cid-' + String(openGId).replace(/[^A-Za-z0-9_-]/g, '_') + '-' + Object.keys(openData).length;
+      openData[id] = { opengid: openGId, chat_type: 3, ...extra };
+      return id;
+    },
     setNow(ms) { t = ms; },
     advance(ms) { t += ms; },
     now() { return t; },
     setEnv(k, v) { if (!(k in env)) env[k] = process.env[k]; if (v === undefined) delete process.env[k]; else process.env[k] = v; },
     /** call a function as `openid` (undefined => a server/timer-style call with no OPENID) */
     call(fn, event, { openid } = {}) {
+      let ev = event === undefined ? {} : event;
+      // a server / timer style call (no openid) carries the marker a real timer trigger delivers; callRaw sends exactly what it is given
+      if (openid === undefined && ev !== null && typeof ev === 'object' && !Array.isArray(ev) && ev.Type === undefined) {
+        ev = Object.assign({ Type: 'Timer', TriggerName: 'test-timer' }, ev);
+      }
+      return h.callRaw(fn, ev, { openid });
+    },
+    /** point the fake SDK at this harness (for tests that call helper modules directly instead of a function) */
+    bind(openid) { current = { db, openid }; },
+    callRaw(fn, event, { openid } = {}) {
       const mod = require(path.join(root, fn, 'index.js'));
       current = { db, openid };
+      if (!h.limits && openid && db.cols.rate_limits) db.cols.rate_limits.clear(); // timer calls carry no counter, so seeded rows survive
       return mod.main(event);
     },
     /** replace gates.acceptDailySeed in every staged function (real acceptance is ~0.4%). Modules are

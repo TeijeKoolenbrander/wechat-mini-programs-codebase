@@ -82,7 +82,8 @@ const FORBIDDEN = ['82-0', '82胜', 'NBA', '武力', '统率', '政治', '魅力
 
 function walk(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (['node_modules', 'tests', 'tools', 'out'].includes(e.name)) continue;
+    if (['node_modules', 'cloudfunctions-deploy', 'tests', 'tools', 'out'].includes(e.name)) continue;
+    if (e.name === 'project.private.config.json') continue; // DevTools-local, gitignored, never uploaded
     const p = path.join(dir, e.name);
     if (e.isDirectory()) walk(p, out);
     else if (/\.(js|json|wxss|wxml)$/.test(e.name)) out.push(p);
@@ -138,12 +139,13 @@ test('main package (game dir minus packOptions.ignore) <= 4 MB and no portrait i
   (function sum(d, rel) {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const r = rel ? rel + '/' + e.name : e.name;
+      if (r === 'project.private.config.json') continue; // DevTools-local, gitignored, never uploaded
       if (ignore.has(r) || ignore.has(e.name) && e.isDirectory()) continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) sum(p, r);
       else {
         total += fs.statSync(p).size;
-        assert.ok(!/\.(png|jpe?g|webp|gif)$/i.test(e.name), 'image in main package: ' + r);
+        assert.ok(!/\.(png|jpe?g|webp|gif)$/i.test(e.name) || r === 'assets/share-fallback.png', 'image in main package: ' + r); // the one allowed image is the generic share fallback (not a portrait)
       }
     }
   })(GAME, '');
@@ -193,4 +195,29 @@ test('production readiness flags: stubAds is a build flag, stub also forced when
   assert.equal(typeof bc.stubAds, 'boolean');
   const ads = fs.readFileSync(path.join(GAME, 'js', 'ads.js'), 'utf8');
   assert.match(ads, /!units\.rewarded/);
+});
+
+// ---------- local DevTools artifacts ----------
+test('local DevTools artifacts do not matter: a project.private.config.json and a reformatted project.config.json in a temp copy keep the package tests green', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'djt-art-'));
+  const copy = (src, dst) => {
+    fs.mkdirSync(dst, { recursive: true });
+    for (const e of fs.readdirSync(src, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name === 'cloudfunctions-deploy' || e.name === 'project.private.config.json') continue;
+      if (e.isDirectory()) copy(path.join(src, e.name), path.join(dst, e.name)); else fs.copyFileSync(path.join(src, e.name), path.join(dst, e.name));
+    }
+  };
+  try {
+    copy(path.join(GAME, '..'), path.join(root, 'apps', 'dianjiangtai')); // the whole app: some tests read ../cloudfunctions
+    fs.mkdirSync(path.join(root, 'docs', 'dianjiangtai'), { recursive: true });
+    fs.copyFileSync(path.join(REPO, 'docs', 'dianjiangtai', 'spec.md'), path.join(root, 'docs', 'dianjiangtai', 'spec.md'));
+    const g = path.join(root, 'apps', 'dianjiangtai', 'game');
+    fs.writeFileSync(path.join(g, 'project.private.config.json'), JSON.stringify({ description: 'devtools', projectname: 'x', setting: { compileHotReLoad: true } }, null, '\t'));
+    const pcPath = path.join(g, 'project.config.json');
+    fs.writeFileSync(pcPath, JSON.stringify(JSON.parse(fs.readFileSync(pcPath, 'utf8')), null, '\t')); // tabs, no trailing newline
+    const r = spawnSync(process.execPath, ['--test', 'tests/wechat-compat.test.js', 'tests/core-basic.test.js'], { cwd: g, encoding: 'utf8', timeout: 180000, env: Object.assign({}, process.env, { NODE_TEST_CONTEXT: undefined }) });
+    assert.equal(r.status, 0, 'suite must stay green\n' + r.stdout.slice(-1500));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

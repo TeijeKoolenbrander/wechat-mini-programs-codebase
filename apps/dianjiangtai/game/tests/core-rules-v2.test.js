@@ -18,7 +18,7 @@ const { bestLineup } = require('../core/search');
 const { playRun } = require('../core/players');
 
 const content = C.getContent(2);
-const cfg = getConfig(2);
+const cfg = getConfig(3);
 const SLOTS = C.SLOTS;
 
 /** A sheet whose rounds are on the given cells (pools of the seed's sheet kept, they cover every big cell). */
@@ -36,12 +36,14 @@ function pickId(run, id, slot) {
   return r;
 }
 
-test('config 2 is the default for content 2, config 1 for content 1; unknown versions are null', () => {
+test('config 3 is the default for content 2, config 1 for content 1; unknown versions are null', () => {
   assert.equal(defaultConfigVersion(1), 1);
-  assert.equal(defaultConfigVersion(2), 2);
+  assert.equal(defaultConfigVersion(2), 3);
+  assert.equal(cfg.configVersion, 3);
+  assert.equal(getConfig(2).configVersion, 2, 'config 2 stays intact (the server keeps the last 2)');
   assert.equal(cfg.contentVersion, 2);
   assert.equal(getConfig(1).contentVersion, 1);
-  assert.equal(getConfig(3), null);
+  assert.equal(getConfig(4), null);
   assert.equal(C.getContent(3), null);
   assert.equal(cfg.poolCap, 8);
   assert.equal(getConfig(1).poolCap, 8);
@@ -447,7 +449,7 @@ test('a stronger lineup never does worse on the same seed (events off), v2 conte
 
 /** Independent brute force over the capped pools (no use of search.js). */
 function bruteBest(seed, tokens, sheet) {
-  const scn = makeScenario(seed, 2, 2);
+  const scn = makeScenario(seed, 2, 3);
   const cap = 8;
   const perms = [];
   (function p(a, rest) {
@@ -580,9 +582,9 @@ test('gate and daily acceptance work for contentVersion 2 and are reproducible',
   const { gateCheck } = require('../core/gates');
   for (let i = 0; i < 6; i++) {
     const seed = rng.hash32('g2:' + i);
-    const a = gateCheck(seed, 2, 2);
+    const a = gateCheck(seed, 2, 3);
     const b = gateCheck(seed, 2);
-    assert.deepEqual(a, b, 'default config for content 2 is config 2');
+    assert.deepEqual(a, b, 'default config for content 2 is config 3');
     assert.equal(a.relaxed, false);
     assert.equal(a.K, 400);
     assert.equal(a.pass.optimal, a.optimal.l === 0);

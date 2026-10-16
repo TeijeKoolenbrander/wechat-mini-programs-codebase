@@ -5,6 +5,7 @@
 // (reinstall, second device) gets every released round plus the frozen action prefix.
 const core = require('./common/coreapi');
 const store = require('./common/store');
+const limits = require('./common/limits');
 const input = require('./common/input');
 const rules = require('./common/rules');
 const progress = require('./common/progress');
@@ -61,4 +62,4 @@ exports.main = store.handler(async (event, { openid }) => {
     out.clientRunId = p.clientRunId; // the attempt's original run id (a second device adopts it)
   }
   return out;
-});
+}, { rate: limits.rateOf('startRun') });
