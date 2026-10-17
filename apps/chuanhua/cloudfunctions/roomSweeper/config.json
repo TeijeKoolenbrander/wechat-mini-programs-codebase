@@ -1,0 +1,9 @@
+{
+  "triggers": [
+    {
+      "name": "chuanhua_roomSweeper_timer",
+      "type": "timer",
+      "config": "0 */1 * * * * *"
+    }
+  ]
+}

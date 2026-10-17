@@ -17,3 +17,4 @@ Never commit or paste secrets. Upload key path: `MP_UPLOAD_KEY_PATH` env var. Ap
 
 ## Conventions
 <!-- Fill in once chosen: language (JS/TS), framework (native / Taro / uni-app), game engine, test command. -->
+- **Test AppID:** every app under testing uses the shared test AppID `wxcd03c1b62d7eb0e0` in its `project.config.json` by default, unless the founder says otherwise for a specific app. The app's own registered AppID is used only for release builds; record it in `docs/<app>/release/` (not in `project.config.json`) until the founder switches that app over. An AppID is public, not a secret. Never put the AppSecret anywhere in the repo.

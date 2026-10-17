@@ -1,0 +1,429 @@
+{
+  "_comment": "Indexes to create in the console (Database > collection > Index management). _id is always indexed. Collections are listed unprefixed here; prefix them with kedupan_. \"reasons\" names the query that needs each index.",
+  "collections": {
+    "daily_sets": [],
+    "daily_card_stats": [],
+    "daily_entries": [
+      {
+        "name": "dateKey_completeAt",
+        "keys": [
+          {
+            "name": "dateKey",
+            "direction": "1"
+          },
+          {
+            "name": "completeAt",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "openid",
+        "keys": [
+          {
+            "name": "openid",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "player_stats": [
+      {
+        "name": "updatedAt",
+        "keys": [
+          {
+            "name": "updatedAt",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "group_members": [
+      {
+        "name": "groupRef",
+        "keys": [
+          {
+            "name": "groupRef",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "openid_groupRef",
+        "keys": [
+          {
+            "name": "openid",
+            "direction": "1"
+          },
+          {
+            "name": "groupRef",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "lastSeen",
+        "keys": [
+          {
+            "name": "lastSeen",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "group_daily": [
+      {
+        "name": "computedAt",
+        "keys": [
+          {
+            "name": "computedAt",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "rounds": [
+      {
+        "name": "createdAt",
+        "keys": [
+          {
+            "name": "createdAt",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "status_createdAt",
+        "keys": [
+          {
+            "name": "status",
+            "direction": "1"
+          },
+          {
+            "name": "createdAt",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "clueMode_clueMod.ts",
+        "keys": [
+          {
+            "name": "clueMode",
+            "direction": "1"
+          },
+          {
+            "name": "clueMod.ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "guesses": [
+      {
+        "name": "roundId",
+        "keys": [
+          {
+            "name": "roundId",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "roundId_late",
+        "keys": [
+          {
+            "name": "roundId",
+            "direction": "1"
+          },
+          {
+            "name": "late",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "groupRef_ts",
+        "keys": [
+          {
+            "name": "groupRef",
+            "direction": "1"
+          },
+          {
+            "name": "ts",
+            "direction": "-1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "ts",
+        "keys": [
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "sub_grants": [
+      {
+        "name": "roundId_used",
+        "keys": [
+          {
+            "name": "roundId",
+            "direction": "1"
+          },
+          {
+            "name": "used",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "used_grantedAt",
+        "keys": [
+          {
+            "name": "used",
+            "direction": "1"
+          },
+          {
+            "name": "grantedAt",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "grantedAt",
+        "keys": [
+          {
+            "name": "grantedAt",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "card_reports": [
+      {
+        "name": "ts",
+        "keys": [
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "item_usage": [],
+    "anomalies": [
+      {
+        "name": "ts",
+        "keys": [
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "events": [
+      {
+        "name": "ts",
+        "keys": [
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "name_ts",
+        "keys": [
+          {
+            "name": "name",
+            "direction": "1"
+          },
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "rate_limits": [
+      {
+        "name": "expireAt",
+        "keys": [
+          {
+            "name": "expireAt",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "app_config": [],
+    "meta": [],
+    "reveal_views": [
+      {
+        "name": "ts",
+        "keys": [
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "mod_log": [
+      {
+        "name": "ts",
+        "keys": [
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "roundId",
+        "keys": [
+          {
+            "name": "roundId",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "kind_ts",
+        "keys": [
+          {
+            "name": "kind",
+            "direction": "1"
+          },
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "mod_quota": [
+      {
+        "name": "ts",
+        "keys": [
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "clue_reports": [
+      {
+        "name": "ts",
+        "keys": [
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "state_ts",
+        "keys": [
+          {
+            "name": "state",
+            "direction": "1"
+          },
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      },
+      {
+        "name": "roundId",
+        "keys": [
+          {
+            "name": "roundId",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ],
+    "audit_log": [
+      {
+        "name": "ts",
+        "keys": [
+          {
+            "name": "ts",
+            "direction": "1"
+          }
+        ],
+        "unique": false
+      }
+    ]
+  },
+  "reasons": {
+    "daily_entries.dateKey_completeAt": "getFriendBoard listing and count, finalizeDay paging, cleanup (dateKey)",
+    "daily_entries.openid": "cleanup / player deletion",
+    "player_stats.updatedAt": "cleanup",
+    "group_members.groupRef": "member list of a group (getDaily/getGroupDay)",
+    "group_members.openid_groupRef": "membership check on every group-aware call",
+    "group_members.lastSeen": "cleanup",
+    "group_daily.computedAt": "cleanup",
+    "rounds.createdAt": "cleanup",
+    "rounds.status_createdAt": "sweepRounds (draft/open rounds oldest first)",
+    "guesses.roundId": "reveal (all guesses of a round), getRound",
+    "guesses.groupRef_ts": "group page rounds list",
+    "guesses.ts": "cleanup",
+    "sub_grants.roundId_used": "claim grants at reveal",
+    "sub_grants.used_grantedAt": "sweepRounds pending sends",
+    "sub_grants.grantedAt": "cleanup",
+    "card_reports.ts": "cleanup",
+    "anomalies.ts": "cleanup",
+    "events.ts": "cleanup",
+    "events.name_ts": "analytics queries",
+    "rate_limits.expireAt": "cleanup",
+    "guesses.roundId_late": "reveal views: on-time guesses in full, late guesses capped (guessesOf)",
+    "reveal_views.ts": "cleanup",
+    "mod_log.ts": "cleanup",
+    "mod_log.roundId": "admin getRound (the evidence of one round)",
+    "mod_log.kind_ts": "sweepRounds busy-rate alert (typed-clue checks of the last hour)",
+    "mod_quota.ts": "cleanup",
+    "clue_reports.ts": "cleanup",
+    "clue_reports.state_ts": "admin listReports (open reports, oldest first) and the sweepRounds 48 h alert",
+    "clue_reports.roundId": "admin getRound / upholdReport / dismissReport (reports of one round)",
+    "audit_log.ts": "cleanup",
+    "rounds.clueMode_clueMod.ts": "admin sample (passed typed clues of the last 24 h)"
+  }
+}

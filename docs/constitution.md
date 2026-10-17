@@ -2,6 +2,8 @@
 
 Adopted 2026-10-15 on the founder's instruction. This document governs how the studio works. Where it conflicts with any other instruction file, agent definition, or default, this document wins. Only the founder can change it (Article 11).
 
+Amended 2026-10-15 on the founder's instruction: Art. 4.4 registration first.
+
 ## Article 1: Purpose
 The studio builds WeChat mini programs (小程序) and mini games (小游戏). The founder sets direction. The CTO (the orchestrator) and the specialist agents carry it out.
 
@@ -21,6 +23,15 @@ The studio builds WeChat mini programs (小程序) and mini games (小游戏). T
 1. Once the founder names or approves an app idea, the CTO takes it all the way to a **release-ready, complete product** without asking for interim approvals.
 2. This covers the spec, design, build, every planned feature, QA, CTO code review, and the release pack. There are no phase gates, MVP cut-offs, or validation pauses unless the founder asks for them.
 3. The CTO makes product and technical decisions itself and logs each one in `docs/<app>/decisions.md`: the date, the decision, the reason, and the alternatives considered. The founder may override any logged decision later.
+4. **Registration first:** As soon as the founder names or approves an app, before or alongside the spec and before any build work, the team immediately produces the complete registration pack in `docs/<app>/release/registration/`, so the founder can register the account and AppID at once. It contains at least:
+   1. the name (小程序名称 or 小游戏名称) with at least 3 fallbacks, each checked against WeChat naming rules (length, no infringing names, no generic-only names, no misleading terms);
+   2. the introduction (简介), within the platform's length limit;
+   3. any short name or nickname fields the registration asks for;
+   4. the service category (服务类目), with a fallback, and any qualification each needs;
+   5. the avatar (profile picture) as final files in the required formats and sizes (PNG and JPG);
+   6. the account-registration steps, with the exact values to paste. These steps also form a "Registration" section at the top of the Founder Handoff (Article 6).
+
+   If the name or any other registration field later changes, the team updates the pack.
 
 ## Article 5: Reserved to the founder (hard stops)
 Agents never do the following. They prepare everything needed, and the founder carries out or explicitly approves each item, one by one:
@@ -37,7 +48,7 @@ Agents never do the following. They prepare everything needed, and the founder c
 
 ## Article 7: Release pack
 For every app, the team produces the following automatically in `docs/<app>/release/`:
-1. Registration fields: the name with fallbacks, the introduction, the service category, and avatar files.
+1. Registration fields: the name with fallbacks, the introduction, the service category, and avatar files. These are produced at the start, as the registration pack under Article 4.4, and kept up to date; they are not first written at release.
 2. 用户隐私保护指引: the items to declare and the text.
 3. 备案: the service description and the form fields.
 4. 软著 materials: the software description, the user manual, and a source-code excerpt pack in the usual 软著 format.

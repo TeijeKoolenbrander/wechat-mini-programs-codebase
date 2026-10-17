@@ -1,0 +1,3179 @@
+传画接龙 V1.0.0 源程序                                          第 1 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+require('./js/main');
+'use strict';
+/**
+ * Game constants (spec 3, 4, 5, 6, 7, 11). Pure data + two helpers. Shared by client, mock server a
+    nd
+ * cloud functions (copied by cloudfunctions/scripts/sync-core.js). Nothing here reads wx, process o
+    r time.
+ *
+ * Remote overrides (app_config) go through `applyRemote`, which clamps every value so a bad console
+     edit
+ * cannot break the rules (spec 17.31: unreadable config -> defaults).
+ */
+const MIN = 60e3;
+const HOUR = 3600e3;
+const DAY = 86400e3;
+const CONFIG = {
+  /** bumped when the 接龙公约 text changes (spec 8.2): everybody is asked again */
+  rulesVersion: 2, // rev. 2 (rooms, 80 turns a day, rolls) is a material change to the agreement (s
+    pec 8.2)
+  promptsVersion: 2,
+  chain: {
+    length: 6, // PO-1: 6 棒 after the prompt
+    drawSteps: [1, 3, 5],
+    describeSteps: [2, 4, 6],
+    maxPerPerson: 3, // PO-3, counts passed + pending, never blocked/void/hidden/deleted
+    earlyRevealMin: 4, // PO-5: 现在揭晓 and expiry reveal need >= 4 passed
+    lifetimeMs: 48 * HOUR,
+    claimTtlMs: 150e3, // PO-4
+    membershipFreshMs: 30 * DAY, // group_members.lastSeen must be this recent to claim (3.3)
+  },
+  timers: { drawSec: 60, describeSec: 45, warnSec: 10 },
+  /** live rooms (spec 3A, PO-41..43), remote-configurable under app_config.room (clamped by applyRe
+    mote) */
+  room: {
+    minPlayers: 3,
+    maxPlayers: 10,
+    maxRounds: 4, // R = min(n - 1, maxRounds); clamp 2-6
+    promptSec: 30,
+    drawSec: 60,
+    describeSec: 45,
+    graceSec: 5,
+    lobbyIdleMin: 30,
+    gameMaxMin: 20,
+    startDelayMs: 1000, // the next round starts this long after the advance so clients can fetch (3
+    A.5)
+    inFlightMs: 8000, // a slot `received` for less than this blocks a deadline end (3A.5)
+    sweepOverdueMs: 10e3, // roomSweeper advances rounds overdue by more than this
+    quietMs: 60e3, // lobby "可能已离开" hint after this much silence (3A.6)
+    signalKeepMs: DAY, // room_signals and closed lobbies are deleted this long after the end (7.5)
+  },
+
+传画接龙 V1.0.0 源程序                                          第 2 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  /** realtime sync (3A.7), remote-configurable under app_config.rt */
+  rt: { watch: true, pollSec: 2, safetyPollSec: 10 },
+  text: {
+    promptMin: 2,
+    promptMax: 12,
+    describeMin: 2,
+    describeMax: 16,
+    /** 5 or more digits in total are rejected (5.6) */
+    digitsReject: 5,
+  },
+  strokes: {
+    version: 2, // v2 adds the stored height `h`; v1 (square, h = 1024) still decodes (5.3)
+    grid: 1024,
+    minH: 768,
+    maxH: 2048,
+    maxStrokes: 200,
+    maxPoints: 4000,
+    maxPointsPerStroke: 600,
+    maxBytes: 32 * 1024,
+    /** ink budget: total path length of all strokes in grid units (backend raster cost guard, TD-24
+     backend; reason 'pathLength') */
+    maxPathUnits: 250000,
+    /** the recorder stops this far below the cap (the longest single segment is about 1,450 units) 
+    so a conforming drawing always validates */
+    pathMargin: 1500,
+    minPointDist: 3, // grid units between kept points (5.1)
+    colors: 12,
+    sizes: 3,
+  },
+  raster: { size: 512 }, // server PNG for moderation: 512 x round(512 * h / 1024); widths scale wit
+    h size / 1024
+  allowances: {
+    freeStarts: 3,
+    adStartsMax: 2,
+    stepsPerDay: 80, // sent turns across both modes, markers excluded (PO-48)
+    roomsCreatedPerDay: 10,
+    roomsJoinedPerDay: 30,
+    claimsPerChainPerDay: 3,
+    reportsPerDay: 10,
+  },
+  moderation: {
+    scene: 3, // 论坛 (6.1, V3)
+    textTimeoutMs: 3000, // general msgSecCheck
+    textGameTimeoutMs: 2000, // game msgSecCheck (6.1: the doc suggests 1 s, we use 2 s)
+    imageSyncTimeoutMs: 5000, // mediaCheckSync (6.1: the doc recommends 5 s)
+    imageMode: 'sync', // 'sync' (default) | 'async' (fallback: live rooms off, 6.9-6.10)
+    textApi: 'game', // 'game' | 'general'
+    notSupportedCode: 750031, // mediaCheckSync: game not configured for this AppID (6.1) -> imageMo
+    de becomes 'async'
+    mockSyncDelayMs: 800,
+
+传画接龙 V1.0.0 源程序                                          第 3 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    devImageDailyBudget: 200,
+    pendingTimeoutMs: 35 * MIN, // 6.3 step 7
+    callRetryAfterMs: [5 * MIN, 10 * MIN], // 6.3 step 8: retry k at submittedAt + this[k-1]
+    maxCallErrors: 3, // initial attempt + 2 retries
+    maxRechecks: 1,
+    mockMediaDelaySec: 60,
+    devTextDailyBudget: 80, // of the ~100 pre-publish msgSecCheck calls (6.6)
+    quota: { imageDaily: 200000, alertAt: 0.7, createPauseAt: 0.95, failAt: 1 },
+    breaker: { windowMs: 5 * MIN, minCalls: 20, failRate: 0.5, pauseMs: 15 * MIN },
+  },
+  strikes: {
+    windowMs: 30 * DAY,
+    /** strikes in the window -> consequence (7.3) */
+    ladder: [
+      { at: 1, warn: true, restrictMs: 0, flag: false },
+      { at: 2, warn: false, restrictMs: 24 * HOUR, flag: false },
+      { at: 3, warn: false, restrictMs: 7 * DAY, flag: false },
+      { at: 4, warn: false, restrictMs: 30 * DAY, flag: true },
+    ],
+  },
+  reports: { reasons: ['porn', 'politics', 'abuse', 'ad', 'other'], staleAlertMs: 48 * HOUR },
+  retention: { days: 180, abandonedDays: 1 },
+  /** reveal notices are held between these Beijing hours (7.6, AC 78) */
+  quietHours: { fromHour: 22, toHour: 8 },
+  roll: { size: 3, window: 300, rerollsPerPick: 5 }, // 4.1: 3 prompts from 3 categories, never amon
+    g the last 300 shown; up to 5 换一批 per pick (TD-151)
+  stats: { streakMin: 2 },
+  cache: { appConfigHomeMs: 60e3, appConfigGateMs: 10e3 },
+  ads: {
+    interstitial: { enabled: true, minLifetimeReveals: 3, minGapSec: 180, maxPerDay: 3, clampMinGapS
+    ec: 180, clampMaxPerDay: 3 },
+    banner: { enabled: false },
+    rewardedStartsPerDay: 2,
+    paletteUnlocksPerDay: 1,
+  },
+  groupList: { revealedMax: 20, albumPage: 20 },
+  reactions: { perStepPerPlayer: 1 },
+};
+function clampInt(v, lo, hi, dflt) {
+  return Number.isInteger(v) ? Math.min(hi, Math.max(lo, v)) : dflt;
+}
+/** A deep copy of the defaults, so callers (tests, remote config) can mutate their own. */
+function getConfig() {
+  return JSON.parse(JSON.stringify(CONFIG));
+}
+/**
+ * Merge the remote `app_config` document (spec 13.1) over the defaults with clamping.
+ * Unknown or malformed fields are ignored. Returns {config, ugc, subscribe, features}.
+ */
+function applyRemote(remote) {
+
+传画接龙 V1.0.0 源程序                                          第 4 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const cfg = getConfig();
+  const r = remote && typeof remote === 'object' ? remote : {};
+  if (r.timers && typeof r.timers === 'object') {
+    cfg.timers.drawSec = clampInt(r.timers.drawSec, 15, 180, cfg.timers.drawSec);
+    cfg.timers.describeSec = clampInt(r.timers.describeSec, 15, 180, cfg.timers.describeSec);
+  }
+  const ia = r.ads && r.ads.interstitial;
+  if (ia && typeof ia === 'object') {
+    const c = cfg.ads.interstitial;
+    if (typeof ia.enabled === 'boolean') c.enabled = ia.enabled;
+    c.minLifetimeReveals = clampInt(ia.minLifetimeReveals, 0, 50, c.minLifetimeReveals);
+    c.minGapSec = clampInt(ia.minGapSec, c.clampMinGapSec, 3600, c.minGapSec);
+    c.maxPerDay = clampInt(ia.maxPerDay, 0, c.clampMaxPerDay, c.maxPerDay);
+  }
+  const ban = r.ads && r.ads.banner;
+  const banner = { enabled: false, adUnitId: null };
+  if (ban && typeof ban === 'object') {
+    banner.enabled = ban.enabled === true;
+    banner.adUnitId = typeof ban.adUnitId === 'string' && ban.adUnitId ? ban.adUnitId : null;
+  }
+  const ugcIn = r.ugc && typeof r.ugc === 'object' ? r.ugc : {};
+  const ugc = {
+    createEnabled: ugcIn.createEnabled !== false, // missing -> enabled (17.31)
+    viewEnabled: ugcIn.viewEnabled !== false,
+    autoPausedUntil: Number.isFinite(ugcIn.autoPausedUntil) ? ugcIn.autoPausedUntil : 0,
+  };
+  const sub = r.subscribe && typeof r.subscribe.tmplId === 'string' && r.subscribe.tmplId ? { tmplId
+    : r.subscribe.tmplId } : null;
+  if (r.room && typeof r.room === 'object') {
+    const c = cfg.room;
+    const x = r.room;
+    c.minPlayers = clampInt(x.minPlayers, 3, 10, c.minPlayers);
+    c.maxPlayers = clampInt(x.maxPlayers, Math.max(3, c.minPlayers), 10, c.maxPlayers);
+    c.maxRounds = clampInt(x.maxRounds, 2, 6, c.maxRounds);
+    c.promptSec = clampInt(x.promptSec, 10, 120, c.promptSec);
+    c.drawSec = clampInt(x.drawSec, 15, 180, c.drawSec);
+    c.describeSec = clampInt(x.describeSec, 15, 180, c.describeSec);
+    c.graceSec = clampInt(x.graceSec, 0, 15, c.graceSec);
+    c.lobbyIdleMin = clampInt(x.lobbyIdleMin, 1, 240, c.lobbyIdleMin);
+    c.gameMaxMin = clampInt(x.gameMaxMin, 5, 120, c.gameMaxMin);
+  }
+  if (r.rt && typeof r.rt === 'object') {
+    if (typeof r.rt.watch === 'boolean') cfg.rt.watch = r.rt.watch;
+    cfg.rt.pollSec = clampInt(r.rt.pollSec, 1, 10, cfg.rt.pollSec);
+    cfg.rt.safetyPollSec = clampInt(r.rt.safetyPollSec, 5, 60, cfg.rt.safetyPollSec);
+  }
+  const m = r.moderation && typeof r.moderation === 'object' ? r.moderation : {};
+  cfg.moderation.imageMode = m.imageMode === 'async' ? 'async' : 'sync'; // anything else -> the def
+    ault 'sync' (6.9)
+  cfg.moderation.textApi = m.textApi === 'general' ? 'general' : 'game';
+
+传画接龙 V1.0.0 源程序                                          第 5 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const f = r.features && typeof r.features === 'object' ? r.features : {};
+  const features = {
+    updatableCard: f.updatableCard === true, // default off until the device pass (V7)
+    // live rooms are the default, and `imageMode: 'async'` forces them off (6.9 item 6, AC 154)
+    liveRooms: f.liveRooms !== false && cfg.moderation.imageMode === 'sync',
+  };
+  return { config: cfg, ugc, subscribe: sub, banner, features };
+}
+/** Is creation (new chains, claims, submissions) allowed right now? (6.8). Viewing is `ugc.viewEnab
+    led`. */
+function ugcCreateAllowed(ugc, nowMs) {
+  const u = ugc || {};
+  if (u.createEnabled === false) return { ok: false, source: 'switch' };
+  if (Number.isFinite(u.autoPausedUntil) && u.autoPausedUntil > nowMs) return { ok: false, source: '
+    breaker' };
+  return { ok: true, source: null };
+}
+module.exports = { CONFIG, getConfig, applyRemote, ugcCreateAllowed, MIN, HOUR, DAY };
+/**
+ * Beijing date helpers (spec 5.2, AC 66). Explicit UTC+8 arithmetic: never
+ * uses local-time getters, so the answer is the same whatever TZ the process
+ * (or the device) runs in.
+ */
+const BJT_OFFSET_MS = 8 * 3600e3;
+const DAY_MS = 86400e3;
+/** 'YYYYMMDD' of the Beijing date at epoch-ms `nowMs`. */
+function beijingDateKey(nowMs) {
+  return new Date(nowMs + BJT_OFFSET_MS).toISOString().slice(0, 10).replace(/-/g, '');
+}
+/** Epoch-ms of 00:00 Beijing time on the date of `nowMs`. */
+function beijingMidnightMs(nowMs) {
+  return Math.floor((nowMs + BJT_OFFSET_MS) / DAY_MS) * DAY_MS - BJT_OFFSET_MS;
+}
+/** Seconds after 00:00 BJT (board tie-break `s`, spec 11.4). */
+function secondsSinceBeijingMidnight(nowMs) {
+  return Math.floor((nowMs - beijingMidnightMs(nowMs)) / 1000);
+}
+/** Epoch-ms of 00:00 BJT for a 'YYYYMMDD' key. */
+function dateKeyToMs(key) {
+  const y = +key.slice(0, 4);
+  const m = +key.slice(4, 6);
+  const d = +key.slice(6, 8);
+  return Date.UTC(y, m - 1, d) - BJT_OFFSET_MS;
+}
+/** The key `n` days after `key` (n may be negative). */
+function addDays(key, n) {
+  return beijingDateKey(dateKeyToMs(key) + n * DAY_MS + 12 * 3600e3);
+}
+/** Whole days from key a to key b. */
+function daysBetween(a, b) {
+
+传画接龙 V1.0.0 源程序                                          第 6 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  return Math.round((dateKeyToMs(b) - dateKeyToMs(a)) / DAY_MS);
+}
+/** Milliseconds until the next 00:00 BJT. */
+function msUntilBeijingMidnight(nowMs) {
+  return beijingMidnightMs(nowMs) + DAY_MS - nowMs;
+}
+/** Day of week (0 = Sunday) of the Beijing date 'YYYYMMDD'. Pure calendar arithmetic, TZ independen
+    t. */
+function weekdayOf(key) {
+  return new Date(Date.UTC(+key.slice(0, 4), +key.slice(4, 6) - 1, +key.slice(6, 8))).getUTCDay();
+}
+/**
+ * The daily variant of a date key (spec 5.2/8.11, PO-1): 'shiren' on the config weekday (Sunday), e
+    lse 'standard'.
+ * `weekday` is config.shiren.weekday. Display only: the seed, sheet, sim, gates and validation neve
+    r look at it.
+ */
+function variantOf(key, weekday) {
+  return weekdayOf(key) === (weekday === undefined ? 0 : weekday) ? 'shiren' : 'standard';
+}
+module.exports = {
+  weekdayOf,
+  variantOf,
+  BJT_OFFSET_MS,
+  DAY_MS,
+  beijingDateKey,
+  beijingMidnightMs,
+  secondsSinceBeijingMidnight,
+  dateKeyToMs,
+  addDays,
+  daysBetween,
+  msUntilBeijingMidnight,
+};
+/**
+ * Seeded randomness (spec 5.1). Pure JS, no wx, no DOM: this file is copied
+ * into the cloud functions, so client and server draw identical streams.
+ *
+ *   sub(seed, name) = mulberry32(hash32(seed + ":" + name))
+ */
+/** mulberry32: same seed, same sequence, forever. Returns () => float in [0,1). */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+/** FNV-1a over UTF-16 code units, then a murmur3 finaliser. Returns uint32. */
+
+传画接龙 V1.0.0 源程序                                          第 7 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+function hash32(str) {
+  const s = String(str);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+/** A named sub-stream of a run seed. */
+function sub(seed, name) {
+  return mulberry32(hash32(seed + ':' + name));
+}
+/** Integer in [0, maxExclusive). */
+function int(rng, maxExclusive) {
+  return Math.floor(rng() * maxExclusive);
+}
+/** A uniformly random element of `arr`. */
+function pick(rng, arr) {
+  return arr[int(rng, arr.length)];
+}
+/** Fisher-Yates, in place. Returns the same array. */
+function shuffle(rng, arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = int(rng, i + 1);
+    const t = arr[i];
+    arr[i] = arr[j];
+    arr[j] = t;
+  }
+  return arr;
+}
+/** A fresh random uint32 from Math.random (client-side free-play seeds only). */
+function randomSeed() {
+  return Math.floor(Math.random() * 4294967296) >>> 0;
+}
+module.exports = { mulberry32, hash32, sub, int, pick, shuffle, randomSeed };
+'use strict';
+/**
+ * Stroke data (spec 5, PO-10/11/39, AC 21-27, 30, 31, 122-126). Shared by the drawing tool, the ren
+    derers, the mock server and
+ * the cloud functions. Pure JS, no wx.
+ *
+ * WIRE FORMAT v2 (what clients upload and servers store; `Strokes` in spec 12):
+ *   { v: 2, h: 1363, s: [ [c, w, x0, y0, dx1, dy1, dx2, dy2, ...], ... ] }
+ *   c = colour index 0-11, w = size index 0-2, (x0, y0) absolute grid point, then integer deltas. T
+
+传画接龙 V1.0.0 源程序                                          第 8 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    he logical grid is always
+ *   1024 wide and `h` high (768-2048): h = round(1024 * canvasH / canvasW), clamped (F-3, PO-39).
+ *   v1 compatibility: { v: 1, s } (no h) decodes as h = 1024 (square). Stored v1 drawings stay vali
+    d and a v1 upload is still
+ *   accepted. The delta form is the "compression": typical drawings are 4-15 KB of JSON.
+ *
+ * ABSOLUTE FORM (in memory, easier to draw): [{ c, w, p: [x0, y0, x1, y1, ...] }]. fromAbsolute/toA
+    bsolute convert
+ * exactly (AC 24 round trip, including h).
+ *
+ * CANONICAL GEOMETRY: toPolylines()/absToPolylines() is the one description of what a drawing looks
+     like. The client
+ * renderer (render/strokes.js), the server rasteriser (core/raster.js) and the reveal replay all co
+    nsume it, so the
+ * moderated PNG and the on-screen drawing agree (AC 27, 30). The output space is `size` px wide and
+     size * h / 1024 high (the
+ * same scale on both axes). Every consumer must draw each polyline with round caps and round joins 
+    and `width` px; a
+ * one-point stroke is a filled circle. No smoothing for stored content (smoothing is allowed only o
+    n the stroke still being
+ * drawn).
+ *
+ * LAYOUT HELPERS (pure, so renderer and tests share them): gridHeight, canvasFit (the canvas rect i
+    nside the free space,
+ * clamped to the 0.75-2.0 aspect and centred, 5.1) and containFit (a drawing in any rect, 5.7).
+ */
+const { CONFIG } = require('./config');
+const L = CONFIG.strokes;
+/** 12 colours: 0-5 base (墨 朱 橙 绿 蓝 紫), 6-11 今日彩笔 (粉 黄 天青 棕 灰 草), spec 5.2 */
+const COLORS = ['#1E1B18', '#D8433B', '#F29B30', '#3E9B5A', '#3C78C8', '#7B4FB3', '#F28DB2', '#F2D13
+    C', '#6CC3E0', '#8A5A3B', '#9A9A9A', '#9CCB4A'];
+const COLOR_NAMES = ['墨', '朱', '橙', '绿', '蓝', '紫', '粉', '黄', '天青', '棕', '灰', '草'];
+const BASE_COLORS = 6;
+/** brush widths in grid units: 细 中 粗 */
+const SIZES = [8, 18, 36];
+const REPLAY_MS = 2500;
+/** total polyline length of a wire-format drawing in grid units, straight from the deltas (no alloc
+    ation) */
+function pathLength(d) {
+  let sum = 0;
+  for (const st of d.s) for (let i = 4; i < st.length; i += 2) sum += Math.sqrt(st[i] * st[i] + st[i
+     + 1] * st[i + 1]);
+  return sum;
+}
+/** length of one absolute stroke {p:[x,y,...]} */
+function absLength(st) {
+  let sum = 0;
+  for (let i = 2; i < st.p.length; i += 2) sum += Math.hypot(st.p[i] - st.p[i - 2], st.p[i + 1] - st
+    .p[i - 1]);
+  return sum;
+
+传画接龙 V1.0.0 源程序                                          第 9 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+}
+function isInt(n) {
+  return typeof n === 'number' && Number.isInteger(n);
+}
+/** the logical height of a drawing: `h` for v2, 1024 for v1 */
+function heightOf(d) {
+  return d && d.v === 2 && isInt(d.h) ? d.h : L.grid;
+}
+/** an empty v2 drawing of height `h` (default square) */
+function empty(h) {
+  return { v: L.version, h: h === undefined ? L.grid : h, s: [] };
+}
+/** h = round(1024 * canvasH / canvasW) clamped to 768-2048 (5.1, AC 124) */
+function gridHeight(canvasW, canvasH) {
+  if (!(canvasW > 0) || !(canvasH > 0)) return L.grid;
+  return Math.min(L.maxH, Math.max(L.minH, Math.round((L.grid * canvasH) / canvasW)));
+}
+/**
+ * The canvas rect inside the free rect {x, y, w, h} (5.1, AC 124): the full free rect when its aspe
+    ct (h / w) is inside 0.75-2.0,
+ * else reduced to the clamped aspect and centred. Returns {x, y, w, h, gridH}; the rect and gridH a
+    re fixed for the turn.
+ */
+function canvasFit(free) {
+  const lo = L.minH / L.grid;
+  const hi = L.maxH / L.grid;
+  let { x, y, w, h } = free;
+  if (h / w < lo) {
+    const nw = h / lo;
+    x += (w - nw) / 2;
+    w = nw;
+  } else if (h / w > hi) {
+    const nh = w * hi;
+    y += (h - nh) / 2;
+    h = nh;
+  }
+  return { x, y, w, h, gridH: gridHeight(w, h) };
+}
+/**
+ * A drawing of logical height `gridH` shown contain-fitted and centred in a rect (5.7, AC 125): nev
+    er cropped or stretched.
+ * Returns {scale, x, y, w, h} = the drawing's paper rect; the rest of the rect is the margin tone.
+ */
+function containFit(rect, gridH) {
+  const hh = gridH || L.grid;
+  const scale = Math.min(rect.w / L.grid, rect.h / hh);
+  const w = L.grid * scale;
+  const h = hh * scale;
+  return { scale, x: rect.x + (rect.w - w) / 2, y: rect.y + (rect.h - h) / 2, w, h };
+}
+
+传画接龙 V1.0.0 源程序                                         第 10 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+/**
+ * Validate a wire-format drawing (server authority, client enforces the same).
+ * @param {*} d
+ * @param {{requireStroke?: boolean}} [opts] requireStroke (default true): a submitted drawing needs
+     >= 1 stroke
+ * @returns {{ok:true, strokes:number, points:number, bytes:number, h:number} | {ok:false, reason:st
+    ring}}
+ *   reason: shape version height empty strokes points perStroke range color size bytes pathLength
+ */
+function validate(d, opts) {
+  const requireStroke = !opts || opts.requireStroke !== false;
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return { ok: false, reason: 'shape' };
+  const keys = Object.keys(d);
+  if (d.v !== 1 && d.v !== 2) return { ok: false, reason: keys.includes('v') ? 'version' : 'shape' }
+    ;
+  const want = d.v === 2 ? 3 : 2;
+  if (keys.length !== want || !keys.includes('s') || (d.v === 2 && !keys.includes('h'))) return { ok
+    : false, reason: 'shape' };
+  let h = L.grid;
+  if (d.v === 2) {
+    if (!isInt(d.h) || d.h < L.minH || d.h > L.maxH) return { ok: false, reason: 'height' };
+    h = d.h;
+  }
+  if (!Array.isArray(d.s)) return { ok: false, reason: 'shape' };
+  if (d.s.length > L.maxStrokes) return { ok: false, reason: 'strokes' };
+  if (requireStroke && d.s.length === 0) return { ok: false, reason: 'empty' };
+  let points = 0;
+  for (const st of d.s) {
+    if (!Array.isArray(st) || st.length < 4) return { ok: false, reason: 'shape' };
+    if ((st.length - 2) % 2 !== 0) return { ok: false, reason: 'shape' };
+    const n = (st.length - 2) / 2;
+    if (n > L.maxPointsPerStroke) return { ok: false, reason: 'perStroke' };
+    points += n;
+    if (points > L.maxPoints) return { ok: false, reason: 'points' };
+    for (let i = 0; i < st.length; i++) if (!isInt(st[i])) return { ok: false, reason: 'shape' };
+    if (st[0] < 0 || st[0] >= L.colors) return { ok: false, reason: 'color' };
+    if (st[1] < 0 || st[1] >= L.sizes) return { ok: false, reason: 'size' };
+    let x = st[2];
+    let y = st[3];
+    if (x < 0 || x >= L.grid || y < 0 || y >= h) return { ok: false, reason: 'range' };
+    for (let i = 4; i < st.length; i += 2) {
+      x += st[i];
+      y += st[i + 1];
+      if (x < 0 || x >= L.grid || y < 0 || y >= h) return { ok: false, reason: 'range' };
+    }
+  }
+  const bytes = JSON.stringify(d).length; // digits, '-', ',', '[' ']' only: ASCII, so length == byt
+    es
+  if (bytes > L.maxBytes) return { ok: false, reason: 'bytes' };
+  if (pathLength(d) > L.maxPathUnits) return { ok: false, reason: 'pathLength' };
+
+传画接龙 V1.0.0 源程序                                         第 11 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  return { ok: true, strokes: d.s.length, points, bytes, h };
+}
+/** absolute strokes [{c,w,p:[x0,y0,x1,y1..]}] -> wire format v2 with height `h` (default 1024). Poi
+    nts are rounded to integers. */
+function fromAbsolute(abs, h) {
+  const s = abs.map((st) => {
+    const out = [st.c, st.w];
+    let px = 0;
+    let py = 0;
+    for (let i = 0; i < st.p.length; i += 2) {
+      const x = Math.round(st.p[i]);
+      const y = Math.round(st.p[i + 1]);
+      if (i === 0) out.push(x, y);
+      else out.push(x - px, y - py);
+      px = x;
+      py = y;
+    }
+    return out;
+  });
+  return { v: L.version, h: h === undefined ? L.grid : h, s };
+}
+/** wire format -> absolute strokes (assumes a valid drawing; run validate first for untrusted input
+    ) */
+function toAbsolute(d) {
+  return d.s.map((st) => {
+    const p = [st[2], st[3]];
+    let x = st[2];
+    let y = st[3];
+    for (let i = 4; i < st.length; i += 2) {
+      x += st[i];
+      y += st[i + 1];
+      p.push(x, y);
+    }
+    return { c: st[0], w: st[1], p };
+  });
+}
+function pointCount(d) {
+  let n = 0;
+  for (const st of d.s) n += (st.length - 2) / 2;
+  return n;
+}
+/** distinct colours used (analytics `colorsUsed`) */
+function colorsUsed(d) {
+  return new Set(d.s.map((st) => st[0])).size;
+}
+/** true when the drawing uses a colour from the 今日彩笔 set (analytics `palette`) */
+function usesPaletteColor(d) {
+  return d.s.some((st) => st[0] >= BASE_COLORS);
+}
+// ---- canonical geometry -------------------------------------------------------------------------
+
+传画接龙 V1.0.0 源程序                                         第 12 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    ----------
+/**
+ * Absolute strokes -> polylines in an output space `size` px wide (and size * h / 1024 high: one sc
+    ale for both axes).
+ * Grid cell i is drawn centred at (i + 0.5) * scale.
+ * @returns {{c:number, color:string, width:number, dot:boolean, pts:number[]}[]}
+ */
+function absToPolylines(abs, size) {
+  const scale = (size || L.grid) / L.grid;
+  return abs.map((st) => {
+    const pts = new Array(st.p.length);
+    for (let i = 0; i < st.p.length; i++) pts[i] = (st.p[i] + 0.5) * scale;
+    return { c: st.c, color: COLORS[st.c], width: SIZES[st.w] * scale, dot: st.p.length <= 2, pts };
+  });
+}
+/** Wire format -> polylines (see absToPolylines). Works for v1 and v2. */
+function toPolylines(d, size) {
+  return absToPolylines(toAbsolute(d), size);
+}
+function polyLength(pts) {
+  let len = 0;
+  for (let i = 2; i < pts.length; i += 2) len += Math.hypot(pts[i] - pts[i - 2], pts[i + 1] - pts[i 
+    - 1]);
+  return len;
+}
+/**
+ * Reveal replay (8.9, AC 31): the first `frac` (0..1) of the drawing in drawing order, by path leng
+    th with a minimum
+ * weight per stroke so dots and short strokes still take time. frac = min(1, elapsedMs / REPLAY_MS)
+     whatever the size,
+ * which is what makes every drawing replay in 2.5 s. Returns new polylines; the last one may be cut
+     part-way.
+ */
+function replayPolylines(polys, frac) {
+  if (frac >= 1) return polys;
+  if (frac <= 0) return [];
+  const weights = polys.map((p) => Math.max(polyLength(p.pts), p.width * 3)); // a dot or tiny strok
+    e still takes a beat
+  const total = weights.reduce((a, b) => a + b, 0);
+  let budget = frac * total;
+  const out = [];
+  for (let i = 0; i < polys.length && budget > 0; i++) {
+    const p = polys[i];
+    if (budget >= weights[i]) {
+      out.push(p);
+      budget -= weights[i];
+      continue;
+    }
+    // partial stroke: keep the leading part of the path
+    const part = budget / weights[i];
+
+传画接龙 V1.0.0 源程序                                         第 13 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    const want = polyLength(p.pts) * part;
+    const pts = [p.pts[0], p.pts[1]];
+    let acc = 0;
+    for (let k = 2; k < p.pts.length; k += 2) {
+      const seg = Math.hypot(p.pts[k] - p.pts[k - 2], p.pts[k + 1] - p.pts[k - 1]);
+      if (acc + seg >= want) {
+        const t = seg === 0 ? 0 : (want - acc) / seg;
+        pts.push(p.pts[k - 2] + (p.pts[k] - p.pts[k - 2]) * t, p.pts[k - 1] + (p.pts[k + 1] - p.pts[
+    k - 1]) * t);
+        break;
+      }
+      pts.push(p.pts[k], p.pts[k + 1]);
+      acc += seg;
+    }
+    out.push({ c: p.c, color: p.color, width: p.width, dot: pts.length <= 2, pts });
+    budget = 0;
+  }
+  return out;
+}
+// ---- recorder: the drawing tool's state machine (client) ----------------------------------------
+    -------------
+/**
+ * Records touches into strokes with the rules of 5.1-5.3. Pure state, no timers, no canvas: the con
+    troller feeds it
+ * grid coordinates (already mapped from touch positions), the renderer reads `strokes` (absolute) a
+    nd `rev`.
+ * `opts.h` is the stored height of this turn's canvas (768-2048, default 1024); it is fixed for the
+     recorder's life (5.1).
+ *
+ *   begin(x, y, colorIdx, sizeIdx) -> boolean   false if a limit blocks a new stroke (then `blocked
+    ` is set)
+ *   move(x, y)                     -> boolean   true if a point was kept (>= minPointDist from the 
+    last kept point)
+ *   end()                           finish the stroke (a tap becomes a one-point dot)
+ *   undo() -> boolean               remove the last stroke (unlimited)
+ *   clear()                         remove everything (undo cannot restore; the UI asks first)
+ *   drawing() -> wire format v2     what submitStep / submitRoomStep send
+ */
+function createRecorder(opts) {
+  const o = Object.assign({}, L, opts || {});
+  const gridH = isInt(o.h) ? Math.min(L.maxH, Math.max(L.minH, o.h)) : L.grid;
+  const strokes = []; // absolute
+  let cur = null;
+  let points = 0;
+  let rev = 0;
+  let undoCount = 0;
+  let pathUsed = 0;
+  let pathFull = false; // a move was refused because the ink budget is spent
+  const pathCap = o.maxPathUnits - o.pathMargin;
+  const r = {
+
+传画接龙 V1.0.0 源程序                                         第 14 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    get strokes() { return strokes; },
+    get rev() { return rev; },
+    /** the stored height of this turn's drawing */
+    get h() { return gridH; },
+    get pointsUsed() { return points; },
+    get undoCount() { return undoCount; },
+    get strokeCount() { return strokes.length; },
+    get pathUsed() { return pathUsed; },
+    /** the ink budget is spent: no more strokes (the player is told to submit) */
+    get pathFull() { return pathFull; },
+    get drawingNow() { return cur !== null; },
+    /** a limit has been hit: stroke count, total points, (the per-stroke cap only stops that stroke
+    ) */
+    get blocked() { return strokes.length >= o.maxStrokes || points >= o.maxPoints || pathFull; },
+    get canUndo() { return strokes.length > 0 && cur === null; },
+    get canSubmit() { return strokes.length > 0 && cur === null; },
+  };
+  const clampX = (v) => Math.max(0, Math.min(o.grid - 1, Math.round(v)));
+  const clampY = (v) => Math.max(0, Math.min(gridH - 1, Math.round(v)));
+  r.begin = function begin(x, y, colorIdx, sizeIdx) {
+    if (cur || r.blocked) return false;
+    if (!isInt(colorIdx) || colorIdx < 0 || colorIdx >= o.colors || !isInt(sizeIdx) || sizeIdx < 0 |
+    | sizeIdx >= o.sizes) return false;
+    cur = { c: colorIdx, w: sizeIdx, p: [clampX(x), clampY(y)] };
+    strokes.push(cur);
+    points += 1;
+    rev++;
+    return true;
+  };
+  r.move = function move(x, y) {
+    if (!cur) return false;
+    if (points >= o.maxPoints || cur.p.length / 2 >= o.maxPointsPerStroke) return false;
+    const gx = clampX(x);
+    const gy = clampY(y);
+    const lx = cur.p[cur.p.length - 2];
+    const ly = cur.p[cur.p.length - 1];
+    const dx = gx - lx;
+    const dy = gy - ly;
+    if (dx * dx + dy * dy < o.minPointDist * o.minPointDist) return false;
+    const seg = Math.sqrt(dx * dx + dy * dy);
+    if (pathUsed + seg > pathCap) {
+      pathFull = true;
+      return false;
+    }
+    pathUsed += seg;
+    cur.p.push(gx, gy);
+    points += 1;
+    rev++;
+    return true;
+  };
+
+传画接龙 V1.0.0 源程序                                         第 15 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  r.end = function end() {
+    cur = null;
+  };
+  r.undo = function undo() {
+    if (cur || !strokes.length) return false;
+    const st = strokes.pop();
+    points -= st.p.length / 2;
+    pathUsed = Math.max(0, pathUsed - absLength(st));
+    pathFull = false;
+    undoCount++;
+    rev++;
+    return true;
+  };
+  r.clear = function clear() {
+    cur = null;
+    strokes.length = 0;
+    points = 0;
+    pathUsed = 0;
+    pathFull = false;
+    rev++;
+  };
+  r.drawing = function drawing() {
+    return fromAbsolute(strokes, gridH);
+  };
+  /** restore from a saved wire-format drawing (app killed mid-turn, 17.21). A drawing of another he
+    ight is refused. */
+  r.load = function load(d) {
+    const v = validate(d, { requireStroke: false });
+    if (!v.ok || v.h !== gridH) return false;
+    r.clear();
+    for (const st of toAbsolute(d)) strokes.push(st);
+    points = v.points;
+    pathUsed = pathLength(d);
+    pathFull = pathUsed >= pathCap;
+    rev++;
+    return true;
+  };
+  return r;
+}
+module.exports = {
+  COLORS, COLOR_NAMES, BASE_COLORS, SIZES, REPLAY_MS,
+  empty, heightOf, gridHeight, canvasFit, containFit, validate, pathLength, fromAbsolute, toAbsolute
+    , pointCount, colorsUsed, usesPaletteColor,
+  absToPolylines, toPolylines, replayPolylines, createRecorder,
+};
+'use strict';
+/**
+ * Text rules for custom prompts (2-12) and descriptions (2-16), spec 5.6 / PO-12. Shared by the cli
+    ent (input
+ * filtering, button state) and the cloud functions (the authority). Pure JS, no wx.
+
+传画接龙 V1.0.0 源程序                                         第 16 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+ *
+ *   inputFilter(raw, kind)  -> {text, dropped}   client: drop disallowed characters while typing, c
+    lip to the max
+ *   validate(raw, kind)     -> {ok:true, text} | {ok:false, reason}   server (and client before sub
+    mit)
+ *   validCharCount(raw)     -> number of valid code points (auto-submit rule: >= 2)
+ *
+ * A rejection `reason` is one of: length chars digits url contact handle blocklist. Every reason ma
+    ps to the
+ * error code TEXT_REJECTED ("换个说法吧"): the API was never called, no strike (AC 34, 35).
+ */
+const { CONFIG } = require('./config');
+const blocklist = require('./content/blocklist.v1');
+const KINDS = {
+  prompt: { min: CONFIG.text.promptMin, max: CONFIG.text.promptMax },
+  describe: { min: CONFIG.text.describeMin, max: CONFIG.text.describeMax },
+};
+const PUNCT = new Set(['，', '。', '！', '？', '、', '…', '—', '·', '~', '～', ',', '.', '!', '?', '-']);
+function codePoints(s) {
+  return Array.from(String(s === undefined || s === null ? '' : s));
+}
+function count(s) {
+  return codePoints(s).length;
+}
+/** fullwidth letters/digits -> ASCII (everything else untouched) */
+function foldFullwidthAlnum(ch) {
+  const c = ch.codePointAt(0);
+  if ((c >= 0xff10 && c <= 0xff19) || (c >= 0xff21 && c <= 0xff3a) || (c >= 0xff41 && c <= 0xff5a)) 
+    return String.fromCharCode(c - 0xfee0);
+  return ch;
+}
+function isCjk(c) {
+  return (c >= 0x4e00 && c <= 0x9fff) || (c >= 0x3400 && c <= 0x4dbf) || c === 0x3007;
+}
+/** Allowed after folding: CJK, ASCII letters and digits, the listed punctuation, a plain space. */
+function isAllowed(ch) {
+  const c = ch.codePointAt(0);
+  if (isCjk(c)) return true;
+  if ((c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) return true;
+  if (ch === ' ') return true;
+  return PUNCT.has(ch);
+}
+/**
+ * Remove emoji and other disallowed characters, fold fullwidth letters/digits, turn any whitespace 
+    into one
+ * space and collapse runs. Does not trim (so typing a space between words works) unless {trim:true}
+    .
+ */
+function sanitize(raw, opts) {
+  const out = [];
+
+传画接龙 V1.0.0 源程序                                         第 17 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  for (const ch0 of codePoints(raw)) {
+    let ch = foldFullwidthAlnum(ch0);
+    if (/\s/.test(ch) || ch === '　') ch = ' ';
+    if (!isAllowed(ch)) continue;
+    if (ch === ' ' && out[out.length - 1] === ' ') continue;
+    out.push(ch);
+  }
+  let s = out.join('');
+  if (opts && opts.trim) s = s.trim();
+  return s;
+}
+/** Client input filter: sanitize, then clip to the maximum for `kind`. `dropped` is true when somet
+    hing was removed or clipped. */
+function inputFilter(raw, kind) {
+  const k = KINDS[kind];
+  const before = codePoints(raw);
+  let cps = codePoints(sanitize(raw));
+  if (k && cps.length > k.max) cps = cps.slice(0, k.max);
+  const text = cps.join('');
+  return { text, dropped: cps.length !== before.length };
+}
+/** Number of valid code points of `raw` once sanitized and trimmed (the auto-submit rule counts thi
+    s, 8.5). */
+function validCharCount(raw) {
+  return count(sanitize(raw, { trim: true }));
+}
+// ---- matching helpers ---------------------------------------------------------------------------
+    ----------
+/** NFKC, lower-case, and "。" read as "." so dotted domains written with Chinese full stops are caug
+    ht. */
+function nfkcLower(raw) {
+  let s = String(raw === undefined || raw === null ? '' : raw);
+  try {
+    s = s.normalize('NFKC');
+  } catch (e) {
+    /* very old runtimes: keep as is */
+  }
+  return s.toLowerCase().replace(/[。．｡]/g, '.');
+}
+/** ASCII letters/digits and CJK only, everything else dropped: the form the blocklist is matched on
+     (no \p{} escapes: older JavaScriptCore) */
+function flat(s) {
+  return s.replace(/[^0-9a-z㐀-䶿一-鿿〇豈-﫿]/g, '');
+}
+const NUMERAL = '0-9零〇一二三四五六七八九壹贰叁肆伍陆柒捌玖幺';
+const RE_NUMERAL_RUN = new RegExp('[' + NUMERAL + ']{5,}');
+const RE_URL = /(https?:|ftp:|www\.|\b[a-z0-9-]+\.(com|cn|net|org|cc|top|xyz|io|me|tv|vip|info|app|l
+    ink|co|biz|club|site|shop|ink|ly|gl)\b)/;
+const RE_URL_ZH = /点\s*(com|cn|net|org|cc)\b/;
+const CONTACT_ZH = [
+
+传画接龙 V1.0.0 源程序                                         第 18 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  '微信', '薇信', '威信', '微芯', '加我', '加v', '加微', '加q', '加群', '扣扣', '企鹅号', '群号', '电话', '手机号', '联系我', '联系方式
+    ', '私聊', '私信', '公众号', '抖音号', 'v信',
+  // QA-5 homophones and "me" forms: v我 薇我 加薇 威我 Q群 dd我(滴滴我) 私我 戳我 扣我 q我
+  'v我', '薇我', '加薇', '威我', '加威', 'q群', 'dd我', '滴滴我', '滴我', '私我', '戳我', '扣我', 'q我', '薇芯', '威芯',
+];
+const CONTACT_TOKENS = ['wx', 'vx', 'qq', 'weixin', 'wechat', 'whatsapp', 'telegram', 'weixing', 'we
+    xin'];
+/**
+ * Latin letter-runs with their start/end offsets, plus every run sequence of 2 to 6 consecutive run
+    s separated only by
+ * punctuation or spaces, joined ("w x" -> "wx", "wei xin" -> "weixin", "s.b" -> "sb"). A digit or C
+    JK character between
+ * two runs breaks the sequence. Used for whole-word Latin matching so spacing cannot split a token.
+ */
+function latinWords(s) {
+  const re = /[a-z]+/g;
+  const runs = [];
+  let m;
+  while ((m = re.exec(s))) runs.push({ t: m[0], a: m.index, b: m.index + m[0].length });
+  const words = runs.map((r) => r.t);
+  for (let i = 0; i < runs.length; i++) {
+    let joined = runs[i].t;
+    for (let j = i + 1; j < runs.length && j <= i + 5; j++) {
+      if (!/^[^a-z0-9㐀-䶿一-鿿〇豈-﫿]+$/.test(s.slice(runs[j - 1].b, runs[j].a))) break;
+      joined += runs[j].t;
+      words.push(joined);
+    }
+  }
+  return words;
+}
+/** Contact, ad and number patterns (5.6). Returns {reason} or null. `raw` is the unsanitized client
+     text. */
+function contactHit(raw) {
+  const s = nfkcLower(raw);
+  if (/@/.test(s)) return { reason: 'handle' };
+  const digits = (s.match(/[0-9]/g) || []).length;
+  const f = flat(s);
+  if (digits >= CONFIG.text.digitsReject || RE_NUMERAL_RUN.test(f)) return { reason: 'digits' };
+  if (RE_URL.test(s) || RE_URL_ZH.test(s)) return { reason: 'url' };
+  for (const w of CONTACT_ZH) if (f.includes(w)) return { reason: 'contact' };
+  const runs = latinWords(s);
+  for (const t of CONTACT_TOKENS) if (runs.includes(t)) return { reason: 'contact' };
+  return null;
+}
+/** Blocklist (content/blocklist.v1.js). Returns {category, term} or null. */
+function blocklistHit(raw) {
+  const s = nfkcLower(raw);
+  let f = flat(s);
+  for (const e of blocklist.exceptions || []) if (f.includes(e)) f = f.split(e).join(' ');
+  for (const cat of Object.keys(blocklist.zh)) {
+
+传画接龙 V1.0.0 源程序                                         第 19 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    for (const term of blocklist.zh[cat]) if (f.includes(term)) return { category: cat, term };
+  }
+  const runs = latinWords(s);
+  const letters = s.replace(/[^a-z]/g, '');
+  for (const cat of Object.keys(blocklist.latin.token)) {
+    for (const t of blocklist.latin.token[cat]) if (runs.includes(t)) return { category: cat, term: 
+    t };
+  }
+  for (const cat of Object.keys(blocklist.latin.contains)) {
+    for (const t of blocklist.latin.contains[cat]) if (letters.includes(t)) return { category: cat, 
+    term: t };
+  }
+  return null;
+}
+/**
+ * Full validation (server authority; the client runs it before enabling the submit button).
+ * Order: contact/number patterns, blocklist, characters, length. The text must already be in the sa
+    nitized form
+ * a conforming client sends: the server never edits text, it rejects ('chars').
+ */
+function validate(raw, kind) {
+  const k = KINDS[kind];
+  if (!k) return { ok: false, reason: 'length' };
+  if (typeof raw !== 'string') return { ok: false, reason: 'chars' };
+  if (raw.length > 400) return { ok: false, reason: 'length' }; // cheap guard before the regexes
+  const c = contactHit(raw);
+  if (c) return { ok: false, reason: c.reason };
+  const b = blocklistHit(raw);
+  if (b) return { ok: false, reason: 'blocklist', category: b.category };
+  const trimmed = raw.trim();
+  if (sanitize(trimmed) !== trimmed) return { ok: false, reason: 'chars' };
+  const n = count(trimmed);
+  if (n < k.min || n > k.max) return { ok: false, reason: 'length' };
+  return { ok: true, text: trimmed };
+}
+module.exports = {
+  KINDS, codePoints, count, sanitize, inputFilter, validCharCount, validate, contactHit, blocklistHi
+    t, nfkcLower, flat, isAllowed,
+};
+'use strict';
+/**
+ * The prompt roll (spec 4.1, F-2, PO-34, AC 115-119). Pure functions over the prompt bank and the p
+    layer's `seenPrompts`
+ * ring buffer; the server passes a seeded rng, so no client rng is ever trusted.
+ *
+ *   - a roll = 3 non-retired prompts from 3 DIFFERENT categories
+ *   - never a prompt among the last 300 ids shown to the player (every shown prompt counts, picked 
+    or not)
+ *   - in one live room no two seats' rolls (or rerolls) share a prompt
+ *   - 换一批 (reroll) = 3 new prompts, none shown earlier in this pick; up to CONFIG.roll.rerollsPerPi
+
+传画接龙 V1.0.0 源程序                                         第 20 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    ck (5) per pick (TD-151)
+ *   - if the pool is too small to satisfy this (impossible with >= 2,000 prompts), the oldest ids d
+    rop out of the window until it can
+ */
+const { CONFIG } = require('./config');
+const SIZE = CONFIG.roll.size;
+const WINDOW = CONFIG.roll.window;
+/** 换一批 allowed per pick (rev. 2.1, founder 2026-10-16); the server enforces it, the client only sho
+    ws rerollLeft */
+const MAX_REROLLS = CONFIG.roll.rerollsPerPick;
+const ALNUM = 'abcdefghijklmnopqrstuvwxyz0123456789';
+/** a roll id from an rng (the cloud functions use crypto ids of the same shape) */
+function rollId(rng) {
+  let s = 'r';
+  for (let i = 0; i < 11; i++) s += ALNUM[Math.floor(rng() * ALNUM.length)];
+  return s;
+}
+function pickOne(rng, arr) {
+  return arr[Math.floor(rng() * arr.length)];
+}
+/**
+ * Roll 3 prompts from 3 categories.
+ * @param {{bank:{byCat:Object<string,{id:string}[]>}, seen?:string[], exclude?:string[], rng:()=>nu
+    mber, size?:number, window?:number}} o
+ *   seen = the player's shown ids, oldest first; exclude = ids that are off limits whatever the win
+    dow (the first roll of a reroll,
+ *   the other seats of the room)
+ * @returns {{ids:string[], windowUsed:number, relaxed:boolean}} relaxed = the window had to shrink 
+    (or `exclude` was dropped)
+ */
+function rollThree(o) {
+  const size = o.size || SIZE;
+  const seen = o.seen || [];
+  const cats = Object.keys(o.bank.byCat).sort();
+  const ex = new Set(o.exclude || []);
+  let win = seen.slice(-(o.window || WINDOW));
+  let relaxed = false;
+  for (let guard = 0; guard < 64; guard++) {
+    const banned = new Set(win);
+    ex.forEach((id) => banned.add(id));
+    const open = [];
+    for (const c of cats) {
+      const pool = o.bank.byCat[c].filter((p) => !banned.has(p.id));
+      if (pool.length) open.push(pool);
+    }
+    if (open.length >= size) {
+      // choose `size` distinct categories at random, then one prompt in each
+      const order = open.map((_, i) => i);
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(o.rng() * (i + 1));
+
+传画接龙 V1.0.0 源程序                                         第 21 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+        const t = order[i];
+        order[i] = order[j];
+        order[j] = t;
+      }
+      const ids = order.slice(0, size).map((i) => pickOne(o.rng, open[i]).id);
+      return { ids, windowUsed: win.length, relaxed };
+    }
+    relaxed = true;
+    if (win.length) win = win.slice(Math.ceil(win.length / 4)); // drop the oldest quarter and retry
+     (4.1)
+    else if (ex.size) ex.clear(); // last resort: only reachable with a tiny test bank
+    else break;
+  }
+  // a bank too small for 3 categories at all: whatever exists, distinct ids
+  const all = cats.reduce((a, c) => a.concat(o.bank.byCat[c]), []);
+  const ids = [];
+  while (ids.length < size && all.length) ids.push(all.splice(Math.floor(o.rng() * all.length), 1)[0
+    ].id);
+  return { ids, windowUsed: 0, relaxed: true };
+}
+/** append shown ids to the ring buffer (newest last, at most `cap`); an id already inside moves to 
+    the end */
+function pushSeen(seen, ids, cap) {
+  const max = cap || CONFIG.roll.window;
+  const set = new Set(ids);
+  const out = (seen || []).filter((id) => !set.has(id));
+  for (const id of ids) out.push(id);
+  return out.length > max ? out.slice(out.length - max) : out;
+}
+/**
+ * The first rolls of a room (4.1, AC 118): one roll per seat, pairwise disjoint.
+ * @param {{bank, seenBySeat:string[][], rng:()=>number}} o
+ * @returns {string[][]} ids per seat
+ */
+function rollRoom(o) {
+  const used = [];
+  const out = [];
+  for (const seen of o.seenBySeat) {
+    const r = rollThree({ bank: o.bank, seen, exclude: used, rng: o.rng });
+    out.push(r.ids);
+    used.push(...r.ids);
+  }
+  return out;
+}
+/**
+ * 换一批 (AC 116): 3 new prompts, none from `firstIds` (every set already shown in this pick); in a ro
+    om also none that anyone has been shown (`exclude`).
+ * @returns {{ids:string[], relaxed:boolean}}
+ */
+function reroll(o) {
+
+传画接龙 V1.0.0 源程序                                         第 22 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const r = rollThree({ bank: o.bank, seen: o.seen, exclude: (o.firstIds || []).concat(o.exclude || 
+    []), rng: o.rng });
+  return { ids: r.ids, relaxed: r.relaxed };
+}
+/** rerolls used on a roll record: `rerolls` 0..5 (a pre-2.1 record only has the boolean `rerolled`)
+     */
+function rerollsOf(rec) {
+  if (!rec) return 0;
+  if (Number.isInteger(rec.rerolls) && rec.rerolls >= 0) return rec.rerolls;
+  return rec.rerolled ? 1 : 0;
+}
+/** rerolls left on a roll record: 0..MAX_REROLLS */
+function rerollLeft(rec) {
+  return Math.max(0, MAX_REROLLS - rerollsOf(rec));
+}
+/** every id shown in this pick so far (the current set and the rerolled-away sets), <= 18 */
+function shownOf(rec) {
+  if (!rec) return [];
+  if (Array.isArray(rec.shownIds)) return rec.shownIds.slice();
+  const out = [];
+  for (const id of (rec.ids || []).concat(rec.prevIds || [])) if (!out.includes(id)) out.push(id);
+  return out;
+}
+/** the fields every roll record carries (players.roll, rooms.rolls[seat]) */
+function newRec(rollId, ids) {
+  return { rollId, ids: ids.slice(), rerolls: 0, shownIds: ids.slice() };
+}
+/** the record after one more 换一批: new rollId, new set, count + 1, shownIds grown by the new set */
+function nextRec(rec, rollId, ids) {
+  return Object.assign({}, rec, { rollId, ids: ids.slice(), rerolls: rerollsOf(rec) + 1, shownIds: s
+    hownOf(rec).concat(ids) });
+}
+/** is the pick part of the roll that is current? (AC 119) */
+function pickValid(roll, rollIdIn, promptId) {
+  return !!roll && roll.rollId === rollIdIn && typeof promptId === 'string' && roll.ids.includes(pro
+    mptId);
+}
+module.exports = { SIZE, WINDOW, MAX_REROLLS, rerollsOf, rerollLeft, shownOf, newRec, nextRec, rollI
+    d, rollThree, pushSeen, rollRoom, reroll, pickValid };
+'use strict';
+/**
+ * Live rooms (spec 3A, F-5, PO-41..43, AC 135-151): the pure state machine. No I/O, no clock (`now`
+     is always a parameter), no
+ * randomness. Every transition takes a `rooms` document and returns a NEW one, so the cloud functio
+    ns run them inside a
+ * transaction (guarded by `version`) and the mock server runs the very same code.
+ *
+ * ROOM DOCUMENT (spec 13.1):
+ *   _id, host (openid; hands over in the lobby), creator (openid), openGId|null, groupRef|null,
+ *   state: lobby | playing | reveal | closed | removed
+
+传画接龙 V1.0.0 源程序                                         第 23 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+ *   seats: [{openid, joinedAt, status: active | left, lastSeenAt}]   (join order; fixed at start)
+ *   n, R, round (0..R; null in the lobby), kind (prompt | draw | describe; null in the lobby), phas
+    e ('turn'; `passing` is derived, see phaseAt)
+ *   roundStartAt, deadline, timers {promptSec, drawSec, describeSec, graceSec} (snapshot at start)
+ *   slots: { '0': [slot per seat], '1': [...], ... }   slot = {state: none | received | sent | bloc
+    ked | marker, at, attempt, stepId?, marker?, auto?,
+ *                                                                 round 0 only: promptId? | custom?
+     + text?}
+ *   chainIds: [n]   rolls: [{rollId, ids[3], rerolls 0..5, shownIds[<=18]}] per seat (round 0)   us
+    edPrompts: [ids shown in this room]
+ *   version (bumped by every change, = the signal `seq`), rematchRoomId, activityId, activityExpire
+    sAt, materialized,
+ *   createdAt, startedAt, endedAt, endedBy (normal | cap | switch | empty | admin), lastActivityAt,
+     dateKey
+ *
+ * ROTATION (3A.4, AC 139): chain c (started by seat c in round 0) is worked in round r (1..R) by se
+    at (c + r) mod n; equivalently seat s works on
+ * chain (s - r) mod n and sees the previous output of seat (s - 1) mod n. With r <= n - 1 nobody to
+    uches their own chain or one chain twice.
+ */
+const { CONFIG } = require('./config');
+const copy = require('./copy');
+const rollLib = require('./roll');
+const { hash32 } = require('./rng');
+const L = CONFIG.room;
+const STATE = { LOBBY: 'lobby', PLAYING: 'playing', REVEAL: 'reveal', CLOSED: 'closed', REMOVED: 're
+    moved' };
+const SLOT = { NONE: 'none', RECEIVED: 'received', SENT: 'sent', BLOCKED: 'blocked', MARKER: 'marker
+    ' };
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const mod = (a, n) => ((a % n) + n) % n;
+// ---- shape --------------------------------------------------------------------------------------
+    --------------
+/** R = min(n - 1, maxRounds) (3A.4) */
+function roundsFor(n, maxRounds) {
+  return Math.min(n - 1, maxRounds === undefined ? L.maxRounds : maxRounds);
+}
+/** round 0 = prompt, odd rounds draw, even rounds describe */
+function kindOfRound(r) {
+  if (r === 0) return 'prompt';
+  return r % 2 === 1 ? 'draw' : 'describe';
+}
+/** seconds of a round kind from a timers snapshot */
+function secFor(kind, timers) {
+  const t = timers || L;
+  return kind === 'prompt' ? t.promptSec : kind === 'draw' ? t.drawSec : t.describeSec;
+}
+/** the chain seat `s` works on in round `r` (r = 0: its own) */
+function chainOfSeat(s, r, n) {
+  return mod(s - r, n);
+
+传画接龙 V1.0.0 源程序                                         第 24 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+}
+/** the seat that works on chain `c` in round `r` */
+function workerOfChain(c, r, n) {
+  return mod(c + r, n);
+}
+/** the seat whose previous-round output seat `s` receives */
+function sourceSeat(s, n) {
+  return mod(s - 1, n);
+}
+/** every (round, seat) -> chain assignment of a game, for tests and docs: out[r][s] = chain */
+function rotationTable(n, R) {
+  const out = [];
+  for (let r = 0; r <= R; r++) {
+    const row = [];
+    for (let s = 0; s < n; s++) row.push(chainOfSeat(s, r, n));
+    out.push(row);
+  }
+  return out;
+}
+// ---- lookups ------------------------------------------------------------------------------------
+    ----------------
+function seatOf(room, openid) {
+  if (!openid) return -1;
+  return room.seats.findIndex((s) => s.openid === openid);
+}
+function isMember(room, openid) {
+  return seatOf(room, openid) >= 0;
+}
+function activeSeats(room) {
+  return room.seats.filter((s) => s.status === 'active').length;
+}
+function isResolved(slot) {
+  return !!slot && (slot.state === SLOT.SENT || slot.state === SLOT.MARKER);
+}
+function slotAt(room, round, seat) {
+  return room.slots && room.slots[String(round)] ? room.slots[String(round)][seat] : null;
+}
+/** resolved slots (sent or marker) of the current round */
+function sentCount(room) {
+  if (room.state !== STATE.PLAYING) return 0;
+  return room.slots[String(room.round)].filter(isResolved).length;
+}
+/** milliseconds from the start of a round to the deadline */
+function roundMs(room) {
+  return secFor(kindOfRound(room.round), room.timers) * 1000;
+}
+/** a send is accepted when the function started at or before deadline + grace (3A.5) */
+function acceptUntil(room) {
+  return room.deadline + room.timers.graceSec * 1000;
+}
+
+传画接龙 V1.0.0 源程序                                         第 25 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+/**
+ * `turn` while the timer runs, `passing` before the round starts (the 1 s head start) and from the 
+    deadline on (while the last
+ * checks finish and the next round is assigned). Derived at read time; never stored (3A.2).
+ */
+function phaseAt(room, now) {
+  if (room.state !== STATE.PLAYING) return null;
+  return now < room.roundStartAt || now >= room.deadline ? 'passing' : 'turn';
+}
+// ---- creation, lobby ----------------------------------------------------------------------------
+    ------------------
+function newRoom(o) {
+  return {
+    _id: o.roomId,
+    host: o.host,
+    creator: o.host, // never changes: the createRoom allowance comes back when the lobby closes uns
+    tarted (3.9)
+    openGId: o.openGId || null,
+    groupRef: o.groupRef || null,
+    state: STATE.LOBBY,
+    seats: [{ openid: o.host, joinedAt: o.now, status: 'active', lastSeenAt: o.now }],
+    n: 0,
+    R: 0,
+    round: null,
+    kind: null,
+    phase: null,
+    roundStartAt: null,
+    deadline: null,
+    timers: null,
+    slots: null,
+    chainIds: null,
+    rolls: null,
+    usedPrompts: [],
+    version: 1,
+    rematchRoomId: null,
+    activityId: null,
+    activityExpiresAt: null,
+    materialized: false,
+    createdAt: o.now,
+    startedAt: null,
+    endedAt: null,
+    endedBy: null,
+    lastActivityAt: o.now,
+    dateKey: o.dateKey,
+  };
+}
+function bump(room, now) {
+  room.version += 1;
+  room.lastActivityAt = now;
+  return room;
+
+传画接龙 V1.0.0 源程序                                         第 26 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+}
+/** can a non-member take a seat? Returns null or an error code (ROOM_STARTED | ROOM_FULL | ROOM_CLO
+    SED) */
+function joinBlock(room, cfg) {
+  if (room.state === STATE.CLOSED || room.state === STATE.REMOVED) return 'ROOM_CLOSED';
+  if (room.state !== STATE.LOBBY) return 'ROOM_STARTED';
+  if (room.seats.length >= ((cfg && cfg.maxPlayers) || L.maxPlayers)) return 'ROOM_FULL';
+  return null;
+}
+/** take a seat (call joinBlock first). Binds an unbound room to `bind` ({openGId, groupRef}). */
+function join(room, openid, now, bind) {
+  const r = clone(room);
+  r.seats.push({ openid, joinedAt: now, status: 'active', lastSeenAt: now });
+  if (bind && !r.openGId) {
+    r.openGId = bind.openGId;
+    r.groupRef = bind.groupRef || null;
+  }
+  return bump(r, now);
+}
+/**
+ * A member leaves the lobby (3A.6): the seat is removed and seats renumber in join order; the earli
+    est-joined remaining member
+ * becomes host; the last member leaving closes the room.
+ * @returns {{room, closed:boolean, hostChanged:boolean}}
+ */
+function leaveLobby(room, openid, now) {
+  const r = clone(room);
+  const i = seatOf(r, openid);
+  if (i < 0) return { room, closed: false, hostChanged: false };
+  r.seats.splice(i, 1);
+  let hostChanged = false;
+  let closed = false;
+  if (!r.seats.length) {
+    r.state = STATE.CLOSED;
+    r.endedAt = now;
+    r.endedBy = 'empty';
+    closed = true;
+  } else if (r.host === openid) {
+    r.host = r.seats[0].openid;
+    hostChanged = true;
+  }
+  return { room: bump(r, now), closed, hostChanged };
+}
+/** close an idle lobby (30 min) or a lobby the switches shut */
+function closeLobby(room, now, reason) {
+  const r = clone(room);
+  r.state = STATE.CLOSED;
+  r.endedAt = now;
+  r.endedBy = reason;
+  return bump(r, now);
+
+传画接龙 V1.0.0 源程序                                         第 27 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+}
+/** record that a seat used the room (lastSeenAt, for the lobby's "可能已离开" hint) */
+function touchSeat(room, seat, now) {
+  const r = clone(room);
+  r.seats[seat].lastSeenAt = now;
+  return r; // version untouched: this is not a state change
+}
+/** can the host start? null or an error code */
+function startBlock(room, openid, cfg) {
+  if (room.state === STATE.CLOSED || room.state === STATE.REMOVED) return 'ROOM_CLOSED';
+  if (room.state !== STATE.LOBBY) return 'ROOM_STARTED';
+  if (room.host !== openid) return 'NOT_HOST';
+  if (activeSeats(room) < ((cfg && cfg.minPlayers) || L.minPlayers)) return 'NOT_ENOUGH_PLAYERS';
+  return null;
+}
+/**
+ * Start the game: fix seats, n and R, snapshot the timers, create the slots and the round-0 deadlin
+    e (3A.3-3A.5).
+ * @param {{now:number, chainIds:string[], rolls:{rollId:string, ids:string[]}[], cfg?:object}} o ch
+    ainIds and rolls have one entry per seat
+ */
+function start(room, o) {
+  const cfg = o.cfg || L;
+  const r = clone(room);
+  const n = r.seats.length;
+  r.n = n;
+  r.R = roundsFor(n, cfg.maxRounds);
+  r.timers = { promptSec: cfg.promptSec, drawSec: cfg.drawSec, describeSec: cfg.describeSec, graceSe
+    c: cfg.graceSec };
+  r.slots = {};
+  for (let k = 0; k <= r.R; k++) r.slots[String(k)] = Array.from({ length: n }, () => ({ state: SLOT
+    .NONE, at: null, attempt: 0 }));
+  r.chainIds = o.chainIds.slice();
+  r.rolls = o.rolls.map((x) => rollLib.newRec(x.rollId, x.ids));
+  r.usedPrompts = [].concat(...o.rolls.map((x) => x.ids));
+  r.state = STATE.PLAYING;
+  r.round = 0;
+  r.kind = 'prompt';
+  r.phase = 'turn';
+  r.roundStartAt = o.now + L.startDelayMs;
+  r.deadline = r.roundStartAt + r.timers.promptSec * 1000;
+  r.startedAt = o.now;
+  for (const s of r.seats) s.status = 'active';
+  return bump(r, o.now);
+}
+// ---- turns --------------------------------------------------------------------------------------
+    ----------------
+/**
+ * Can a send for `round` from `seat` be taken now? (3A.5, edge 1-3)
+ * @returns {{ok:true, slot:object} | {ok:false, code:string, slot?:object}}
+
+传画接龙 V1.0.0 源程序                                         第 28 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+ */
+function sendGate(room, seat, round, now) {
+  if (room.state === STATE.CLOSED || room.state === STATE.REMOVED) return { ok: false, code: 'ROOM_C
+    LOSED' };
+  if (room.state === STATE.LOBBY) return { ok: false, code: 'BAD_REQUEST' };
+  if (room.state === STATE.REVEAL) return { ok: false, code: 'ROUND_OVER' };
+  if (!Number.isInteger(round) || round < 0 || round > room.R) return { ok: false, code: 'BAD_REQUES
+    T' };
+  if (round < room.round) return { ok: false, code: 'ROUND_OVER' };
+  if (round > room.round) return { ok: false, code: 'BAD_REQUEST' };
+  const slot = room.slots[String(round)][seat];
+  if (isResolved(slot)) return { ok: false, code: 'ALREADY_SENT', slot };
+  if (now > acceptUntil(room)) return { ok: false, code: 'ROUND_OVER' };
+  if (now < room.roundStartAt - 2000) return { ok: false, code: 'BAD_REQUEST' }; // before the round
+     exists for the client (2 s of clock slack)
+  if (slot.state === SLOT.RECEIVED && now - slot.at < L.inFlightMs) return { ok: false, code: 'ALREA
+    DY_SENT', slot }; // a check of this very turn is in flight
+  return { ok: true, slot };
+}
+/** phase A: the slot is `received` (a fast transaction); a stale `received` is taken over (attempt 
+    + 1) */
+function markReceived(room, seat, now) {
+  const r = clone(room);
+  const s = r.slots[String(r.round)][seat];
+  s.state = SLOT.RECEIVED;
+  s.at = now;
+  s.attempt = (s.attempt || 0) + 1;
+  return bump(r, now);
+}
+/**
+ * Phase C guard: is the slot still the one phase A took? (attempt token)
+ */
+function stillReceived(room, round, seat, attempt) {
+  if (room.state !== STATE.PLAYING || room.round !== round) return false;
+  const s = room.slots[String(round)][seat];
+  return s.state === SLOT.RECEIVED && s.attempt === attempt;
+}
+/** phase C: the turn passed its check. `extra` = {stepId} or, in round 0, {promptId | (custom, text
+    )} */
+function resolveSent(room, seat, extra, now, auto) {
+  const r = clone(room);
+  const s = r.slots[String(r.round)][seat];
+  const keep = { attempt: s.attempt };
+  r.slots[String(r.round)][seat] = Object.assign({ state: SLOT.SENT, at: now, auto: !!auto }, keep, 
+    extra);
+  return bump(r, now);
+}
+/** phase C or an empty/forced send: a marker step fills the slot (5.8) */
+function resolveMarker(room, seat, marker, now, auto) {
+  const r = clone(room);
+
+传画接龙 V1.0.0 源程序                                         第 29 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const s = r.slots[String(r.round)][seat];
+  r.slots[String(r.round)][seat] = { state: SLOT.MARKER, at: now, attempt: s.attempt || 0, marker, a
+    uto: !!auto };
+  return bump(r, now);
+}
+/** a block / busy / rejection BEFORE time-up: the slot reopens for a resend (6.4); no version bump 
+    needed but the state moved */
+function reopenSlot(room, seat, now) {
+  const r = clone(room);
+  const s = r.slots[String(r.round)][seat];
+  s.state = SLOT.BLOCKED;
+  s.at = now;
+  return bump(r, now);
+}
+/**
+ * Phase B/C failed for a reason that is not the player's (the resolving transaction lost every writ
+    e conflict, the function threw): put the slot
+ * of attempt `attempt` back to `none` (attempt kept, so the counter stays monotonic) so the very ne
+    xt send is accepted instead of answering
+ * ALREADY_SENT for the in-flight window. Returns null when the slot is no longer that `received` at
+    tempt. (QA-R2-2b)
+ */
+function releaseReceived(room, round, seat, attempt, now) {
+  if (!stillReceived(room, round, seat, attempt)) return null;
+  const r = clone(room);
+  const s = r.slots[String(round)][seat];
+  s.state = SLOT.NONE;
+  s.at = null;
+  return bump(r, now);
+}
+/** the first rolled prompt of a seat: the round-0 default (4.2, 5.8) */
+function firstPrompt(room, seat) {
+  return room.rolls[seat].ids[0];
+}
+/** the marker for an unresolved turn of the CURRENT round (empty turn, or a check in flight too lon
+    g) */
+function fillSlotsOf(room, round, seat, now, why) {
+  const s = room.slots[String(round)][seat];
+  if (isResolved(s)) return null;
+  if (round === 0) {
+    // a chain needs a prompt: the selected (here: the first) rolled prompt, never a marker
+    return { state: SLOT.SENT, at: now, attempt: s.attempt || 0, auto: true, promptId: room.rolls[se
+    at].ids[0] };
+  }
+  const marker = s.state === SLOT.RECEIVED ? 'notDelivered' : copy.emptyMarkerFor(kindOfRound(round)
+    );
+  return { state: SLOT.MARKER, at: now, attempt: s.attempt || 0, marker, auto: true };
+}
+/**
+ * A seat leaves a game in progress (3A.6): the seat is `left` and its slots in the current and ever
+
+传画接龙 V1.0.0 源程序                                         第 30 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    y later round are filled with
+ * the empty marker AT ONCE (a `received` slot in flight is left to resolve). Returns {room, ended} 
+    where ended = nobody is active.
+ */
+function leavePlaying(room, openid, now) {
+  const i = seatOf(room, openid);
+  if (i < 0 || room.state !== STATE.PLAYING) return { room, changed: false };
+  const r = clone(room);
+  if (r.seats[i].status === 'left') return { room, changed: false };
+  r.seats[i].status = 'left';
+  for (let k = r.round; k <= r.R; k++) {
+    const s = r.slots[String(k)][i];
+    if (isResolved(s) || s.state === SLOT.RECEIVED) continue;
+    r.slots[String(k)][i] = fillSlotsOf(r, k, i, now);
+  }
+  return { room: bump(r, now), changed: true, nobodyActive: activeSeats(r) === 0 };
+}
+// ---- advance ------------------------------------------------------------------------------------
+    ------------------
+/**
+ * Should the room move on? (3A.5)
+ *   - 'all'      every seat has a resolved slot (left seats are filled at once): the round ends ear
+    ly
+ *   - 'deadline' deadline + grace has passed and no slot has been `received` for less than 8 s (a c
+    heck in flight)
+ *   - 'cap'      gameMaxMin since the start: the sweeper finishes the game
+ * @returns {{action:'none'} | {action:'advance', reason:'all'|'deadline'} | {action:'finish', reaso
+    n:'cap'}}
+ */
+function decide(room, now, cfg) {
+  if (room.state !== STATE.PLAYING) return { action: 'none' };
+  const capMs = ((cfg && cfg.gameMaxMin) || L.gameMaxMin) * 60e3;
+  if (now >= room.startedAt + capMs) return { action: 'finish', reason: 'cap' };
+  const slots = room.slots[String(room.round)];
+  if (slots.every(isResolved)) return { action: 'advance', reason: 'all' };
+  if (now >= acceptUntil(room)) {
+    const inFlight = slots.some((s) => s.state === SLOT.RECEIVED && now - s.at < L.inFlightMs);
+    if (!inFlight) return { action: 'advance', reason: 'deadline' };
+  }
+  return { action: 'none' };
+}
+/**
+ * End the current round (3A.5): every unresolved slot is filled (empty marker; a `received` one old
+    er than the in-flight guard
+ * becomes 「（这一棒没传过来）」; in round 0 the first rolled prompt), then the next round is scheduled (start
+     = now + 1 s) or, after
+ * round R, the room goes to `reveal`.
+ * @returns {{room, fills:{round:number, seat:number, state:string, marker?:string, promptId?:string
+    }[], ended:boolean, from:number, sentBefore:number, markersBefore:number}}
+ */
+
+传画接龙 V1.0.0 源程序                                         第 31 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  env.ugcGuard();
+  await store.rateLimit(openid, 'laugh', 1, 20);
+  const id = chainIdOf(event);
+  const chain = id && (await store.getDoc('chains', id));
+  if (!chain) bad('CHAIN_NOT_FOUND');
+  if (chain.state !== STATE.REVEALED || chain.hidden) bad('CHAIN_CLOSED');
+  if (!chainLib.isParticipant(chain, openid)) bad('NOT_PARTICIPANT');
+  const n = intIn(event.step, 1, chain.length);
+  const sid = n && chain.stepIds[n];
+  if (!sid) bad('BAD_REQUEST');
+  return store.txn(async (t) => {
+    const s = await store.getDocT(t, 'steps', sid);
+    if (!s || s.state !== STEP.PASSED || s.marker) bad('BAD_REQUEST'); // no 笑 on markers
+    const rid = sid + '_' + openid;
+    const rx = await store.getDocT(t, 'reactions', rid);
+    let laughs = s.laughs || 0;
+    let mine;
+    if (rx) {
+      await store.collT(t, 'reactions').doc(rid).remove();
+      laughs = Math.max(0, laughs - 1);
+      mine = false;
+    } else {
+      await players.putT(t, 'reactions', rid, { stepId: sid, openid, createdAt: now() });
+      laughs += 1;
+      mine = true;
+    }
+    await store.collT(t, 'steps').doc(sid).update({ data: { laughs } });
+    return { ok: true, laughs, mine };
+  });
+});
+'use strict';
+// leaveRoom: 离开这一局 (spec 3A.6, 13.2, AC 142, 143).
+//   lobby   : the seat is removed, seats renumber in join order, the earliest-joined member becomes
+     host if the host left, the last member closes the room
+//             (and gives the creator's createRoom back); the room card count is updated.
+//   playing : the seat becomes `left`; its slot in the current and every later round is filled with
+     the empty marker AT ONCE (round 0: the first rolled
+//             prompt), which can end the round early; if nobody is active the game finishes into th
+    e reveal. The player can still open the reveal later.
+//   other   : nothing to do (idempotent).
+const roomLib = require('./core/room');
+const store = require('./common/store');
+const players = require('./common/players');
+const env = require('./common/env');
+const roomio = require('./common/roomio');
+const ops = require('./common/roomops');
+const { bad } = require('./common/errors');
+const { now } = require('./common/util');
+exports.main = store.handler(async (event, { openid }) => {
+  env.ugcGuard();
+
+传画接龙 V1.0.0 源程序                                         第 32 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  await store.rateLimit(openid, 'rleave', 1, 10);
+  const roomId = roomio.roomIdOf(event);
+  if (!roomId) bad('ROOM_NOT_FOUND');
+  let box = null;
+  await store.txn(async (t) => {
+    box = null;
+    const room = await store.getDocT(t, 'rooms', roomId);
+    if (!room) bad('ROOM_NOT_FOUND');
+    if (roomLib.seatOf(room, openid) < 0) bad('NOT_IN_ROOM');
+    if (room.state !== roomLib.STATE.LOBBY && room.state !== roomLib.STATE.PLAYING) return;
+    const p = await players.getT(t, openid);
+    if (p.activeRoomId === roomId) await players.putPlayerT(t, Object.assign({}, p, { activeRoomId: 
+    null }));
+    if (room.state === roomLib.STATE.LOBBY) {
+      const res = roomLib.leaveLobby(room, openid, now());
+      await players.putT(t, 'rooms', roomId, res.room);
+      box = { kind: 'lobby', room: res.room, closed: res.closed, prevCount: room.seats.length };
+      return;
+    }
+    const lp = roomLib.leavePlaying(room, openid, now());
+    if (!lp.changed) return;
+    const s = await roomio.settleT(t, lp.room, 'leave', lp.nobodyActive ? 'empty' : null);
+    await players.putT(t, 'rooms', roomId, s.room);
+    box = { kind: 'playing', room: s.room, due: s.due, round: room.round };
+  });
+  if (box && box.kind === 'lobby') {
+    await roomio.writeSignals(box.room, box.prevCount);
+    await roomio.updateCard(box.room, false);
+    if (box.closed) await ops.refundCreate(box.room);
+    await store.writeEvent(openid, 'room_leave', { phase: 'lobby' });
+    if (box.closed) await store.writeEvent(null, 'room_close', { reason: 'empty', n: 0 });
+  } else if (box && box.kind === 'playing') {
+    if (box.due) await roomio.afterSettle(box.due, box.room);
+    else await roomio.writeSignals(box.room);
+    await store.writeEvent(openid, 'room_leave', { phase: 'playing', round: box.round });
+  }
+  return { ok: true };
+});
+'use strict';
+// modSweeper: the 5-minute timer (spec 6.3 steps 7-8, 3.6, 6.8, 10.3, 7.2). Idempotent: every step 
+    is a transaction on the
+// documents it changes, so overlapping runs or a retry after a crash never double-apply. Server-onl
+    y (FORBIDDEN for any call
+// that carries an OPENID).
+//   1. mock verdicts that are due (dev only, same code path as a real push)
+//   2. pending drawings: retry a failed mediaCheckAsync call (+5, +10 min), one re-check after 35 m
+    in, then void
+//   3. chains: abandon a dead 棒 1, reveal or expire at 48 h
+//   4. reveal notices (quiet hours 22:00-08:00 BJT hold them until 08:00), one message per grant
+//   5. updatable-card updates that failed
+
+传画接龙 V1.0.0 源程序                                         第 33 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+//   6. circuit breaker, quota alert, report-age alert
+const chainLib = require('./core/chain');
+const allowance = require('./core/allowance');
+const mod = require('./core/moderation');
+const notice = require('./core/notice');
+const { CONFIG } = require('./core/config');
+const store = require('./common/store');
+const players = require('./common/players');
+const appconfig = require('./common/appconfig');
+const modio = require('./common/modio');
+const verdict = require('./common/verdict');
+const lifecycle = require('./common/lifecycle');
+const wx = require('./common/wxapi');
+const env = require('./common/env');
+const { now, configuredTimeoutMs } = require('./common/util');
+const { STATE, STEP } = chainLib;
+// ---- 2. pending drawings ------------------------------------------------------------------------
+    ---------------
+/** (re)send a pending drawing for checking and record the outcome on the step; returns true when th
+    e call succeeded */
+async function callAgain(step, isRecheck) {
+  let sent;
+  try {
+    sent = await modio.sendImageCheck({ stepId: step._id, openid: step.author, fileID: step.fileID, 
+    strokes: step.strokes });
+  } catch (e) {
+    console.warn('sweeper check call failed', store.errText(e));
+    sent = { ok: false };
+  }
+  await store.txn(async (t) => {
+    const s = await store.getDocT(t, 'steps', step._id);
+    if (!s || s.state !== STEP.PENDING) return;
+    const m = Object.assign({}, s.mod);
+    if (sent.ok) {
+      m.traceIds = (m.traceIds || []).concat(sent.traceId);
+      m.lastCheckAt = now();
+      if (isRecheck) m.rechecks = (m.rechecks || 0) + 1;
+    } else m.callErrors = (m.callErrors || 0) + 1;
+    await players.putT(t, 'steps', s._id, Object.assign({}, s, { mod: m }));
+  });
+  return sent.ok;
+}
+/** no verdict will come (timeout / call errors): the 棒 reopens, the allowance comes back, NO strike
+     (6.3 step 7) */
+async function voidStep(step, reason) {
+  const done = await store.txn(async (t) => {
+    const s = await store.getDocT(t, 'steps', step._id);
+    if (!s || s.state !== STEP.PENDING) return false;
+    const chain = await store.getDocT(t, 'chains', s.chainId);
+    const res = chain ? chainLib.resolvePending(chain, { stepId: s._id, outcome: 'void', now: now() 
+
+传画接龙 V1.0.0 源程序                                         第 34 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    }) : { stale: true };
+    await players.putT(t, 'steps', s._id, Object.assign({}, s, { state: STEP.VOID, mod: Object.assig
+    n({}, s.mod, { suggest: 'void', label: reason, verdictAt: now() }) }));
+    if (!res.stale) await players.putT(t, 'chains', chain._id, res.chain);
+    let p = await players.getT(t, s.author);
+    p = allowance.refundStep(p, players.dateKey());
+    if (s.n === 1) p = allowance.refundStart(p, players.dateKey());
+    await players.putPlayerT(t, p);
+    return true;
+  });
+  if (!done) return false;
+  await modio.logMod({ stepId: step._id, author: step.author, kind: 'image', fileID: step.fileID || 
+    null, suggest: 'void', label: reason, source: 'sweeper' });
+  await store.writeEvent(null, 'mod_void', { kind: 'image', reason });
+  return true;
+}
+// ---- 4. notices ---------------------------------------------------------------------------------
+    --------------------
+const pad2 = (n) => (n < 10 ? '0' + n : '' + n);
+function bjtStamp(ms) {
+  const d = new Date(ms + 8 * 3600e3);
+  return d.getUTCFullYear() + '年' + pad2(d.getUTCMonth() + 1) + '月' + pad2(d.getUTCDate()) + '日 ' + 
+    pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes());
+}
+async function sendNotices(t, cfg, deadline, summary) {
+  const grants = (await store.coll('sub_grants').where({ used: false }).limit(300).get()).data;
+  const chains = {};
+  for (const g of grants) {
+    if (now() > deadline) break;
+    if (!chains[g.chainId]) chains[g.chainId] = (await store.getDoc('chains', g.chainId)) || false;
+    const chain = chains[g.chainId];
+    if (chain && chain.state !== STATE.REVEALED && !chainLib.isTerminal(chain)) continue; // still r
+    unning
+    const dead = !chain || chain.state !== STATE.REVEALED || chain.hidden;
+    if (!dead && t < notice.noticeSendTime(chain.revealedAt)) continue; // quiet hours (AC 78)
+    // claim the grant in a transaction: at most one message per grant, even with overlapping sweeps
+    const claimed = await store.txn(async (tx) => {
+      const cur = await store.getDocT(tx, 'sub_grants', g._id);
+      if (!cur || cur.used) return false;
+      await players.putT(tx, 'sub_grants', g._id, Object.assign({}, cur, { used: true, sentAt: dead 
+    ? null : t, skipped: dead ? 'closed' : null }));
+      return true;
+    });
+    if (!claimed || dead) continue;
+    const tmplId = g.tmplId || (cfg.subscribe && cfg.subscribe.tmplId);
+    if (!tmplId) continue;
+    const f = cfg.subscribeFields;
+    try {
+      await wx.sendSubscribe({
+        touser: g.openid,
+
+传画接龙 V1.0.0 源程序                                         第 35 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+        templateId: tmplId,
+        page: 'index?r=' + chain._id,
+        data: {
+          [f.title]: { value: '你参与的接龙揭晓了' },
+          [f.prompt]: { value: String(chain.promptText).slice(0, 20) },
+          [f.time]: { value: bjtStamp(chain.revealedAt) },
+        },
+      });
+      summary.notices++;
+    } catch (e) {
+      console.warn('subscribe send failed', store.errText(e));
+      await store.coll('sub_grants').doc(g._id).update({ data: { sendErrCode: e && e.errCode !== und
+    efined ? e.errCode : -1 } }).catch(() => {});
+    }
+  }
+}
+// ---- 6. breaker ---------------------------------------------------------------------------------
+    -------------------
+async function pauseCreation(until) {
+  const c = store.coll('app_config');
+  const cur = await store.getDoc('app_config', 'live');
+  if (cur && !cur.ugc) await c.doc('live').update({ data: { ugc: { createEnabled: true, viewEnabled:
+     true, autoPausedUntil: 0 } } }); // a config doc without the ugc block
+  const r = await c.doc('live').update({ data: { 'ugc.autoPausedUntil': until, updatedAt: now() } })
+    ;
+  if (r && r.stats && r.stats.updated === 0) {
+    await store.addIfAbsent('app_config', { _id: 'live', ugc: { createEnabled: true, viewEnabled: tr
+    ue, autoPausedUntil: until }, updatedAt: now() });
+    await c.doc('live').update({ data: { 'ugc.autoPausedUntil': until, updatedAt: now() } });
+  }
+  appconfig.reset();
+}
+exports.main = store.handler(async (event, { startedAt }) => {
+  const e = env.ugcGuard();
+  const t = now();
+  const deadline = startedAt + 0.8 * configuredTimeoutMs();
+  const _ = store._();
+  const cfg = await appconfig.get(0);
+  const summary = { verdicts: 0, rechecked: 0, voided: 0, retried: 0, revealed: 0, expired: 0, aband
+    oned: 0, notices: 0 };
+  // 1. mock verdicts that are due, through the very code path a real push takes
+  if (e.mode === 'mock') {
+    const due = await store.coll('mod_traces').where({ mock: true, done: false, deliverAt: _.gt(0).a
+    nd(_.lte(t)) }).limit(200).get();
+    for (const tr of due.data) {
+      if (now() > deadline) break;
+      await verdict.applyImageVerdict({ traceId: tr._id, suggest: tr.suggest });
+      summary.verdicts++;
+    }
+  }
+
+传画接龙 V1.0.0 源程序                                         第 36 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  // 2. pending drawings
+  const pend = await store.coll('steps').where({ state: STEP.PENDING }).orderBy('mod.submittedAt', '
+    asc').limit(200).get();
+  for (const step of pend.data) {
+    if (now() > deadline) break;
+    if (!step.mod || step.mod.kind !== 'image') continue;
+    const plan = mod.planPendingImage(step.mod, t);
+    if (plan.action === 'retryCall') {
+      if (await callAgain(step, false)) summary.retried++;
+    } else if (plan.action === 'recheck') {
+      if (await callAgain(step, true)) summary.rechecked++;
+      else if (await voidStep(step, 'error')) summary.voided++;
+    } else if (plan.action === 'void') {
+      if (await voidStep(step, plan.reason)) summary.voided++;
+    }
+  }
+  // 3. chains: a dead 棒 1 abandons; at 48 h reveal (>= 4 passed) or expire, waiting while a claim/p
+    ending is active
+  const starting = (await store.coll('chains').where({ state: STATE.STARTING }).limit(200).get()).da
+    ta;
+  const expiring = (await store.coll('chains').where({ state: _.in([STATE.OPEN, STATE.PENDING]), exp
+    iresAt: _.lte(t) }).orderBy('expiresAt', 'asc').limit(200).get()).data;
+  for (const c0 of starting.concat(expiring)) {
+    if (now() > deadline) break;
+    const r = await store.txn(async (tx) => {
+      const chain = await store.getDocT(tx, 'chains', c0._id);
+      if (!chain) return null;
+      const s = chainLib.sweepChain(chain, t);
+      if (!s.event) return null;
+      await players.putT(tx, 'chains', chain._id, s.chain);
+      return s;
+    });
+    if (!r) continue;
+    if (r.event === 'reveal') {
+      await lifecycle.onRevealed(r.chain);
+      summary.revealed++;
+    } else if (r.event === 'expire') summary.expired++;
+    else summary.abandoned++;
+  }
+  // 4. reveal notices
+  await sendNotices(t, cfg, deadline, summary);
+  // 5. updatable-card updates that failed earlier (only while the feature is on)
+  if (cfg.features.updatableCard) {
+    const act = (await store.coll('chains').where({ state: _.in([STATE.OPEN, STATE.PENDING]), expire
+    sAt: _.gt(t) }).limit(300).get()).data;
+    const rev = (await store.coll('chains').where({ state: STATE.REVEALED, createdAt: _.gt(t - 3 * 8
+    6400e3) }).limit(300).get()).data;
+    for (const c of act.concat(rev)) {
+      if (now() > deadline) break;
+      if (c.cardDirty) await lifecycle.updateCard(c, c.state === STATE.REVEALED);
+
+传画接龙 V1.0.0 源程序                                         第 37 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    }
+  }
+  // 6. circuit breaker (AC 55), image quota (AC 56), report age (AC 67)
+  const stats = await modio.windowStats(t);
+  const br = mod.breakerDecision(stats, t);
+  if (br.trip && !(cfg.ugc.autoPausedUntil > t)) {
+    await pauseCreation(br.pausedUntil);
+    modio.alert('moderation circuit breaker tripped: ' + stats.failed + '/' + stats.total + ' calls 
+    failed in 5 min; creation paused until ' + new Date(br.pausedUntil).toISOString());
+    await store.writeEvent(null, 'ugc_pause', { source: 'breaker', on: true });
+  }
+  if ((await modio.imageLevel()) !== 'ok') modio.alert('image quota >= 70% of the daily mediaCheckAs
+    ync limit; ask WeChat for a raise (Handoff H11)');
+  const stale = (await store.coll('reports').where({ state: 'open', createdAt: _.lt(t - CONFIG.repor
+    ts.staleAlertMs) }).limit(100).get()).data;
+  if (stale.length) modio.alert(stale.length + ' open report(s) older than 48h (oldest ' + stale.map
+    ((r) => r._id).sort()[0] + '): run admin listReports');
+  return Object.assign({ ok: true }, summary);
+}, { auth: false, serverOnly: true, timer: true });
+'use strict';
+// onMediaCheck: the `wxa_media_check` push handler (spec 6.3 step 6, V1). Server-only: a call that 
+    carries an OPENID (a
+// client) gets FORBIDDEN (AC 45). Idempotent per trace_id; unknown traces are ignored; the verdict 
+    logic is shared with
+// modSweeper's mock delivery (common/verdict.js).
+//   Primary route:  console 云开发 > 消息推送 (or the MP message-push config) routes event wxa_media_check
+     to THIS function
+//                   (deployed as chuanhua_onMediaCheck); the event is the pushed message; the funct
+    ion returns 'success'.
+//   Fallback (a):   the HTTP access service URL of this function is the push URL; requests are sign
+    ature-checked with
+//                   PUSH_TOKEN (PUSH_AES_KEY for the encrypted mode) and answered as an HTTP respon
+    se object.
+const store = require('./common/store');
+const env = require('./common/env');
+const push = require('./common/push');
+const verdict = require('./common/verdict');
+async function handleMessage(msg) {
+  env.ugcGuard(); // mock moderation in production: refuse to apply verdicts and alert (AC 51)
+  const m = push.normalize(msg);
+  if (!m) {
+    console.warn('onMediaCheck: not a wxa_media_check message');
+    return;
+  }
+  const r = await verdict.applyImageVerdict(m);
+  if (r.ignored) console.warn('onMediaCheck ignored', r.ignored);
+}
+function httpResp(status, body) {
+  return { statusCode: status, headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: Strin
+    g(body) };
+
+传画接龙 V1.0.0 源程序                                         第 38 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+}
+exports.main = store.handler(async (event) => {
+  if (event.httpMethod) {
+    const r = push.fromHttp(event, { token: process.env.PUSH_TOKEN, aesKey: process.env.PUSH_AES_KEY
+     });
+    if (r.status !== 200) {
+      console.error('[ALERT] onMediaCheck HTTP push rejected: ' + r.reason);
+      return httpResp(r.status, r.reason);
+    }
+    if (r.kind === 'echo') return httpResp(200, r.body);
+    try {
+      await handleMessage(r.msg);
+    } catch (e) {
+      console.error('onMediaCheck failed', store.errText(e));
+      return httpResp(500, 'error'); // the platform retries
+    }
+    return httpResp(200, 'success');
+  }
+  await handleMessage(event);
+  return 'success';
+}, { auth: false, serverOnly: true });
+'use strict';
+// releaseClaim: give a claim back (放弃). Idempotent; releasing the starter's 棒 1 abandons the chain 
+    (spec 3.2, 3.5).
+const chainLib = require('./core/chain');
+const store = require('./common/store');
+const players = require('./common/players');
+const env = require('./common/env');
+const { bad } = require('./common/errors');
+const { chainIdOf, claimIdOf } = require('./common/input');
+const { now } = require('./common/util');
+exports.main = store.handler(async (event, { openid }) => {
+  env.ugcGuard();
+  await store.rateLimit(openid, 'release', 1, 20);
+  const id = chainIdOf(event);
+  if (!id) bad('CHAIN_NOT_FOUND');
+  const claimId = claimIdOf(event);
+  await store.txn(async (t) => {
+    const chain = await store.getDocT(t, 'chains', id);
+    if (!chain) bad('CHAIN_NOT_FOUND');
+    const r = chainLib.releaseClaim(chain, { openid, claimId, now: now() });
+    if (r.released) await players.putT(t, 'chains', id, r.chain);
+  });
+  return { ok: true };
+});
+'use strict';
+// rematch: 再来一局 (spec 8.8, 13.2, AC 151). A member of a revealed room gets the ONE new room of that
+     game: the first caller creates it (bound to the same
+// group; it counts as a createRoom) and records it on the old room in the same transaction, every l
+    ater caller joins it (counts as a joinRoom). Nobody is
+
+传画接龙 V1.0.0 源程序                                         第 39 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+// moved automatically. The old room's signals are bumped so the other members' reveal screens can s
+    how "房主开了新的一局 · 加入 ›".
+const roomLib = require('./core/room');
+const store = require('./common/store');
+const players = require('./common/players');
+const appconfig = require('./common/appconfig');
+const env = require('./common/env');
+const roomio = require('./common/roomio');
+const ops = require('./common/roomops');
+const { bad } = require('./common/errors');
+const { now } = require('./common/util');
+exports.main = store.handler(async (event, { openid }) => {
+  env.ugcGuard();
+  await store.rateLimit(openid, 'rmatch', 1, 5);
+  const roomId = roomio.roomIdOf(event);
+  const first = roomId && (await roomio.loadRoom(roomId));
+  if (!first) bad('ROOM_NOT_FOUND');
+  if (roomLib.seatOf(first, openid) < 0) bad('NOT_IN_ROOM');
+  if (first.state !== roomLib.STATE.REVEAL) bad('BAD_REQUEST');
+  const cfg = await appconfig.get();
+  const p = await players.touch(openid);
+  ops.policyOrThrow(p, cfg);
+  let out = null;
+  for (let i = 0; i < 4 && !out; i++) {
+    const old = await roomio.loadRoom(roomId);
+    if (old.rematchRoomId) {
+      const target = await roomio.loadRoom(old.rematchRoomId);
+      if (!target) bad('ROOM_CLOSED');
+      const group = { openGId: old.openGId, member: true }; // the old room's members came in throug
+    h that group
+      let joined = null;
+      await store.txn(async (t) => {
+        const room = await store.getDocT(t, 'rooms', target._id);
+        if (!room) bad('ROOM_NOT_FOUND');
+        joined = await ops.joinT(t, room, { openid, group, groupRef: old.groupRef, cfgRoom: cfg.conf
+    ig.room });
+      });
+      out = { room: joined.room, created: false, joined: joined.joined, old: null };
+    } else {
+      out = await store.txn(async (t) => {
+        const o = await store.getDocT(t, 'rooms', roomId);
+        if (o.rematchRoomId) return null; // lost the race: join the winner's room on the next pass
+        const c = await ops.createT(t, { openid, openGId: o.openGId, groupRef: o.groupRef, existingO
+    k: false });
+        const marked = roomLib.setRematch(o, c.room._id, now());
+        await players.putT(t, 'rooms', roomId, marked);
+        return { room: c.room, created: true, joined: false, old: marked };
+      });
+    }
+  }
+
+传画接龙 V1.0.0 源程序                                         第 40 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  if (!out) bad('INTERNAL');
+  if (out.created || out.joined) await roomio.writeSignals(out.room);
+  if (out.old) await roomio.writeSignals(out.old); // the other members' reveal screens learn about 
+    the new room
+  if (out.joined) await roomio.updateCard(out.room, false);
+  if (out.created) await store.writeEvent(null, 'room_create', { bound: !!out.room.openGId });
+  const res = await roomio.memberResponse(out.room, roomLib.seatOf(out.room, openid), openid, cfg);
+  res.created = out.created;
+  return res;
+});
+'use strict';
+// report: 举报 (spec 7.1, PO-16, AC 58-61). The reported item is hidden for EVERYONE at once, in the 
+    same transaction that
+// records the report; if it was the latest passed 棒 of an open chain the 棒 reopens and the next cla
+    im is cancelled (the
+// reporter's own claim is released). No free text: fixed reasons only. Strikes come later from `adm
+    in upholdReport`.
+const { CONFIG } = require('./core/config');
+const chainLib = require('./core/chain');
+const roomLib = require('./core/room');
+const allowance = require('./core/allowance');
+const schema = require('./core/schema');
+const store = require('./common/store');
+const players = require('./common/players');
+const groups = require('./common/groups');
+const env = require('./common/env');
+const { bad } = require('./common/errors');
+const { chainIdOf, intIn } = require('./common/input');
+const roomio = require('./common/roomio');
+const { now } = require('./common/util');
+const { STATE, STEP } = chainLib;
+exports.main = store.handler(async (event, { openid }) => {
+  env.ugcGuard();
+  await store.rateLimit(openid, 'report', 1, 10);
+  let id;
+  let n;
+  let pre;
+  if (event.reportRef !== undefined) {
+    // a LIVE source named by its opaque reference (spec 7.1, TD-140): `{roomId, reportRef, reason}`
+    . The chain and step come from the
+    // CALLER'S OWN seat in a playing room, never from the client; the ref is only compared with the
+     one recomputed for that seat.
+    if (typeof event.reportRef !== 'string' || !/^q[0-9a-z]{2,24}$/.test(event.reportRef)) bad('BAD_
+    REQUEST');
+    const roomId = roomio.roomIdOf(event);
+    const room = roomId && (await roomio.loadRoom(roomId));
+    if (!room) bad('ROOM_NOT_FOUND');
+    const seat = roomLib.seatOf(room, openid);
+    if (seat < 0) bad('NOT_MEMBER');
+    if (room.state !== roomLib.STATE.PLAYING) bad('ROUND_OVER');
+
+传画接龙 V1.0.0 源程序                                         第 41 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    if (room.round < 1 || event.reportRef !== roomLib.reportRefFor(room, seat)) bad('BAD_REQUEST');
+    id = room.chainIds[roomLib.chainOfSeat(seat, room.round, room.n)];
+    n = room.round - 1;
+    pre = await store.getDoc('chains', id);
+    if (!pre) bad('CHAIN_NOT_FOUND');
+    if (!CONFIG.reports.reasons.includes(event.reason)) bad('BAD_REQUEST');
+  } else {
+    id = chainIdOf(event);
+    pre = id && (await store.getDoc('chains', id));
+    if (!pre) bad('CHAIN_NOT_FOUND');
+    if (!CONFIG.reports.reasons.includes(event.reason)) bad('BAD_REQUEST');
+    n = intIn(event.step, 0, pre.length);
+    if (n === null) bad('BAD_REQUEST');
+  }
+  const member = n === 0 ? await groups.isMember(openid, pre.openGId) : false;
+  const out = await store.txn(async (t) => {
+    const chain = await store.getDocT(t, 'chains', id);
+    if (!chain) bad('CHAIN_NOT_FOUND');
+    const p = await players.getT(t, openid);
+    const lim = allowance.checkReports(p, players.dateKey());
+    if (lim) bad(lim.code);
+    let target; // {whole:true} | {step}
+    if (chain.mode === 'live' && chain.state !== STATE.REVEALED) {
+      // a LIVE round (7.1): only the seat that works on this chain right now may report the source 
+    it was handed (the previous step, or the custom prompt)
+      const room = await store.getDocT(t, 'rooms', chain.roomId);
+      const seat = room ? roomLib.seatOf(room, openid) : -1;
+      if (!room || room.state !== roomLib.STATE.PLAYING || seat < 0) bad('NOT_PARTICIPANT');
+      if (roomLib.chainOfSeat(seat, room.round, room.n) !== chain.seat || n !== room.round - 1) bad(
+    'NOT_PARTICIPANT');
+      if (n === 0) {
+        if (!chain.custom) bad('BAD_REQUEST'); // a rolled prompt is never reportable
+        if (await store.getDocT(t, 'reports', schema.reportKey(openid, chain._id, null))) bad('DUP_R
+    EPORT');
+        target = { whole: true };
+      } else {
+        const slot = roomLib.slotAt(room, n, roomLib.workerOfChain(chain.seat, n, room.n));
+        if (!slot || slot.state !== roomLib.SLOT.SENT) bad('BAD_REQUEST'); // a marker has nothing t
+    o report
+        if (await store.getDocT(t, 'reports', schema.reportKey(openid, chain._id, slot.stepId))) bad
+    ('DUP_REPORT');
+        const s = await store.getDocT(t, 'steps', slot.stepId);
+        if (!s || s.state !== STEP.PASSED || s.marker) bad('BAD_REQUEST');
+        target = { step: s };
+      }
+    } else if (n === 0) {
+      // the teaser texts: a custom prompt hides the whole chain (edge 29); otherwise the final sent
+    ence (TD-16)
+      if (!chainLib.isParticipant(chain, openid) && !member) bad('NOT_MEMBER');
+      if (chain.state !== STATE.REVEALED) bad('CHAIN_CLOSED');
+
+传画接龙 V1.0.0 源程序                                         第 42 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+      // QA-6: the teaser is ONE item per player and chain, whatever sentence it currently shows
+      if (await store.getDocT(t, 'reports', schema.reportKey(openid, chain._id, null))) bad('DUP_REP
+    ORT');
+      if (chain.custom) target = { whole: true };
+      else {
+        let last = null;
+        for (let i = chain.length; i >= 1 && !last; i--) {
+          if (chainLib.kindOf(i) !== 'describe' || !chain.stepIds[i]) continue;
+          const s = await store.getDocT(t, 'steps', chain.stepIds[i]);
+          if (s && s.state === STEP.PASSED) last = s;
+        }
+        if (!last) return { none: true };
+        target = { step: last };
+      }
+    } else {
+      const sid = chain.stepIds[n];
+      // QA-6: a repeat report by the same player is DUP_REPORT even though the first one already hi
+    d the step
+      if (sid && (await store.getDocT(t, 'reports', schema.reportKey(openid, chain._id, sid)))) bad(
+    'DUP_REPORT');
+      const s = sid && (await store.getDocT(t, 'steps', sid));
+      if (!s || s.state !== STEP.PASSED || s.marker) bad('BAD_REQUEST'); // markers cannot be report
+    ed (5.8)
+      const holdsNextClaim = !!chain.claim && chain.claim.openid === openid && chain.claim.step === 
+    n + 1 && chain.claim.expiresAt > now();
+      const allowed = (chain.state === STATE.REVEALED && chainLib.isParticipant(chain, openid)) || h
+    oldsNextClaim;
+      if (!allowed) bad('NOT_PARTICIPANT');
+      target = { step: s };
+    }
+    // report id <openid>_<chainId>_<stepId|teaser> (core/schema.js#reportKey): a teaser report is k
+    eyed 'teaser' whichever
+    // sentence (or the whole chain) it hides, a step report by the step document
+    const key = schema.reportKey(openid, chain._id, n === 0 ? null : target.step._id);
+    if (await store.getDocT(t, 'reports', key)) bad('DUP_REPORT');
+    if (target.step && target.step.author === openid) bad('OWN_STEP');
+    await players.putT(t, 'reports', key, {
+      reporter: openid, stepId: target.whole ? null : target.step._id, chainId: chain._id, roomId: c
+    hain.roomId || null, reason: event.reason, state: 'open', createdAt: now(),
+    });
+    await players.putPlayerT(t, allowance.consumeReport(p, players.dateKey()));
+    let reopened = false;
+    let claimReleased = false;
+    if (target.whole) {
+      await players.putT(t, 'chains', chain._id, chainLib.setChainHidden(chain, 'report', now()));
+    } else {
+      await store.collT(t, 'steps').doc(target.step._id).update({ data: { state: STEP.HIDDEN, hidden
+    Reason: 'report' } });
+      // a live chain never reopens: the room keeps running and the step stays in the chain as a hid
+    den placeholder (TD-140)
+
+传画接龙 V1.0.0 源程序                                         第 43 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+      const r = chain.mode === 'live' ? { reopened: false } : chainLib.reopenLatest(chain, target.st
+    ep.n, now());
+      if (r.reopened) {
+        await players.putT(t, 'chains', chain._id, r.chain);
+        reopened = true;
+        claimReleased = !!(r.cancelledClaim && r.cancelledClaim.openid === openid);
+      }
+    }
+    return { reopened, claimReleased };
+  });
+  if (out.none) return { ok: true, hidden: true, reopened: false };
+  await store.writeEvent(openid, 'report_submit', { mode: pre.mode === 'live' ? 'live' : 'chain', re
+    ason: event.reason, target: n === 0 ? 'teaser' : 'step', reopened: out.reopened });
+  return { ok: true, hidden: true, reopened: out.reopened, claimReleased: out.claimReleased };
+});
+'use strict';
+// revealNow: the starter reveals early (spec 3.6, AC 16): >= 4 passed 棒, no active claim or pending
+     棒.
+const chainLib = require('./core/chain');
+const store = require('./common/store');
+const players = require('./common/players');
+const lifecycle = require('./common/lifecycle');
+const env = require('./common/env');
+const { bad } = require('./common/errors');
+const { chainIdOf } = require('./common/input');
+const { now } = require('./common/util');
+exports.main = store.handler(async (event, { openid }) => {
+  env.ugcGuard();
+  await store.rateLimit(openid, 'revealnow', 1, 10);
+  const id = chainIdOf(event);
+  if (!id) bad('CHAIN_NOT_FOUND');
+  const next = await store.txn(async (t) => {
+    const chain = await store.getDocT(t, 'chains', id);
+    if (!chain) bad('CHAIN_NOT_FOUND');
+    const r = chainLib.canRevealNow(chain, openid, now());
+    if (!r.ok) bad(r.code, r.busy ? { busy: true } : null);
+    const n = chainLib.applyRevealNow(chain, now());
+    await players.putT(t, 'chains', id, n);
+    return n;
+  });
+  await lifecycle.onRevealed(next);
+  return { ok: true };
+});
+'use strict';
+// rollPrompts: the server-side roll of 3 prompts from 3 categories (spec 4.1, F-2, PO-34, AC 115-11
+    9). The bank is SERVER-ONLY (TD-103): only the 3 rolled
+// texts leave. A client rng is never trusted.
+//   慢慢传 {reroll?, rollId?}      writes players.roll + seenPrompts (ring of the last 300 shown). A p
+    lain call returns the CURRENT unused roll (so
+//                                  repeated calls cannot browse the bank), else rolls anew; reroll 
+
+传画接龙 V1.0.0 源程序                                         第 44 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    = 换一批, up to CONFIG.roll.rerollsPerPick (5) per pick (a 6th: REROLL_LIMIT, nothing changes).
+//   live   {roomId, reroll:true}   round 0 only, up to 5 per pick (a 6th: REROLL_LIMIT), only until
+     the round-0 deadline (no grace); disjoint from every prompt shown in the room.
+//                                  Without reroll it returns the seat's current roll. (The first ro
+    ll comes with getRoom.)
+const roll = require('./core/roll');
+const roomLib = require('./core/room');
+const { mulberry32 } = require('./core/rng');
+const store = require('./common/store');
+const players = require('./common/players');
+const env = require('./common/env');
+const roomio = require('./common/roomio');
+const { bad } = require('./common/errors');
+const { now, randomSeed } = require('./common/util');
+const FRESH_MS = 10 * 60e3; // an unused roll is handed out again for this long
+const texts = (ids) => ids.map((id) => ({ id, text: roomio.bank().promptById(id).text }));
+exports.main = store.handler(async (event, { openid }) => {
+  env.ugcGuard();
+  await store.rateLimit(openid, 'roll', 1, 20);
+  const reroll = event.reroll === true;
+  const bankLib = roomio.bank().getPrompts();
+  const rng = mulberry32(randomSeed());
+  if (event.roomId !== undefined) {
+    const roomId = roomio.roomIdOf(event);
+    const pre = roomId && (await roomio.loadRoom(roomId));
+    if (!pre) bad('ROOM_NOT_FOUND');
+    const seat0 = roomLib.seatOf(pre, openid);
+    if (seat0 < 0) bad('NOT_IN_ROOM');
+    if (!reroll) {
+      const cur = roomLib.rollOf(pre, seat0);
+      if (!cur) bad('BAD_REQUEST');
+      return { ok: true, rollId: cur.rollId, prompts: texts(cur.ids), rerollLeft: roll.rerollLeft(cu
+    r) };
+    }
+    const p = await players.read(openid);
+    let res = null;
+    await store.txn(async (t) => {
+      const room = await store.getDocT(t, 'rooms', roomId);
+      if (!room) bad('ROOM_NOT_FOUND');
+      const seat = roomLib.seatOf(room, openid);
+      if (seat < 0) bad('NOT_IN_ROOM');
+      const cur = roomLib.rollOf(room, seat);
+      if (cur && event.rollId !== undefined && event.rollId !== cur.rollId) bad('BAD_REQUEST'); // a
+     stale rollId: the client reloads
+      const block = roomLib.rerollBlock(room, seat, now());
+      if (block === 'REROLL_LIMIT') bad(block, { rollId: cur.rollId, rerollLeft: 0 });
+      if (block) bad(block);
+      const r = roll.reroll({ bank: bankLib, seen: p.seenPrompts || [], firstIds: roll.shownOf(cur),
+     exclude: room.usedPrompts, rng });
+      const rollId = roomio.newRollId();
+
+传画接龙 V1.0.0 源程序                                         第 45 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+      const next = roomLib.applyReroll(room, seat, rollId, r.ids, now());
+      await players.putT(t, 'rooms', roomId, next);
+      res = { rollId, ids: r.ids, left: roll.rerollLeft(roomLib.rollOf(next, seat)) };
+    });
+    await players.mutate(openid, (pl) => Object.assign({}, pl, { seenPrompts: roll.pushSeen(pl.seenP
+    rompts, res.ids) })).catch((e) => console.warn('seenPrompts failed', store.errText(e)));
+    return { ok: true, rollId: res.rollId, prompts: texts(res.ids), rerollLeft: res.left };
+  }
+  // 慢慢传
+  const out = await players.mutate(openid, (p) => {
+    const cur = p.roll && p.roll.ctx === 'chain' && !p.roll.used ? p.roll : null;
+    if (reroll) {
+      if (!cur || (event.rollId !== undefined && event.rollId !== cur.rollId)) return { player: p, r
+    esult: { err: 'BAD_REQUEST' } };
+      if (roll.rerollLeft(cur) <= 0) return { player: p, result: { err: 'REROLL_LIMIT', extra: { rol
+    lId: cur.rollId, rerollLeft: 0 } } };
+      const r = roll.reroll({ bank: bankLib, seen: p.seenPrompts || [], firstIds: roll.shownOf(cur),
+     exclude: [], rng });
+      const nr = Object.assign(roll.nextRec(cur, roomio.newRollId(), r.ids), { ctx: 'chain', used: f
+    alse, at: now() });
+      return { player: Object.assign({}, p, { roll: nr, seenPrompts: roll.pushSeen(p.seenPrompts, r.
+    ids) }), result: { roll: nr } };
+    }
+    if (cur && now() - cur.at < FRESH_MS) return { player: p, result: { roll: cur } };
+    const r = roll.rollThree({ bank: bankLib, seen: p.seenPrompts || [], rng });
+    const nr = Object.assign(roll.newRec(roomio.newRollId(), r.ids), { ctx: 'chain', used: false, at
+    : now() });
+    return { player: Object.assign({}, p, { roll: nr, seenPrompts: roll.pushSeen(p.seenPrompts, r.id
+    s) }), result: { roll: nr } };
+  });
+  if (out.err) bad(out.err, out.extra);
+  return { ok: true, rollId: out.roll.rollId, prompts: texts(out.roll.ids), rerollLeft: roll.rerollL
+    eft(out.roll) };
+});
+'use strict';
+// roomSweeper: the 1-minute timer for rooms nobody is watching (spec 3A.5, 3A.7, 7.5, 13.2, AC 144,
+     53, 154). Idempotent: every step is the same race-safe
+// transaction the clients use, so overlapping runs, a tick and a late submit never double-apply. Se
+    rver-only (FORBIDDEN for any call that carries an
+// OPENID) and it runs only for the platform's timer event {Type:'Timer'} (L3, TD-99).
+//   1. playing rooms: finish them at once when the kill switch (ugc.createEnabled false) or imageMo
+    de 'async' is on (all remaining slots become markers,
+//      the room reveals), finish them gameMaxMin (20 min) after the start, and advance rounds overd
+    ue by more than 10 s past deadline + grace
+//   2. lobbies: close those idle for lobbyIdleMin (30 min), and all of them when the switches are o
+    ff (the creator gets the createRoom back)
+//   3. over rooms: materialise reveals that missed it; delete the signal documents 1 day after the 
+    end; delete closed lobbies after 1 day
+//   4. heal signals: a seat whose signal is older than the room's version (a failed write) is rewri
+    tten
+
+传画接龙 V1.0.0 源程序                                         第 46 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+const roomLib = require('./core/room');
+const { CONFIG } = require('./core/config');
+const store = require('./common/store');
+const players = require('./common/players');
+const appconfig = require('./common/appconfig');
+const env = require('./common/env');
+const roomio = require('./common/roomio');
+const ops = require('./common/roomops');
+const { now, configuredTimeoutMs } = require('./common/util');
+const DAY = 86400e3;
+exports.main = store.handler(async (event, { startedAt }) => {
+  env.ugcGuard();
+  const t = now();
+  const deadline = startedAt + 0.8 * configuredTimeoutMs();
+  const _ = store._();
+  const cfg = await appconfig.get(0);
+  const R = cfg.config.room;
+  const off = cfg.ugc.createEnabled === false || cfg.config.moderation.imageMode === 'async';
+  const summary = { advanced: 0, finished: 0, closed: 0, materialized: 0, signalsDeleted: 0, lobbies
+    Deleted: 0, healed: 0 };
+  // 1. playing rooms
+  const playing = (await store.coll('rooms').where({ state: roomLib.STATE.PLAYING }).limit(200).get(
+    )).data;
+  for (const room of playing) {
+    if (now() > deadline) break;
+    if (off) {
+      await roomio.advanceIfDue(room._id, 'sweeper', 'switch');
+      summary.finished++;
+    } else if (t >= room.startedAt + R.gameMaxMin * 60e3) {
+      await roomio.advanceIfDue(room._id, 'sweeper');
+      summary.finished++;
+    } else if (t > roomLib.acceptUntil(room) + CONFIG.room.sweepOverdueMs) {
+      const after = await roomio.advanceIfDue(room._id, 'sweeper');
+      if (after && after.version !== room.version) summary.advanced++;
+    }
+  }
+  // 2. lobbies
+  const lobbies = (await store.coll('rooms').where({ state: roomLib.STATE.LOBBY }).limit(200).get())
+    .data;
+  for (const room of lobbies) {
+    if (now() > deadline) break;
+    if (off) {
+      if (await ops.closeLobbyNow(room._id, R, 'switch')) summary.closed++;
+    } else if (t - room.lastActivityAt >= R.lobbyIdleMin * 60e3) {
+      if (await ops.closeLobbyNow(room._id, R, 'idle')) summary.closed++;
+    }
+  }
+  // 3. over rooms
+  const unmat = (await store.coll('rooms').where({ state: roomLib.STATE.REVEAL, materialized: false 
+    }).limit(50).get()).data;
+
+传画接龙 V1.0.0 源程序                                         第 47 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  for (const room of unmat) {
+    if (now() > deadline) break;
+    await roomio.materialize(room._id);
+    summary.materialized++;
+  }
+  const over = (await store.coll('rooms').where({ state: _.in([roomLib.STATE.REVEAL, roomLib.STATE.C
+    LOSED]), endedAt: _.lt(t - CONFIG.room.signalKeepMs) }).limit(100).get()).data;
+  for (const room of over) {
+    if (now() > deadline) break;
+    if (room.state === roomLib.STATE.CLOSED && !room.startedAt) {
+      await store.coll('room_signals').where({ roomId: room._id }).remove();
+      await store.coll('rooms').doc(room._id).remove();
+      summary.lobbiesDeleted++;
+    } else if (!room.signalsGone) {
+      const r = await store.coll('room_signals').where({ roomId: room._id }).remove();
+      await store.coll('rooms').doc(room._id).update({ data: { signalsGone: true } });
+      summary.signalsDeleted += (r && r.stats && r.stats.removed) || 0;
+    }
+  }
+  // 4. heal signals of rooms that changed in the last 3 minutes
+  const live = (await store.coll('rooms').where({ state: _.in([roomLib.STATE.PLAYING, roomLib.STATE.
+    LOBBY, roomLib.STATE.REVEAL]), lastActivityAt: _.gt(t - 3 * 60e3) }).limit(100).get()).data;
+  for (const room of live) {
+    if (now() > deadline) break;
+    let stale = false;
+    for (let i = 0; i < room.seats.length && !stale; i++) {
+      const s = await store.getDoc('room_signals', room._id + '_' + i);
+      if (!s || s.seq < room.version || s._openid !== room.seats[i].openid) stale = true;
+    }
+    if (stale) {
+      await roomio.writeSignals(room);
+      summary.healed++;
+    }
+  }
+  return Object.assign({ ok: true }, summary);
+}, { auth: false, serverOnly: true, timer: true });
+'use strict';
+// roomTick: advance the room if it is due, then return it (spec 3A.5, 13.2, AC 141). Every client c
+    alls it at deadline + grace + 1 s and then every 2 s
+// until the round changes, so a round always advances even when no signal arrives. IDEMPOTENT and r
+    ace-safe: the advance is one transaction on the room
+// document that re-reads the room, so any number of concurrent ticks / submits / sweeper runs produ
+    ce exactly one advance. Members only.
+const roomLib = require('./core/room');
+const store = require('./common/store');
+const appconfig = require('./common/appconfig');
+const env = require('./common/env');
+const roomio = require('./common/roomio');
+const { bad } = require('./common/errors');
+exports.main = store.handler(async (event, { openid }) => {
+
+传画接龙 V1.0.0 源程序                                         第 48 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  env.ugcGuard();
+  await store.rateLimit(openid, 'rtick', 1, 40);
+  const roomId = roomio.roomIdOf(event);
+  const pre = roomId && (await roomio.loadRoom(roomId));
+  if (!pre) bad('ROOM_NOT_FOUND');
+  if (roomLib.seatOf(pre, openid) < 0) bad('NOT_IN_ROOM');
+  const cfg = await appconfig.get();
+  const room = await roomio.advanceIfDue(roomId, 'tick');
+  return roomio.memberResponse(room, roomLib.seatOf(room, openid), openid, cfg);
+});
+'use strict';
+// startRoom: the host starts the game (spec 3A.3-3A.5, 13.2, AC 137, 138). Host only (NOT_HOST), >=
+     3 active seats (NOT_ENOUGH_PLAYERS). Fixes the seats,
+// n and R = min(n - 1, maxRounds), snapshots the timers, creates the n live chains, rolls the round
+    -0 prompts (one roll per seat, pairwise disjoint,
+// none among the seat's last 300 shown) and sets the round-0 deadline. If the lobby changes while t
+    he rolls are computed the start is retried.
+const roll = require('./core/roll');
+const roomLib = require('./core/room');
+const chainLib = require('./core/chain');
+const { mulberry32 } = require('./core/rng');
+const store = require('./common/store');
+const players = require('./common/players');
+const appconfig = require('./common/appconfig');
+const env = require('./common/env');
+const lifecycle = require('./common/lifecycle');
+const roomio = require('./common/roomio');
+const { bad } = require('./common/errors');
+const { now, randomSeed, newChainId } = require('./common/util');
+const START_BUDGET_MS = 5000; // the function timeout is 8 s
+exports.main = store.handler(async (event, { openid }) => {
+  env.ugcGuard();
+  await store.rateLimit(openid, 'rstart', 1, 5);
+  const roomId = roomio.roomIdOf(event);
+  if (!roomId) bad('ROOM_NOT_FOUND');
+  const cfg = await appconfig.get();
+  if (!cfg.features.liveRooms) bad('LIVE_OFF');
+  if (!appconfig.createAllowed(cfg).ok) bad('UGC_PAUSED');
+  let started = null;
+  // rolls are kept per openid across attempts: when joins keep landing only the NEW seats are rolle
+    d (QA-R2-2c); the lobby is re-read until it is
+  // stable (bounded by time, not by a count of 4), then the answer is the retryable BUSY_RETRY, nev
+    er INTERNAL
+  const rollByOpenid = new Map();
+  const bankLib = roomio.bank().getPrompts();
+  const budgetUntil = Date.now() + START_BUDGET_MS;
+  for (let attempt = 0; !started && (attempt < 3 || Date.now() < budgetUntil); attempt++) {
+    const pre = await roomio.loadRoom(roomId);
+    if (!pre) bad('ROOM_NOT_FOUND');
+    if (roomLib.seatOf(pre, openid) < 0) bad('NOT_IN_ROOM');
+
+传画接龙 V1.0.0 源程序                                         第 49 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    const block = roomLib.startBlock(pre, openid, cfg.config.room);
+    if (block) bad(block);
+    const present = new Set(pre.seats.map((s) => s.openid));
+    for (const k of Array.from(rollByOpenid.keys())) if (!present.has(k)) rollByOpenid.delete(k); //
+     a seat that left: its roll is free again
+    const used = [];
+    rollByOpenid.forEach((r) => used.push(...r.ids));
+    const fresh = pre.seats.filter((s) => !rollByOpenid.has(s.openid));
+    const seen = await Promise.all(fresh.map(async (s) => (await players.read(s.openid)).seenPrompts
+     || []));
+    const rng = mulberry32(randomSeed());
+    fresh.forEach((s, i) => {
+      const r = roll.rollThree({ bank: bankLib, seen: seen[i], exclude: used, rng });
+      used.push(...r.ids); // pairwise disjoint across the whole room
+      rollByOpenid.set(s.openid, { rollId: roomio.newRollId(), ids: r.ids });
+    });
+    const rolls = pre.seats.map((s) => rollByOpenid.get(s.openid));
+    const chainIds = pre.seats.map(() => newChainId());
+    started = await store.txn(async (t) => {
+      const room = await store.getDocT(t, 'rooms', roomId);
+      if (!room) bad('ROOM_NOT_FOUND');
+      if (room.version !== pre.version) return null; // someone joined or left meanwhile: roll for t
+    he new seats only and go again
+      const b = roomLib.startBlock(room, openid, cfg.config.room);
+      if (b) bad(b);
+      const next = roomLib.start(room, { now: now(), chainIds, rolls, cfg: cfg.config.room });
+      const participants = next.seats.map((s) => s.openid);
+      for (let c = 0; c < next.n; c++) {
+        const chain = chainLib.newLiveChain({
+          chainId: chainIds[c], roomId, seat: c, starter: participants[c], participants, rounds: nex
+    t.R, now: now(), dateKey: players.dateKey(),
+          openGId: next.openGId, groupRef: next.groupRef,
+        });
+        await players.putT(t, 'chains', chainIds[c], chain);
+      }
+      await players.putT(t, 'rooms', roomId, next);
+      return { room: next, rolls, lobbySec: Math.round((now() - room.createdAt) / 1000) };
+    });
+  }
+  if (!started) bad('BUSY_RETRY');
+  const room = started.room;
+  const rolls = started.rolls;
+  // the ids that were shown count for the no-repeat window (4.1); best effort, in parallel
+  await Promise.all(room.seats.map((s, i) => players.mutate(s.openid, (p) => Object.assign({}, p, { 
+    seenPrompts: roll.pushSeen(p.seenPrompts, rolls[i].ids) })).catch((e) => console.warn('seenPromp
+    ts failed', store.errText(e)))));
+  await roomio.writeSignals(room);
+  await roomio.updateCard(room, true);
+  await lifecycle.bumpDaily({ rooms: 1 });
+  await store.writeEvent(null, 'room_start', { n: room.n, rounds: room.R, lobbySec: started.lobbySec
+
+传画接龙 V1.0.0 源程序                                         第 50 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+     });
+  return roomio.memberResponse(room, roomLib.seatOf(room, openid), openid, cfg);
+});
+'use strict';
+// submitRoomStep: hand in the turn of the current round (spec 3A.5, 5.8, 6.2-6.3, 13.2, AC 128-134,
+     141, 152-153). Three phases, so the check time never
+// holds the room hostage and a double tap / retry is harmless:
+//   A  one fast transaction: the caller must be seated, the round must be the current one and the f
+    unction must have started at or before
+//      deadline + grace (else ROUND_OVER); a resolved slot answers ALREADY_SENT with its state; an 
+    EMPTY forced send (nothing to send) resolves to the
+//      empty marker right here; otherwise the slot becomes `received`.
+//   B  outside any transaction: validate, then the synchronous check (game msgSecCheck, rasterise +
+     mediaCheckSync, 5 s). Nothing unchecked is stored.
+//   C  one transaction: if the slot is still the `received` one of phase A, resolve it: `sent` (a s
+    tep document for content), or the marker
+//      「（这一棒没传过来）」 when a FORCED send failed (blocked, busy, timed out, rejected: nobody learns why
+    ), or, before time-up, reopen it for a resend
+//      with the error code. The last resolved slot advances the round in the same transaction.
+// The daily turn cap is never applied here: a game already started is finished (3.9). Markers count
+     for neither the cap nor the streak.
+const roomLib = require('./core/room');
+const allowance = require('./core/allowance');
+const text = require('./core/text');
+const strokesLib = require('./core/strokes');
+const copy = require('./core/copy');
+const store = require('./common/store');
+const players = require('./common/players');
+const appconfig = require('./common/appconfig');
+const modio = require('./common/modio');
+const env = require('./common/env');
+const roomio = require('./common/roomio');
+const { bad, errResp } = require('./common/errors');
+const { now } = require('./common/util');
+const { SLOT } = roomLib;
+const clone = (o) => JSON.parse(JSON.stringify(o));
+exports.main = store.handler(async (event, { openid }) => {
+  env.ugcGuard();
+  await store.rateLimit(openid, 'rsubmit', 1, 30);
+  const roomId = roomio.roomIdOf(event);
+  const round = Number.isInteger(event.round) && event.round >= 0 && event.round <= 6 ? event.round 
+    : null;
+  if (!roomId || round === null) bad('BAD_REQUEST');
+  const auto = event.auto === true;
+  if (event.empty === true && !auto) bad('BAD_REQUEST'); // `empty` only rides on a forced send (AC 
+    25 / 13.2)
+  const cfg = await appconfig.get();
+  if (!appconfig.createAllowed(cfg).ok) bad('UGC_PAUSED');
+  const pre = await roomio.loadRoom(roomId);
+  if (!pre) bad('ROOM_NOT_FOUND');
+
+传画接龙 V1.0.0 源程序                                         第 51 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const seat = roomLib.seatOf(pre, openid);
+  if (seat < 0) bad('NOT_IN_ROOM');
+  // ---- the shape of the send for this kind of round (static: nothing is touched yet)
+  const kind = roomLib.kindOfRound(round);
+  const hasText = typeof event.text === 'string';
+  const hasStrokes = event.strokes !== undefined && event.strokes !== null;
+  const hasPick = typeof event.promptId === 'string';
+  const hasCustom = typeof event.customText === 'string';
+  if (kind === 'prompt') {
+    if (hasText || hasStrokes) bad('BAD_REQUEST');
+    if (!auto && hasPick === hasCustom) bad('BAD_REQUEST');
+    if (hasPick && typeof event.rollId !== 'string') bad('BAD_REQUEST');
+  } else if (kind === 'draw') {
+    if (hasText || hasPick || hasCustom) bad('BAD_REQUEST');
+    if (!auto && !hasStrokes) bad('BAD_REQUEST');
+  } else {
+    if (hasStrokes || hasPick || hasCustom) bad('BAD_REQUEST');
+    if (!auto && !hasText) bad('BAD_REQUEST');
+  }
+  // 0 strokes / fewer than 2 valid characters at a forced send = nothing to send (5.8)
+  let emptyTurn = false;
+  if (kind === 'draw' && auto && (event.empty === true || !hasStrokes || (Array.isArray(event.stroke
+    s && event.strokes.s) && event.strokes.s.length === 0))) emptyTurn = true;
+  if (kind === 'describe' && auto && (event.empty === true || !hasText || text.validCharCount(event.
+    text) < 2)) emptyTurn = true;
+  // ---- phase A
+  let a = null;
+  await store.txn(async (t) => {
+    a = null;
+    const room = await store.getDocT(t, 'rooms', roomId);
+    if (!room) bad('ROOM_NOT_FOUND');
+    const sNow = roomLib.seatOf(room, openid);
+    if (sNow < 0) bad('NOT_IN_ROOM');
+    const gate = roomLib.sendGate(room, sNow, round, now());
+    if (!gate.ok) {
+      if (gate.code === 'ALREADY_SENT') {
+        a = { already: true, slot: gate.slot };
+        return;
+      }
+      bad(gate.code);
+    }
+    if (emptyTurn) {
+      const marker = copy.emptyMarkerFor(kind);
+      const slot0 = roomLib.markReceived(room, sNow, now()); // keeps the attempt counter monotonic
+      const resolved = roomLib.resolveMarker(slot0, sNow, marker, now(), true);
+      const s = await roomio.settleT(t, resolved, 'submit');
+      await players.putT(t, 'rooms', roomId, s.room);
+      a = { room: s.room, due: s.due, marker, seat: sNow };
+      return;
+    }
+
+传画接龙 V1.0.0 源程序                                         第 52 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    const next = roomLib.markReceived(room, sNow, now());
+    await players.putT(t, 'rooms', roomId, next);
+    a = { room: next, seat: sNow, attempt: next.slots[String(round)][sNow].attempt };
+  });
+  if (a.already) return errResp('ALREADY_SENT', { slot: { state: a.slot.state, marker: a.slot.marker
+     || null } });
+  if (a.marker) {
+    await roomio.afterSettle(a.due, a.room);
+    if (!a.due) await roomio.writeSignals(a.room);
+    await store.writeEvent(openid, 'step_result', { mode: 'live', step: round, kind: kind === 'promp
+    t' ? 'draw' : kind, result: 'marker' });
+    return { ok: true, state: 'marker', marker: a.marker, round, slot: { state: SLOT.MARKER }, serve
+    rNow: now(), advanced: !!a.due };
+  }
+  const seatNo = a.seat;
+  const attempt = a.attempt;
+  const chainIndex = roomLib.chainOfSeat(seatNo, round, a.room.n);
+  const chainId = a.room.chainIds[chainIndex];
+  const sid = round >= 1 ? chainId + '_' + round + '_' + attempt : null;
+  // phases B and C run inside one guard: whatever fails there that is not the player's doing (the r
+    esolving transaction lost every write conflict,
+  // a check threw) gives the slot back (`received` -> `none`) so the very next send is taken, inste
+    ad of the slot staying `received` for the
+  // 8 s in-flight window while every retry answers ALREADY_SENT and a drawing that PASSED its check
+     ends up replaced by the marker (QA-R2-2b).
+  let c = null;
+  try {
+    c = await checkAndResolve();
+  } catch (e) {
+    await releaseSlot();
+    throw e;
+  }
+  async function releaseSlot() {
+    try {
+      await store.txn(async (t) => {
+        const room = await store.getDocT(t, 'rooms', roomId);
+        const next = room && roomLib.releaseReceived(room, round, seatNo, attempt, now());
+        if (next) await players.putT(t, 'rooms', roomId, next);
+      });
+    } catch (e2) {
+      console.warn('release of a received slot failed', store.errText(e2)); // the 8 s in-flight tak
+    eover (sendGate) is the last resort
+    }
+  }
+  async function checkAndResolve() {
+  // ---- phase B: validate and check (outside any transaction)
+  let verdict = null; // {ok:true, ...content} | {ok:false, code, extra}
+  let pick = null; // round 0
+  let fellBack = false;
+  if (kind === 'prompt') {
+
+传画接龙 V1.0.0 源程序                                         第 53 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    let err = null;
+    if (hasCustom) {
+      const v = text.validate(event.customText, 'prompt');
+      if (!v.ok) err = { code: 'TEXT_REJECTED', extra: { reason: v.reason } };
+      else {
+        const m = await modio.checkText({ openid, text: v.text, stepId: null, auto });
+        if (m.ok) pick = { custom: true, text: v.text };
+        else err = { code: m.code };
+      }
+    }
+    if (!pick && hasPick && (roomLib.rollPickValid(a.room, seatNo, event.rollId, event.promptId) || 
+    (auto && roomLib.shownPickValid(a.room, seatNo, event.promptId)))) pick = { promptId: event.prom
+    ptId };
+    if (!pick && !auto) verdict = { ok: false, code: err ? err.code : 'BAD_REQUEST', extra: err ? er
+    r.extra : null };
+    if (!pick && auto) {
+      pick = { promptId: roomLib.firstPrompt(a.room, seatNo) }; // 4.2 / AC 120: the selected rolled
+     prompt (the first if none was tapped)
+      fellBack = !hasPick;
+    }
+    if (pick) verdict = { ok: true, pick };
+  } else if (kind === 'describe') {
+    const v = text.validate(event.text, 'describe');
+    if (!v.ok) verdict = { ok: false, code: 'TEXT_REJECTED', extra: { reason: v.reason } };
+    else {
+      const m = await modio.checkText({ openid, text: v.text, stepId: sid, auto });
+      verdict = m.ok ? { ok: true, text: v.text } : { ok: false, code: m.code };
+    }
+  } else {
+    const sv = strokesLib.validate(event.strokes);
+    if (!sv.ok) verdict = { ok: false, code: 'INVALID_STROKES', extra: { reason: sv.reason } };
+    else {
+      const m = await modio.checkDrawingSync({ openid, chainId, n: round, attempt, stepId: sid, stro
+    kes: event.strokes, auto });
+      verdict = m.ok ? { ok: true, fileID: m.fileID } : { ok: false, code: m.code, extra: m.reason ?
+     { reason: m.reason } : null };
+    }
+  }
+  // ---- phase C
+  let c = null;
+  await store.txn(async (t) => {
+    c = null;
+    const room = await store.getDocT(t, 'rooms', roomId);
+    if (!room) bad('ROOM_NOT_FOUND');
+    if (!roomLib.stillReceived(room, round, seatNo, attempt)) {
+      // the round moved on (or the slot was taken over / filled by leaveRoom) while the check ran: 
+    the late verdict is logged, nothing is delivered
+      c = { late: true, code: room.state === roomLib.STATE.PLAYING && room.round === round ? 'ALREAD
+    Y_SENT' : 'ROUND_OVER' };
+      return;
+
+传画接龙 V1.0.0 源程序                                         第 54 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    }
+    let next;
+    let pl = null;
+    if (verdict.ok) {
+      let extra;
+      if (kind === 'prompt') extra = verdict.pick.custom ? { custom: true, text: verdict.pick.text }
+     : { promptId: verdict.pick.promptId };
+      else {
+        extra = { stepId: sid };
+        const step = {
+          _id: sid, chainId, roomId, n: round, attempt, kind, author: openid, claimId: null, state: 
+    'passed', auto, hiddenReason: null, laughs: 0, createdAt: now(),
+          mod: kind === 'draw' ? { kind: 'image', api: 'game', suggest: 'pass', submittedAt: now(), 
+    verdictAt: now() } : { kind: 'text', api: 'game', suggest: 'pass', submittedAt: now(), verdictAt
+    : now() },
+        };
+        if (kind === 'draw') {
+          step.strokes = clone(event.strokes);
+          step.fileID = verdict.fileID;
+        } else step.text = verdict.text;
+        await players.putT(t, 'steps', sid, step);
+      }
+      next = roomLib.resolveSent(room, seatNo, extra, now(), auto);
+      if (!fellBack) {
+        pl = await players.getT(t, openid);
+        pl = allowance.advanceStreak(allowance.consumeStep(pl, players.dateKey()), players.dateKey()
+    );
+        await players.putPlayerT(t, pl);
+      }
+      c = { state: 'sent' };
+    } else if (auto) {
+      next = roomLib.resolveMarker(room, seatNo, 'notDelivered', now(), true); // 「（这一棒没传过来）」: no re
+    ason is given to anyone (5.8)
+      c = { state: 'marker', marker: 'notDelivered', failed: verdict.code };
+    } else {
+      next = roomLib.reopenSlot(room, seatNo, now()); // before time-up: the author keeps the work a
+    nd may fix and resend
+      c = { state: 'blocked', code: verdict.code, extra: verdict.extra };
+    }
+    const s = await roomio.settleT(t, next, 'submit');
+    await players.putT(t, 'rooms', roomId, s.room);
+    c.room = s.room;
+    c.due = s.due;
+  });
+  return c;
+  }
+  if (c.late) {
+    await store.writeEvent(openid, 'step_result', { mode: 'live', step: round, kind: kind === 'promp
+    t' ? 'draw' : kind, result: 'roundOver' });
+    return errResp(c.code, c.code === 'ALREADY_SENT' ? { slot: { state: 'received' } } : {});
+
+传画接龙 V1.0.0 源程序                                         第 55 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  }
+  await roomio.afterSettle(c.due, c.room);
+  if (!c.due) await roomio.writeSignals(c.room);
+  const resultName = c.state === 'sent' ? 'passed' : c.state === 'marker' ? 'marker' : c.code === 'M
+    ODERATION_BUSY' ? 'busy' : c.code === 'TEXT_REJECTED' || c.code === 'INVALID_STROKES' ? 'rejecte
+    d' : 'blocked';
+  await store.writeEvent(openid, 'step_result', { mode: 'live', step: round, kind: kind === 'prompt'
+     ? 'draw' : kind, result: resultName });
+  if (c.state === 'blocked') return errResp(c.code, Object.assign({ slot: { state: SLOT.BLOCKED } },
+     c.extra || {}));
+  const base = { ok: true, state: c.state, round, slot: { state: c.state === 'sent' ? SLOT.SENT : SL
+    OT.MARKER }, serverNow: now(), advanced: !!c.due };
+  if (c.state === 'marker') {
+    base.marker = c.marker;
+    if (c.failed) base.failed = c.failed === 'MODERATION_BUSY' ? 'busy' : 'blocked'; // the author's
+     own toast only (6.4)
+  }
+  return base;
+});
+'use strict';
+// submitStep: hand in a 棒 of a 慢慢传 chain (spec 3.5, 5.8, 6.2, 6.3, AC 1, 12, 15, 37-41, 128-134, 15
+    2-153). Idempotent per claimId.
+//   describe 棒: local rules -> game msgSecCheck (synchronous) -> transaction (step passed, chain ad
+    vances, 棒 6 reveals)
+//   draw 棒:     validate -> rasterise PNG (512 x round(512 h/1024)) -> cloud storage -> temp URL ->
+     mediaCheckSync (5 s) -> the same transaction.
+//                Nothing unchecked is ever visible: block / error / timeout leave the 棒 undelivered
+    .
+//                imageMode 'async' (the dormant fallback, 6.10): the v1 pipeline, mediaCheckAsync -
+    > `pending` -> verdict by push.
+//   forced send (`auto: true`, F-4): nothing to send (0 strokes / < 2 valid characters / `empty`) -
+    > a MARKER step 「（没来得及画）」/「（没来得及写）」 that passes
+//                the 棒 on without any check; a send that is blocked, rejected or errors -> the clai
+    m is released and the 棒 REOPENS for anyone eligible (the author
+//                sees "这一棒没通过内容审核" in 我的接龙). Before time-up a block just returns the error and the 
+    author keeps the claim and the work.
+// All state changes of one submit commit in ONE transaction (chain, step, player); the moderation c
+    alls sit outside it.
+const { CONFIG } = require('./core/config');
+const chainLib = require('./core/chain');
+const allowance = require('./core/allowance');
+const strikes = require('./core/strikes');
+const text = require('./core/text');
+const copy = require('./core/copy');
+const strokesLib = require('./core/strokes');
+const store = require('./common/store');
+const players = require('./common/players');
+const appconfig = require('./common/appconfig');
+const modio = require('./common/modio');
+const lifecycle = require('./common/lifecycle');
+
+传画接龙 V1.0.0 源程序                                         第 56 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+const env = require('./common/env');
+const raster = require('./common/raster');
+const { bad, errResp } = require('./common/errors');
+const { chainIdOf, claimIdOf } = require('./common/input');
+const { now } = require('./common/util');
+const { STEP } = chainLib;
+const clone = (o) => JSON.parse(JSON.stringify(o));
+/** the stored result of an earlier submit with this claimId (index chainId + claimId) */
+async function storedResult(chainId, claimId, openid) {
+  const r = await store.coll('steps').where({ chainId, claimId }).limit(10).get();
+  const s = (r.data || []).find((x) => x.author === openid && x.result);
+  return s ? Object.assign({ ok: true }, s.result) : null;
+}
+exports.main = store.handler(async (event, { openid }) => {
+  const e = env.ugcGuard();
+  await store.rateLimit(openid, 'submit', 1, 30);
+  const chainId = chainIdOf(event);
+  const chain = chainId && (await store.getDoc('chains', chainId));
+  if (!chain || chain.mode === 'live') bad('CHAIN_NOT_FOUND');
+  const claimId = claimIdOf(event);
+  const prior = await storedResult(chainId, claimId, openid); // idempotent per claimId (17.3)
+  if (prior) return prior;
+  const p = await players.touch(openid);
+  if (p.rulesVersion < CONFIG.rulesVersion) bad('RULES_REQUIRED');
+  const cfg = await appconfig.get();
+  if (!appconfig.createAllowed(cfg).ok) bad('UGC_PAUSED');
+  const imageMode = cfg.config.moderation.imageMode;
+  const auto = event.auto === true;
+  if (event.empty === true && !auto) bad('BAD_REQUEST'); // `empty` only rides on a forced send (spe
+    c 13.2)
+  let hasText = typeof event.text === 'string';
+  let hasStrokes = event.strokes !== undefined && event.strokes !== null;
+  // a forced send with nothing in it becomes a marker (5.8): 0 strokes, or fewer than 2 valid chara
+    cters
+  const kind0 = chain.claim ? chainLib.kindOf(chain.claim.step) : null;
+  let empty = event.empty === true;
+  if (auto && kind0 === 'draw' && !hasText && (!hasStrokes || (Array.isArray(event.strokes.s) && eve
+    nt.strokes.s.length === 0))) empty = true;
+  if (auto && kind0 === 'describe' && !hasStrokes && (!hasText || text.validCharCount(event.text) < 
+    2)) empty = true;
+  if (empty) {
+    hasText = false;
+    hasStrokes = false;
+  }
+  const chk = chainLib.checkSubmit(chain, { openid, claimId, now: now(), hasText, hasStrokes, empty 
+    });
+  if (!chk.ok) bad(chk.code);
+  const r = strikes.restrictionOf(p, now());
+  if (r && !(p.restrictedAt > chain.claim.at)) bad('RESTRICTED', { until: r.until }); // edge 19 / T
+    D-7: a claim taken before the restriction may finish
+
+传画接龙 V1.0.0 源程序                                         第 57 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  if (!empty) {
+    const stepLim = allowance.checkSteps(p, players.dateKey());
+    if (stepLim) bad(stepLim.code);
+  }
+  const n = chk.step;
+  const kind = chk.kind;
+  const attempt = chain.attempts[n] + 1;
+  const sid = chainLib.stepId(chain._id, n, attempt);
+  const lateCheck = () => ({ openid, claimId, now: now(), hasText, hasStrokes, empty });
+  /** the transaction that records a delivered 棒: `step` fields on top of the base, `pass` = which c
+    hain transition, `markPlayer` = turn counters */
+  async function commit(stepExtra, passFn, counters) {
+    const out = await store.txn(async (t) => {
+      const fresh = await store.getDocT(t, 'chains', chain._id);
+      const again = fresh && chainLib.checkSubmit(fresh, lateCheck());
+      if (!again || !again.ok || fresh.attempts[n] + 1 !== attempt) return { replay: true, code: aga
+    in && again.code };
+      const pl = await players.getT(t, openid);
+      if (n === 1 && allowance.checkStart(pl, players.dateKey())) return { limit: 'START_LIMIT' };
+      const pr = passFn(fresh);
+      const result = { state: stepExtra.marker ? 'marker' : 'passed', step: n, chainState: pr.chain.
+    state, revealed: pr.revealed };
+      if (stepExtra.marker) result.marker = stepExtra.marker;
+      const step = Object.assign({
+        _id: sid, chainId: chain._id, n, attempt, kind, author: openid, claimId, state: STEP.PASSED,
+     auto, hiddenReason: null, laughs: 0, result, createdAt: now(),
+      }, stepExtra);
+      await players.putT(t, 'steps', sid, step);
+      await players.putT(t, 'chains', chain._id, pr.chain);
+      let pl2 = pl;
+      if (counters.turn) pl2 = allowance.advanceStreak(allowance.consumeStep(pl2, players.dateKey())
+    , players.dateKey());
+      if (n === 1) pl2 = allowance.consumeStart(pl2, players.dateKey());
+      await players.putPlayerT(t, pl2);
+      return { chain: pr.chain, step, result };
+    });
+    if (out.limit) bad(out.limit);
+    if (out.replay) return (await storedResult(chainId, claimId, openid)) || bad(out.code || 'CLAIM_
+    LOST');
+    if (n === 1) await lifecycle.onStarted(out.chain);
+    await lifecycle.onPassed(out.chain, out.step, out.result.revealed);
+    await store.writeEvent(openid, 'step_result', { mode: 'chain', chainId: chain._id, step: n, kind
+    , result: out.result.state === 'marker' ? 'marker' : 'passed' });
+    return Object.assign({ ok: true, serverNow: now() }, out.result);
+  }
+  /** a FORCED send that did not pass: release the claim, reopen the 棒, keep a record for the author
+    's 我的接龙 (5.8, AC 132) */
+  async function reopenForced(code, extra, recState) {
+    await store.txn(async (t) => {
+      const fresh = await store.getDocT(t, 'chains', chain._id);
+
+传画接龙 V1.0.0 源程序                                         第 58 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+      const again = fresh && chainLib.checkSubmit(fresh, lateCheck());
+      if (!again || !again.ok || fresh.attempts[n] + 1 !== attempt) return;
+      const next = chainLib.reopenAfterForced(fresh, { attempt, now: now() });
+      await players.putT(t, 'chains', chain._id, next);
+      await players.putT(t, 'steps', sid, {
+        _id: sid, chainId: chain._id, n, attempt, kind, author: openid, claimId, state: recState, au
+    to, hiddenReason: null, laughs: 0, mod: { kind, suggest: recState === 'blocked' ? 'risky' : 'err
+    or', submittedAt: now(), verdictAt: now() }, createdAt: now(),
+      });
+    });
+    await store.writeEvent(openid, 'step_result', { mode: 'chain', chainId: chain._id, step: n, kind
+    , result: code === 'MODERATION_BUSY' ? 'busy' : code === 'TEXT_REJECTED' || code === 'INVALID_ST
+    ROKES' ? 'rejected' : 'blocked' });
+    return errResp(code, Object.assign({ reopened: true }, extra || {}));
+  }
+  const fail = (code, extra, recState) => (auto ? reopenForced(code, extra, recState || (code === 'T
+    EXT_BLOCKED' || code === 'IMAGE_BLOCKED' ? 'blocked' : 'void')) : bad(code, extra));
+  // -----------------------------------------------------------------------------------------------
+    ------------- marker
+  if (empty) {
+    if (n === 1) {
+      const sl = allowance.checkStart(p, players.dateKey());
+      if (sl) bad(sl.code);
+    }
+    const marker = copy.emptyMarkerFor(kind);
+    return commit({ marker, mod: { kind: 'marker' } }, (fresh) => chainLib.passMarker(fresh, { stepI
+    d: sid, openid, attempt, now: now(), marker }), { turn: false });
+  }
+  // -----------------------------------------------------------------------------------------------
+    ------------- describe
+  if (kind === 'describe') {
+    const v = text.validate(event.text, 'describe');
+    if (!v.ok) return fail('TEXT_REJECTED', { reason: v.reason }, 'void');
+    const m = await modio.checkText({ openid, text: v.text, stepId: sid, auto });
+    if (!m.ok) return fail(m.code);
+    return commit({ text: v.text, mod: { kind: 'text', api: cfg.config.moderation.textApi, suggest: 
+    'pass', submittedAt: now(), verdictAt: now() } },
+      (fresh) => chainLib.passText(fresh, { stepId: sid, openid, attempt, now: now() }), { turn: tru
+    e });
+  }
+  // -----------------------------------------------------------------------------------------------
+    ------------- drawing
+  const sv = raster.validateDrawing(event.strokes);
+  if (!sv.ok) return fail('INVALID_STROKES', { reason: sv.reason }, 'void');
+  if (n === 1) {
+    const sl = allowance.checkStart(p, players.dateKey());
+    if (sl) bad(sl.code);
+  }
+  const strokes = clone(event.strokes);
+  if (imageMode === 'sync') {
+
+传画接龙 V1.0.0 源程序                                         第 59 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    const m = await modio.checkDrawingSync({ openid, chainId: chain._id, n, attempt, stepId: sid, st
+    rokes, auto });
+    if (!m.ok) return fail(m.code, m.reason ? { reason: m.reason } : null);
+    return commit({ strokes, fileID: m.fileID, mod: { kind: 'image', api: 'game', suggest: 'pass', s
+    ubmittedAt: now(), verdictAt: now() } },
+      (fresh) => chainLib.passText(fresh, { stepId: sid, openid, attempt, now: now() }), { turn: tru
+    e });
+  }
+  // ---- imageMode 'async' (6.10): the v1 pipeline, kept dormant behind the configuration switch
+  const lvl = await modio.imageLevel();
+  if (lvl === 'failClosed') bad('MODERATION_BUSY');
+  if (lvl === 'alert') modio.alert('image quota >= 70% of the daily mediaCheckAsync limit; ask WeCha
+    t for a raise (Handoff H11)');
+  const img = raster.strokesToPng(strokes);
+  if (!img.ok) bad('INVALID_STROKES', { reason: img.reason });
+  let fileID;
+  try {
+    fileID = await modio.storePng(chain._id, n, attempt, img.png);
+  } catch (err) {
+    console.error('[ALERT] moderation PNG upload failed', store.errText(err));
+    bad('MODERATION_BUSY'); // fail closed: nothing stored, the claim stays
+  }
+  const sent = await modio.sendImageCheck({ stepId: sid, openid, fileID, strokes });
+  const t0 = now();
+  const modBlock = {
+    kind: 'image', traceIds: sent.ok ? [sent.traceId] : [], submittedAt: t0, lastCheckAt: sent.ok ? 
+    t0 : null, rechecks: 0,
+    callErrors: sent.ok ? 0 : 1, suggest: null, label: null,
+  };
+  const out = await store.txn(async (t) => {
+    const fresh = await store.getDocT(t, 'chains', chain._id);
+    const again = fresh && chainLib.checkSubmit(fresh, lateCheck());
+    if (!again || !again.ok || fresh.attempts[n] + 1 !== attempt) return { replay: true, code: again
+     && again.code };
+    const pl = await players.getT(t, openid);
+    if (n === 1 && allowance.checkStart(pl, players.dateKey())) return { limit: 'START_LIMIT' };
+    const next = chainLib.beginPending(fresh, { stepId: sid, openid, attempt, now: now() });
+    const result = { state: 'pending', step: n, chainState: next.state, revealed: false };
+    const step = {
+      _id: sid, chainId: chain._id, n, attempt, kind: 'draw', author: openid, claimId, strokes, file
+    ID, state: STEP.PENDING,
+      mod: modBlock, hiddenReason: null, laughs: 0, result, createdAt: now(),
+    };
+    await players.putT(t, 'steps', sid, step);
+    await players.putT(t, 'chains', chain._id, next);
+    let pl2 = allowance.consumeStep(pl, players.dateKey());
+    if (n === 1) pl2 = allowance.consumeStart(pl2, players.dateKey());
+    await players.putPlayerT(t, pl2);
+    return { chain: next, result };
+  });
+
+传画接龙 V1.0.0 源程序                                         第 60 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  if (out.limit) bad(out.limit);
+  if (out.replay) return (await storedResult(chainId, claimId, openid)) || bad(out.code || 'CLAIM_LO
+    ST');
+  if (n === 1) await lifecycle.onStarted(out.chain);
+  await store.writeEvent(openid, 'step_result', { mode: 'chain', chainId: chain._id, step: n, kind: 
+    'draw', result: 'pending', mock: e.mode === 'mock' });
+  return Object.assign({ ok: true, serverNow: now() }, out.result);
+});
+'use strict';
+// subscribeReveal: store one grant for the opt-in "接龙揭晓了" notice (spec 10.3, AC 100). Participants 
+    only; one doc per
+// chain + player, so a repeat tap changes nothing and at most one message is ever sent per grant.
+const chainLib = require('./core/chain');
+const store = require('./common/store');
+const appconfig = require('./common/appconfig');
+const { bad } = require('./common/errors');
+const { chainIdOf } = require('./common/input');
+const { now } = require('./common/util');
+exports.main = store.handler(async (event, { openid }) => {
+  await store.rateLimit(openid, 'sub', 1, 20);
+  const c = await appconfig.get();
+  if (!c.subscribe) bad('NO_TEMPLATE');
+  const id = chainIdOf(event);
+  const chain = id && (await store.getDoc('chains', id));
+  if (!chain) bad('CHAIN_NOT_FOUND');
+  if (!chainLib.isParticipant(chain, openid)) bad('NOT_PARTICIPANT');
+  await store.addIfAbsent('sub_grants', { _id: chain._id + '_' + openid, chainId: chain._id, openid,
+     tmplId: c.subscribe.tmplId, grantedAt: now(), used: false });
+  return { ok: true };
+});
+'use strict';
+// track: batched analytics (spec 14, AC 75). core/analytics.js#sanitizeEvents allowlists event name
+    s AND, per event, the prop keys,
+// types and enum values from the spec 14 catalogue (L2); everything else (unknown keys, wrong types
+    , out-of-enum strings, anything
+// that could be content or identity such as text, strokes, openids, group ids) is dropped, whatever
+     a modified client sends.
+const { sanitizeEvents } = require('./core/analytics');
+const store = require('./common/store');
+const { now } = require('./common/util');
+exports.main = store.handler(async (event, { openid }) => {
+  await store.rateLimit(openid, 'track', 1, 20); // before parsing: a flood of junk batches costs th
+    e sender, not us
+  const clean = sanitizeEvents(event.events);
+  if (!clean.length) return { ok: true };
+  await Promise.all(clean.map((e) => store.coll('events').add({ data: { openid, sessionId: e.session
+    Id, name: e.name, props: e.props, ts: now(), clientTs: e.clientTs } }).catch((err) => console.wa
+    rn('track add failed', store.errText(err)))));
+  return { ok: true };
+});

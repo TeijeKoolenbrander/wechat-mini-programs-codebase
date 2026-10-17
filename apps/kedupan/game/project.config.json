@@ -1,0 +1,69 @@
+{
+  "appid": "wxcd03c1b62d7eb0e0",
+  "compileType": "game",
+  "cloudfunctionRoot": "cloudfunctions-deploy/",
+  "projectname": "kedupan-game",
+  "libVersion": "latest",
+  "setting": {
+    "es6": true,
+    "enhance": false,
+    "minified": false,
+    "postcss": false,
+    "compileWorklet": false,
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "useCompilerPlugins": false,
+    "condition": false,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
+  },
+  "packOptions": {
+    "ignore": [
+      {
+        "value": "tests",
+        "type": "folder"
+      },
+      {
+        "value": "tools",
+        "type": "folder"
+      },
+      {
+        "value": "node_modules",
+        "type": "folder"
+      },
+      {
+        "value": "package.json",
+        "type": "file"
+      },
+      {
+        "value": "package-lock.json",
+        "type": "file"
+      },
+      {
+        "value": "core/README.md",
+        "type": "file"
+      },
+      {
+        "value": "js/render/CONTRACT.md",
+        "type": "file"
+      },
+      {
+        "value": "cloudfunctions-deploy",
+        "type": "folder"
+      }
+    ],
+    "include": []
+  },
+  "simulatorPluginLibVersion": {},
+  "isGameTourist": false,
+  "editorSetting": {}
+}

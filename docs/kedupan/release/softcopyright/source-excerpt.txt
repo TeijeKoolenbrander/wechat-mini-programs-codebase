@@ -1,0 +1,3179 @@
+群友刻度盘 V1.0.0 源程序                                        第 1 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+require('./js/main');
+/**
+ * Tuning constants (spec 3, 5, 9, 11). Pure JS; copied into the cloud functions.
+ * One frozen object, versioned. The server may override only the keys the spec lists
+ * as remote (app_config: ads.interstitial, ads.banner, subscribe), see features.js / adpolicy.js.
+ */
+const CONFIG = Object.freeze({
+  configVersion: 2,
+  /** Track: integer positions 0..100 (spec 3). */
+  track: { min: 0, max: 100, nudge: 1, tickEvery: 5 },
+  score: {
+    /** s(d) = max(0, 100 - ceil(perStep * d)) (spec 3.1) */
+    perStep: 2.5,
+    /** card label upper bounds on d (spec 3.1): <=2, <=6, <=12, <=20, else the last label */
+    labels: [
+      { maxD: 2, label: '心有灵犀' },
+      { maxD: 6, label: '很同频' },
+      { maxD: 12, label: '差不多' },
+      { maxD: 20, label: '有点偏' },
+      { maxD: Infinity, label: '想法独特' },
+    ],
+    /** day bands: lowest total for each band, descending (spec 3.3) */
+    bands: [
+      { min: 450, label: '灵魂同频' },
+      { min: 380, label: '默契十足' },
+      { min: 300, label: '大体同频' },
+      { min: 200, label: '各有想法' },
+      { min: 0, label: '独树一帜' },
+    ],
+    /** virtual votes at the editor anchor (PD-4) */
+    priorVotes: 10,
+    /** "和全国 x% 的人想法相近": within +-agreeRadius, shown from agreeMinN real answers (spec 3.3) */
+    agreeRadius: 10,
+    agreeMinN: 30,
+    /** percentile hidden below this many complete dailies (spec 3.3) */
+    percentileMinN: 30,
+    /** hollow-dot / sample size under which the national label says 样本少 (spec 15.7) */
+    smallSampleN: 30,
+    /** "和你一样" when the group median is within this many steps (spec 6.3) */
+    sameAsYouD: 2,
+    /** bullseye (confetti, chime, vibrate): d <= this (spec 6.3, AC 17) */
+    bullseyeD: 2,
+  },
+  daily: {
+    cards: 5,
+    /** placeholder; LAUNCH_DATE_KEY env / meta.launch override it on the server (spec 5) */
+    launchDateKey: '20261101',
+    /** a daily started on D may finish until D+1 00:30 BJT; 定分 at the same moment (spec 5, PD-24) *
+    /
+    graceMs: 30 * 60 * 1000,
+
+群友刻度盘 V1.0.0 源程序                                        第 2 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    /** card 5 within this many ms of card 1 raises the observe-only `fast` flag (spec 11.5) */
+    fastMs: 6000,
+  },
+  group: {
+    /** group page: members needed (spec 3.4) */
+    minForLeaveOneOut: 2,
+    minForMq: 3,
+    rowCap: 500,
+    /** dots drawn in the reveal are down-sampled to this many */
+    dotCap: 60,
+    trendDays: 7,
+    roundsListCap: 10,
+    cacheSec: 60,
+  },
+  board: { listCap: 3000, cacheSec: 60 },
+  rounds: {
+    targetMin: 5,
+    targetMax: 95,
+    minGuessesToReveal: 2,
+    autoRevealAtGuesses: 8,
+    autoRevealMs: 24 * 3600e3,
+    guessCloseMs: 7 * 24 * 3600e3,
+    draftMs: 30 * 60e3,
+    groupRefsCap: 10,
+    offerSpectra: 3,
+    clueOptions: 6,
+    freeSpectraSwaps: 1,
+    adSpectraSwapsMax: 3,
+  },
+  limits: {
+    createRoundPerDay: 20,
+    bonusPerDay: 3,
+    /** spec 11.2 says 3; raised, see decisions TD-8 (the ad was already watched when this is hit) *
+    /
+    distributionPerDay: 20,
+    reportPerDay: 10,
+    trackBatchMax: 50,
+    /**
+     * Per-openid fixed-window (1 minute) call limits of EVERY client-callable function (M3, TD-63).
+     Reads about 60,
+     * writes about 20; the heavy readers (a board or 60-set scan per call) and the one-shot writers
+     are lower.
+     * Applied by store.handler before any work; a refused call returns RATE_LIMITED.
+     */
+    perMinute: {
+      getDaily: 60, getArchive: 60, getArchiveDay: 60, getRound: 60,
+      getGroupDay: 30, getFriendBoard: 30, getBonusCard: 10, unlockDistribution: 20,
+      submitCard: 30, submitGuess: 20, createRound: 20, setClue: 20, revealRound: 20, subscribeRound
+    : 20,
+      joinGroup: 20, reportCard: 10, track: 30,
+
+群友刻度盘 V1.0.0 源程序                                        第 3 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+      // D-2 (spec 11.6): agreeRules 20, reportClue 10; admin 60 applies to an allow-listed openid o
+    nly (the console carries none)
+      agreeRules: 20, reportClue: 10, admin: 60,
+    },
+    /** typed-clue WeChat checks per user per Beijing day (spec 11.2 setClue, AC 99); local rejectio
+    ns do not count */
+    clueChecksPerDay: 50,
+    /** reportClue per user per Beijing day (spec 11.2, AC 91) */
+    clueReportsPerDay: 10,
+  },
+  /** Display caps for responses and server events (M3). */
+  caps: {
+    /** guesses read for a reveal view (a round hardly passes the 8th on-time guess; late guesses ar
+    e the tail) */
+    guessesShown: 500,
+    /** board_list server events are written for one request in this many (the rest are sampled out)
+     */
+    boardEventEvery: 10,
+  },
+  archive: { pageMax: 30, bonusExcludeMax: 60 },
+  /** Interstitial defaults and clamps (spec 9); app_config.ads.interstitial may override within the
+     clamps. */
+  interstitial: {
+    defaults: { enabled: true, everyNSets: 2, minLifetimeSets: 3, minGapSec: 120, maxPerDay: 6 },
+    clamp: { everyNSets: { min: 2 }, minLifetimeSets: { min: 2 }, minGapSec: { min: 60 }, maxPerDay:
+     { max: 8 } },
+  },
+  analytics: { flushMs: 20000, maxBatch: 50, sessionGapMs: 30 * 60 * 1000 },
+  /**
+   * Typed clues (D-2, spec 6.12, 11.6-11.8). rulesVersion: the 发言规则 version a host must have agreed
+     to.
+   * reportReasons: the five report reasons (the legacy spelling 'ad' is accepted by input.js and st
+    ored as 'ads').
+   */
+  ugc: {
+    rulesVersion: 1,
+    clueMax: 12,
+    reportReasons: ['porn', 'politics', 'abuse', 'ads', 'other'],
+    /** sweepRounds alerts for a report still open after this long */
+    staleReportAlertMs: 48 * 3600e3,
+    /** sweepRounds alerts when >= rate of >= minCalls text checks in the last windowMs were busy */
+    busyAlert: { minCalls: 20, rate: 0.5, windowMs: 3600e3 },
+    /** admin sample: passed typed clues of the last 24 h */
+    sampleWindowMs: 24 * 3600e3,
+  },
+  /** WeChat text check (spec 11.6). scene 3 = 论坛 (a clue is shown to several people). */
+  moderation: {
+    scene: 3,
+    textGameTimeoutMs: 2000,
+    textTimeoutMs: 3000,
+
+群友刻度盘 V1.0.0 源程序                                        第 4 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    mockSyncDelayMs: 300,
+    /** dev + live only: calls per day (protects the pre-publish quota), counted in mod_quota/<dateK
+    ey> */
+    devTextDailyBudget: 80,
+  },
+  /** Strike ladder (spec 11.8, 传画接龙 7.3): strikes in the rolling window -> consequence. */
+  strikes: {
+    windowMs: 30 * 86400e3,
+    /** strike timestamps kept per player */
+    keepMax: 10,
+    ladder: [
+      { at: 1, warn: true, restrictMs: 0, flag: false },
+      { at: 2, warn: false, restrictMs: 24 * 3600e3, flag: false },
+      { at: 3, warn: false, restrictMs: 7 * 86400e3, flag: false },
+      { at: 4, warn: false, restrictMs: 30 * 86400e3, flag: true },
+    ],
+  },
+  /** retention days (spec 13) */
+  retentionDays: 180,
+});
+module.exports = { CONFIG, getConfig: () => CONFIG };
+/**
+ * Beijing date helpers (spec 5.2, AC 66). Explicit UTC+8 arithmetic: never
+ * uses local-time getters, so the answer is the same whatever TZ the process
+ * (or the device) runs in.
+ */
+const BJT_OFFSET_MS = 8 * 3600e3;
+const DAY_MS = 86400e3;
+/** 'YYYYMMDD' of the Beijing date at epoch-ms `nowMs`. */
+function beijingDateKey(nowMs) {
+  return new Date(nowMs + BJT_OFFSET_MS).toISOString().slice(0, 10).replace(/-/g, '');
+}
+/** Epoch-ms of 00:00 Beijing time on the date of `nowMs`. */
+function beijingMidnightMs(nowMs) {
+  return Math.floor((nowMs + BJT_OFFSET_MS) / DAY_MS) * DAY_MS - BJT_OFFSET_MS;
+}
+/** Seconds after 00:00 BJT (board tie-break `s`, spec 11.4). */
+function secondsSinceBeijingMidnight(nowMs) {
+  return Math.floor((nowMs - beijingMidnightMs(nowMs)) / 1000);
+}
+/** Epoch-ms of 00:00 BJT for a 'YYYYMMDD' key. */
+function dateKeyToMs(key) {
+  const y = +key.slice(0, 4);
+  const m = +key.slice(4, 6);
+  const d = +key.slice(6, 8);
+  return Date.UTC(y, m - 1, d) - BJT_OFFSET_MS;
+}
+/** The key `n` days after `key` (n may be negative). */
+function addDays(key, n) {
+  return beijingDateKey(dateKeyToMs(key) + n * DAY_MS + 12 * 3600e3);
+
+群友刻度盘 V1.0.0 源程序                                        第 5 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+}
+/** Whole days from key a to key b. */
+function daysBetween(a, b) {
+  return Math.round((dateKeyToMs(b) - dateKeyToMs(a)) / DAY_MS);
+}
+/** Milliseconds until the next 00:00 BJT. */
+function msUntilBeijingMidnight(nowMs) {
+  return beijingMidnightMs(nowMs) + DAY_MS - nowMs;
+}
+/** Issue number (第 N 期): days since launch, launch day = 1. */
+function issueNo(dateKey, launchKey) {
+  return daysBetween(launchKey, dateKey) + 1;
+}
+/** Day of week (0 = Sunday) of the Beijing date 'YYYYMMDD'. Pure calendar arithmetic, TZ independen
+    t. */
+function weekdayOf(key) {
+  return new Date(Date.UTC(+key.slice(0, 4), +key.slice(4, 6) - 1, +key.slice(6, 8))).getUTCDay();
+}
+/**
+ * The daily variant of a date key (spec 5.2/8.11, PO-1): 'shiren' on the config weekday (Sunday), e
+    lse 'standard'.
+ * `weekday` is config.shiren.weekday. Display only: the seed, sheet, sim, gates and validation neve
+    r look at it.
+ */
+function variantOf(key, weekday) {
+  return weekdayOf(key) === (weekday === undefined ? 0 : weekday) ? 'shiren' : 'standard';
+}
+module.exports = {
+  weekdayOf,
+  variantOf,
+  BJT_OFFSET_MS,
+  DAY_MS,
+  beijingDateKey,
+  beijingMidnightMs,
+  secondsSinceBeijingMidnight,
+  dateKeyToMs,
+  addDays,
+  daysBetween,
+  msUntilBeijingMidnight,
+  issueNo,
+};
+/**
+ * Seeded randomness (spec 5.1). Pure JS, no wx, no DOM: this file is copied
+ * into the cloud functions, so client and server draw identical streams.
+ *
+ *   sub(seed, name) = mulberry32(hash32(seed + ":" + name))
+ */
+/** mulberry32: same seed, same sequence, forever. Returns () => float in [0,1). */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+
+群友刻度盘 V1.0.0 源程序                                        第 6 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  return function () {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+/** FNV-1a over UTF-16 code units, then a murmur3 finaliser. Returns uint32. */
+function hash32(str) {
+  const s = String(str);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+/** A named sub-stream of a run seed. */
+function sub(seed, name) {
+  return mulberry32(hash32(seed + ':' + name));
+}
+/** Integer in [0, maxExclusive). */
+function int(rng, maxExclusive) {
+  return Math.floor(rng() * maxExclusive);
+}
+/** A uniformly random element of `arr`. */
+function pick(rng, arr) {
+  return arr[int(rng, arr.length)];
+}
+/** Fisher-Yates, in place. Returns the same array. */
+function shuffle(rng, arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = int(rng, i + 1);
+    const t = arr[i];
+    arr[i] = arr[j];
+    arr[j] = t;
+  }
+  return arr;
+}
+/** A fresh random uint32 from Math.random (client-side free-play seeds only). */
+function randomSeed() {
+  return Math.floor(Math.random() * 4294967296) >>> 0;
+}
+module.exports = { mulberry32, hash32, sub, int, pick, shuffle, randomSeed };
+/**
+
+群友刻度盘 V1.0.0 源程序                                        第 7 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+ * Error codes (spec 11.3) and the client copy for each (spec 6 states). Pure JS.
+ * Server codes come back as {ok:false, code, message}; TIMEOUT / NETWORK / BAD_RESPONSE are produce
+    d by js/api.js only.
+ */
+const SERVER_CODES = [
+  'INVALID_INPUT', 'CARD_ORDER', 'CARD_DONE', 'LATE_SUBMIT', 'DAILY_UNAVAILABLE', 'DAY_OPEN',
+  'ROUND_NOT_FOUND', 'ROUND_EXPIRED', 'OWN_ROUND', 'ALREADY_GUESSED', 'TOO_FEW_GUESSES', 'NOT_HOST',
+  'NO_TEMPLATE', 'NOT_MEMBER', 'NOT_GROUP', 'BAD_CLOUDID', 'RATE_LIMITED', 'UNAUTHENTICATED', 'FORBI
+    DDEN',
+  'SERVER_CONFIG', 'INTERNAL',
+  // added by this implementation (decisions TD-9)
+  'NO_CARD_AVAILABLE',
+  // D-2 typed clues (spec 11.3)
+  'TEXT_REJECTED', 'TEXT_BLOCKED', 'MODERATION_BUSY', 'RULES_REQUIRED', 'RESTRICTED', 'UGC_PAUSED', 
+    'DUP_REPORT', 'REPORT_LIMIT',
+];
+const CLIENT_CODES = ['TIMEOUT', 'NETWORK', 'BAD_RESPONSE'];
+/** Player-facing copy by code. `where` overrides (e.g. RATE_LIMITED on createRound vs getBonusCard)
+    . */
+const COPY = {
+  INVALID_INPUT: '出了点小问题，请重试',
+  CARD_ORDER: '请按顺序回答',
+  CARD_DONE: null, // not an error for the player: the stored reveal is shown
+  LATE_SUBMIT: '这一期已经结束，可以去往期里玩',
+  DAILY_UNAVAILABLE: '今日卡片需联网获取',
+  DAY_OPEN: '这一期还没结束',
+  ROUND_NOT_FOUND: '找不到这道题',
+  ROUND_EXPIRED: '这道题已经结束了',
+  OWN_ROUND: '这是你自己出的题',
+  ALREADY_GUESSED: '你已经猜过了',
+  TOO_FEW_GUESSES: '至少 2 人作答后可揭晓',
+  NOT_HOST: '只有出题人可以这样做',
+  NO_TEMPLATE: null,
+  NOT_MEMBER: '本群数据暂时打不开',
+  NOT_GROUP: null,
+  BAD_CLOUDID: null,
+  RATE_LIMITED: '操作太频繁，请稍后再试',
+  UNAUTHENTICATED: '网络不稳，请重试',
+  FORBIDDEN: null,
+  SERVER_CONFIG: '服务暂时不可用',
+  INTERNAL: '服务暂时不可用，请重试',
+  NO_CARD_AVAILABLE: '暂时没有可加的题',
+  // D-2 typed clues (spec 6.5, 6.12). TEXT_REJECTED's copy is the per-reason hint of core/clue.js (
+    hintFor).
+  TEXT_REJECTED: '换个说法吧',
+  TEXT_BLOCKED: '这个提示没通过审核，换个说法吧',
+  MODERATION_BUSY: '提示暂时没法检查，还没有发出去',
+  RULES_REQUIRED: null, // the 发言规则 sheet opens instead
+  RESTRICTED: null, // the restriction copy (strikes.restrictionText) replaces tab 1
+  UGC_PAUSED: '自己写提示暂时关闭，先选一个提示词吧',
+
+群友刻度盘 V1.0.0 源程序                                        第 8 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  DUP_REPORT: '你已经举报过这个提示了',
+  REPORT_LIMIT: '今天的举报次数用完了',
+  TIMEOUT: '网络不稳，请重试',
+  NETWORK: '网络不稳，请重试',
+  BAD_RESPONSE: '服务暂时不可用，请重试',
+};
+const COPY_BY_WHERE = {
+  'createRound:RATE_LIMITED': '今天出的题够多啦，明天再来',
+  'setClue:RATE_LIMITED': '操作太频繁，请稍后再试',
+  'getBonusCard:RATE_LIMITED': '今天的加一题用完了',
+  'submitCard:TIMEOUT': '网络不稳，答案还没送达',
+  'submitCard:NETWORK': '网络不稳，答案还没送达',
+  'submitCard:RATE_LIMITED': '操作太频繁，答案还没送达，稍后再试',
+};
+/** `scope` is the response's own `scope` field ('day' | 'minute') where it matters: setClue's 50-ch
+    ecks-a-day limit has its own copy. */
+function copyFor(code, where, scope) {
+  if (code === 'RATE_LIMITED' && where === 'setClue' && scope === 'day') return '今天检查提示的次数用完了，先选一个提示
+    词吧';
+  const k = where + ':' + code;
+  if (Object.prototype.hasOwnProperty.call(COPY_BY_WHERE, k)) return COPY_BY_WHERE[k];
+  return Object.prototype.hasOwnProperty.call(COPY, code) ? COPY[code] : COPY.INTERNAL;
+}
+/** Errors that mean "no connection" (the offline / retry states) as opposed to a refusal by the ser
+    ver. */
+function isNetworkError(code) {
+  return CLIENT_CODES.indexOf(code) >= 0 || code === 'UNAUTHENTICATED';
+}
+module.exports = { SERVER_CODES, CLIENT_CODES, COPY, copyFor, isNetworkError };
+/**
+ * Scoring (spec 3, AC 1-5, 7). Pure JS, no wx, no DOM, deterministic. Copied into the cloud functio
+    ns, so
+ * client and server compute identical numbers (drift test, AC 7).
+ *
+ * Positions are integers 0..100. Reference values (medians) may be half-integers.
+ */
+const { CONFIG } = require('./config');
+const BINS = 101;
+function isPos(p) {
+  return Number.isInteger(p) && p >= 0 && p <= 100;
+}
+function clampPos(p) {
+  return p < 0 ? 0 : p > 100 ? 100 : p;
+}
+/** s(d) = max(0, 100 - ceil(2.5 * d)) (spec 3.1) */
+function cardScore(d) {
+  const s = 100 - Math.ceil(CONFIG.score.perStep * d);
+  return s > 0 ? s : 0;
+}
+/** Card label by distance (spec 3.1). */
+
+群友刻度盘 V1.0.0 源程序                                        第 9 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+function cardLabel(d) {
+  const ls = CONFIG.score.labels;
+  for (let i = 0; i < ls.length; i++) if (d <= ls[i].maxD) return ls[i].label;
+  return ls[ls.length - 1].label;
+}
+/** {d, score, label} of position p against reference ref. */
+function scoreAt(p, ref) {
+  const d = Math.abs(p - ref);
+  return { d, score: cardScore(d), label: cardLabel(d) };
+}
+/** Day band label for a total 0..500 (spec 3.3). */
+function dayBand(total) {
+  const bs = CONFIG.score.bands;
+  for (let i = 0; i < bs.length; i++) if (total >= bs[i].min) return bs[i].label;
+  return bs[bs.length - 1].label;
+}
+// ---- histograms ---------------------------------------------------------------------------------
+    ----------------
+function emptyHist() {
+  return new Array(BINS).fill(0);
+}
+function histTotal(hist) {
+  let n = 0;
+  for (let i = 0; i < hist.length; i++) n += hist[i] || 0;
+  return n;
+}
+/** Median of a sorted-ascending read of a histogram (spec 3.2). null when empty. O(101). */
+function histMedian(hist) {
+  const M = histTotal(hist);
+  if (M === 0) return null;
+  const lo = Math.floor((M - 1) / 2);
+  const hi = Math.floor(M / 2);
+  let seen = 0;
+  let a = null;
+  let b = null;
+  for (let v = 0; v < hist.length; v++) {
+    const c = hist[v] || 0;
+    if (c === 0) continue;
+    if (a === null && lo < seen + c) a = v;
+    if (b === null && hi < seen + c) b = v;
+    seen += c;
+    if (a !== null && b !== null) break;
+  }
+  return (a + b) / 2;
+}
+/** Median of a list of numbers (spec 3.2). null when empty. Does not mutate. */
+function medianOf(values) {
+  const M = values.length;
+  if (M === 0) return null;
+  const v = values.slice().sort((x, y) => x - y);
+
+群友刻度盘 V1.0.0 源程序                                       第 10 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  return (v[Math.floor((M - 1) / 2)] + v[Math.floor(M / 2)]) / 2;
+}
+/** Mean absolute deviation of `values` from `center`. 0 for an empty list. */
+function madOf(values, center) {
+  if (values.length === 0) return 0;
+  let s = 0;
+  for (let i = 0; i < values.length; i++) s += Math.abs(values[i] - center);
+  return s / values.length;
+}
+/** MAD of a histogram's real positions about `center`. 0 when empty. */
+function histMad(hist, center) {
+  const M = histTotal(hist);
+  if (M === 0) return 0;
+  let s = 0;
+  for (let v = 0; v < hist.length; v++) if (hist[v]) s += hist[v] * Math.abs(v - center);
+  return s / M;
+}
+/**
+ * National reference R_c (spec 3.3, PD-4): median of the real positions plus `priorVotes` virtual v
+    otes at the
+ * editor anchor. With no real positions it is the anchor. Does not mutate `hist`.
+ */
+function nationRef(hist, anchor, priorVotes) {
+  const W = priorVotes === undefined ? CONFIG.score.priorVotes : priorVotes;
+  const h = hist.slice();
+  const a = Math.round(clampPos(anchor));
+  h[a] = (h[a] || 0) + W;
+  return histMedian(h);
+}
+/** Share of real positions within +-agreeRadius of p (integer percent), or null below agreeMinN (sp
+    ec 3.3). */
+function agreePct(hist, p) {
+  const M = histTotal(hist);
+  if (M < CONFIG.score.agreeMinN) return null;
+  const r = CONFIG.score.agreeRadius;
+  let c = 0;
+  for (let v = Math.max(0, p - r); v <= Math.min(100, p + r); v++) c += hist[v] || 0;
+  return Math.round((100 * c) / M);
+}
+/** 21 display bins of the national distribution (spec 6.4). Centred: bin i holds positions 5i-2..5i
+    +2, so both ends are half-width. */
+function bin21(pos) {
+  return Math.floor((pos + 2) / 5);
+}
+function distribution21(hist) {
+  const out = new Array(21).fill(0);
+  for (let v = 0; v < hist.length; v++) if (hist[v]) out[bin21(v)] += hist[v];
+  return out;
+}
+/**
+
+群友刻度盘 V1.0.0 源程序                                       第 11 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+ * Card index with the widest national spread (spec 3.3): highest MAD of real positions about R_c; t
+    ies go to the
+ * lower index; null when no card has an answer.
+ * @param {number[][]} hists 5 x 101   @param {number[]} refs 5 reference values
+ */
+function mostDivisive(hists, refs) {
+  let best = null;
+  let bestMad = -1;
+  for (let c = 0; c < hists.length; c++) {
+    if (histTotal(hists[c]) === 0) continue;
+    const m = histMad(hists[c], refs[c]);
+    if (m > bestMad) {
+      bestMad = m;
+      best = c;
+    }
+  }
+  return best;
+}
+// ---- daily totals -------------------------------------------------------------------------------
+    ----------------
+/**
+ * Daily total over the answered cards (spec 3.3). `positions` and `refs` have length 5; a null posi
+    tion (or a null ref)
+ * is not answered. Returns {total, answered, scores: (number|null)[5], complete}.
+ */
+function dailyTotal(positions, refs) {
+  let total = 0;
+  let answered = 0;
+  const scores = [];
+  for (let c = 0; c < positions.length; c++) {
+    const p = positions[c];
+    const r = refs[c];
+    if (p === null || p === undefined || r === null || r === undefined) {
+      scores.push(null);
+      continue;
+    }
+    const s = cardScore(Math.abs(p - r));
+    scores.push(s);
+    total += s;
+    answered++;
+  }
+  return { total, answered, scores, complete: answered === positions.length };
+}
+/** Freeze the 5 references of a day from its card histograms and anchors (spec 3.3 定分). */
+function freezeRefs(hists, anchors) {
+  return hists.map((h, c) => nationRef(h, anchors[c]));
+}
+// ---- percentile (spec 3.3, TD-2) ----------------------------------------------------------------
+    -----------------
+/** Final-histogram bin (width 5) of a total 0..500. */
+
+群友刻度盘 V1.0.0 源程序                                       第 12 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+function totalBin(total) {
+  return Math.floor(total / 5);
+}
+/** 101-bin histogram of complete totals. */
+function buildFinalHist(totals) {
+  const h = emptyHist();
+  for (let i = 0; i < totals.length; i++) h[totalBin(totals[i])]++;
+  return h;
+}
+/**
+ * "超过全国 x%": share of complete dailies in strictly lower bins, rounded down. The histogram has 5-po
+    int bins, so a
+ * total never beats another total in its own bin (conservative: never overstates). null below perce
+    ntileMinN.
+ */
+function percentile(total, finalHist, finalCount) {
+  if (!finalHist || !finalCount || finalCount < CONFIG.score.percentileMinN) return null;
+  const b = totalBin(total);
+  let below = 0;
+  for (let i = 0; i < b; i++) below += finalHist[i] || 0;
+  return Math.floor((100 * below) / finalCount);
+}
+module.exports = {
+  BINS,
+  isPos,
+  clampPos,
+  cardScore,
+  cardLabel,
+  scoreAt,
+  dayBand,
+  emptyHist,
+  histTotal,
+  histMedian,
+  medianOf,
+  madOf,
+  histMad,
+  nationRef,
+  agreePct,
+  bin21,
+  distribution21,
+  mostDivisive,
+  dailyTotal,
+  freezeRefs,
+  totalBin,
+  buildFinalHist,
+  percentile,
+};
+/**
+ * Day windows (spec 5, PD-24, AC 20, 22). Pure JS. All "now" is the SERVER clock (epoch ms); the de
+    vice clock is
+
+群友刻度盘 V1.0.0 源程序                                       第 13 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+ * never an input. Date keys are Beijing dates from date.js (explicit UTC+8 arithmetic, TZ independe
+    nt).
+ *
+ *   day D open for starting:        00:00 .. 24:00 BJT of D
+ *   day D open for finishing:       until D+1 00:30 BJT, only if the first card was submitted on D 
+    (grace)
+ *   day D closed / 定分 / archive:  from D+1 00:30 BJT  (now >= closeMs)
+ */
+const { CONFIG } = require('./config');
+const { beijingDateKey, dateKeyToMs, addDays, DAY_MS, issueNo } = require('./date');
+/** Epoch ms when day D closes (D+1 00:30 BJT): submits stop, references freeze, the day joins the a
+    rchive. */
+function closeMs(dateKey) {
+  return dateKeyToMs(dateKey) + DAY_MS + CONFIG.daily.graceMs;
+}
+function dayClosed(dateKey, nowMs) {
+  return nowMs >= closeMs(dateKey);
+}
+/** Is `dateKey` readable as a live day by getDaily({dateKey}): today, or yesterday before its close
+    . */
+function liveDay(dateKey, nowMs) {
+  const today = beijingDateKey(nowMs);
+  return dateKey === today || (dateKey === addDays(today, -1) && !dayClosed(dateKey, nowMs));
+}
+/**
+ * submitCard window check, in the order of the spec (11.2): future -> INVALID_INPUT; today -> ok; y
+    esterday inside the
+ * grace window with the first card on D -> ok (grace: true); else LATE_SUBMIT.
+ * @param {{dateKey:string, nowMs:number, entry:{firstAt:number|null}|null}} o
+ */
+function submitWindow(o) {
+  const today = beijingDateKey(o.nowMs);
+  if (o.dateKey > today) return { ok: false, code: 'INVALID_INPUT' };
+  if (o.dateKey === today) return { ok: true, grace: false };
+  const started = !!o.entry && o.entry.firstAt !== null && o.entry.firstAt !== undefined && beijingD
+    ateKey(o.entry.firstAt) === o.dateKey;
+  if (o.dateKey === addDays(today, -1) && !dayClosed(o.dateKey, o.nowMs) && started) return { ok: tr
+    ue, grace: true };
+  return { ok: false, code: 'LATE_SUBMIT' };
+}
+/** The newest closed day's key at `nowMs` (what the archive may list first). */
+function newestClosedKey(nowMs) {
+  const today = beijingDateKey(nowMs);
+  const y = addDays(today, -1);
+  return dayClosed(y, nowMs) ? y : addDays(today, -2);
+}
+/** Issue number for a date (第 N 期); launch day = 1. */
+function issueOf(dateKey, launchKey) {
+  return issueNo(dateKey, launchKey || CONFIG.daily.launchDateKey);
+}
+
+群友刻度盘 V1.0.0 源程序                                       第 14 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+module.exports = { closeMs, dayClosed, liveDay, submitWindow, newestClosedKey, issueOf };
+/**
+ * Streak (spec 11.4, PD-17, AC 80). Pure JS. A streak is consecutive PUBLISHED days with a complete
+     daily; days with
+ * no published set are skipped (the caller passes the latest published key before the day). No rewa
+    rds, no freeze.
+ */
+/**
+ * Stats after completing the daily of `dateKey`.
+ * @param {{curStreak:number,bestStreak:number,lastCompleteDate:string|null,totalDays:number}|null} 
+    stats
+ * @param {string} dateKey day just completed (grace completions count for their own day)
+ * @param {string|null} prevPublishedKey latest daily_sets._id < dateKey, or null
+ */
+function onComplete(stats, dateKey, prevPublishedKey) {
+  const s = stats || { curStreak: 0, bestStreak: 0, lastCompleteDate: null, totalDays: 0 };
+  if (s.lastCompleteDate === dateKey) return { stats: { ...s }, streak: s.curStreak, changed: false 
+    }; // duplicate completion
+  if (s.lastCompleteDate && s.lastCompleteDate > dateKey) return { stats: { ...s }, streak: s.curStr
+    eak, changed: false }; // never rewrite history
+  const cur = s.lastCompleteDate && s.lastCompleteDate === prevPublishedKey ? s.curStreak + 1 : 1;
+  const next = {
+    curStreak: cur,
+    bestStreak: Math.max(s.bestStreak || 0, cur),
+    lastCompleteDate: dateKey,
+    totalDays: (s.totalDays || 0) + 1,
+  };
+  return { stats: next, streak: cur, changed: true };
+}
+/**
+ * What to show today (getDaily.myStreak): yesterday's streak all of today until today completes; 0 
+    once a published
+ * day closed without a complete daily.
+ */
+function display(stats, todayKey, prevPublishedKey) {
+  if (!stats) return { current: 0, best: 0 };
+  const alive = stats.lastCompleteDate === todayKey || (prevPublishedKey !== null && stats.lastCompl
+    eteDate === prevPublishedKey);
+  return { current: alive ? stats.curStreak : 0, best: stats.bestStreak || 0 };
+}
+module.exports = { onComplete, display };
+/**
+ * Group scores, boards and trend (spec 3.4, 8.3, 8.4, PD-5, PD-20, PD-21, AC 5, 19, 42-47). Pure JS
+    : the server calls
+ * these over rows it read from the database; the mock server calls the same code.
+ *
+ * Raw openids appear only as the opaque `key` the caller passes in; output rows carry the hash `h` 
+    computed by the
+ * injected `hashFn(key, salt)` (server: sha256hex(key + '|' + salt).slice(0, 12)). Nothing here ret
+    urns a key.
+
+群友刻度盘 V1.0.0 源程序                                       第 15 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+ */
+const { CONFIG } = require('./config');
+const { cardScore, medianOf, madOf, dailyTotal } = require('./score');
+const { addDays, dateKeyToMs } = require('./date');
+const G = CONFIG.group;
+/** Seconds from 00:00 BJT of `dateKey` to completion (may exceed 86400 for grace completions; tie-b
+    reak `t`). */
+function secondsInDay(completeAt, dateKey) {
+  return Math.max(0, Math.floor((completeAt - dateKeyToMs(dateKey)) / 1000));
+}
+/** Per-card values of a list of 5-position arrays. */
+function column(list, c) {
+  const out = [];
+  for (let i = 0; i < list.length; i++) out.push(list[i][c]);
+  return out;
+}
+/** Median of members' positions per card (m_c). null entries when no members. */
+function groupMedians(positionsList) {
+  const out = [];
+  for (let c = 0; c < CONFIG.daily.cards; c++) out.push(medianOf(column(positionsList, c)));
+  return out;
+}
+/** 群默契度 (spec 3.4): n >= 3 -> rounded mean over the 5 cards of max(0, 100 - ceil(2.5 * MAD_c)), els
+    e null. */
+function groupMq(positionsList) {
+  const n = positionsList.length;
+  if (n < G.minForMq) return null;
+  let sum = 0;
+  for (let c = 0; c < CONFIG.daily.cards; c++) {
+    const vals = column(positionsList, c);
+    sum += cardScore(madOf(vals, medianOf(vals)));
+  }
+  return Math.round(sum / CONFIG.daily.cards);
+}
+/** Group's most divisive card: highest MAD_c about m_c, ties -> lower index, n >= 3 else null (TD-6
+    ). */
+function groupDivisiveIdx(positionsList) {
+  if (positionsList.length < G.minForMq) return null;
+  let best = 0;
+  let bestMad = -1;
+  for (let c = 0; c < CONFIG.daily.cards; c++) {
+    const vals = column(positionsList, c);
+    const m = madOf(vals, medianOf(vals));
+    if (m > bestMad) {
+      bestMad = m;
+      best = c;
+    }
+  }
+  return best;
+}
+
+群友刻度盘 V1.0.0 源程序                                       第 16 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+/** 群内默契分 of member `i` (spec 3.4, leave-one-out). null when n < 2. */
+function leaveOneOutScore(positionsList, i) {
+  if (positionsList.length < G.minForLeaveOneOut) return null;
+  let total = 0;
+  for (let c = 0; c < CONFIG.daily.cards; c++) {
+    const others = [];
+    for (let j = 0; j < positionsList.length; j++) if (j !== i) others.push(positionsList[j][c]);
+    total += cardScore(Math.abs(positionsList[i][c] - medianOf(others)));
+  }
+  return total;
+}
+/**
+ * The ● / member dots of one card reveal (spec 3.4 "Group median per card", 6.3): over OTHER member
+    s who submitted the card.
+ * `values` = their positions. Dots are sorted (no order leaks identity) and down-sampled to dotCap.
+     {median:null,n:0,dots:[]} when none.
+ */
+function cardGroupBlock(values) {
+  const n = values.length;
+  if (n === 0) return { median: null, n: 0, dots: [] };
+  const sorted = values.slice().sort((a, b) => a - b);
+  let dots = sorted;
+  if (n > G.dotCap) {
+    dots = [];
+    for (let i = 0; i < G.dotCap; i++) dots.push(sorted[Math.round((i * (n - 1)) / (G.dotCap - 1))])
+    ;
+  }
+  return { median: medianOf(sorted), n, dots };
+}
+/**
+ * 最同频 (spec 3.4, PD-20; computed in the open data domain, the same code is used by tests and the mo
+    ck):
+ * peers = [{key, pos[5], completeAt}] excluding the viewer; smallest mean |gap| wins, ties -> earli
+    er completion.
+ * @returns {{key:string, gap:number}|null} gap is the exact mean; display rounds it.
+ */
+function closestPeer(viewerPos, peers) {
+  let best = null;
+  for (let i = 0; i < peers.length; i++) {
+    const p = peers[i];
+    let s = 0;
+    for (let c = 0; c < CONFIG.daily.cards; c++) s += Math.abs(viewerPos[c] - p.pos[c]);
+    const gap = s / CONFIG.daily.cards;
+    if (best === null || gap < best.gap || (gap === best.gap && p.completeAt < best.completeAt)) bes
+    t = { key: p.key, gap, completeAt: p.completeAt };
+  }
+  return best ? { key: best.key, gap: best.gap } : null;
+}
+function cmpRows(a, b) {
+  // a, b: {gs|null, ns, t, h}; group order: gs desc (null last), then t asc, then h
+
+群友刻度盘 V1.0.0 源程序                                       第 17 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const ga = a.gs === null ? -1 : a.gs;
+  const gb = b.gs === null ? -1 : b.gs;
+  return gb - ga || a.t - b.t || (a.h < b.h ? -1 : a.h > b.h ? 1 : 0);
+}
+/**
+ * Group page payload (spec 8.4 getGroupDay) from the group's COMPLETE dailies.
+ * @param {{dateKey:string, salt:string, refs:number[], members:Array<{key:string,pos:number[],compl
+    eteAt:number,streak:number|null}>,
+ *   viewerKey:string, viewerDone:boolean, hashFn:Function, rowCap?:number}} o
+ * @returns {{n:number, mq:number|null, divisiveIdx:number|null, selfHash:string, rows:Array}}
+ */
+function buildGroupDay(o) {
+  const cap = o.rowCap || G.rowCap;
+  const list = o.members.map((m) => m.pos);
+  const n = o.members.length;
+  const rows = o.members.map((m, i) => {
+    const gs = leaveOneOutScore(list, i);
+    return {
+      key: m.key,
+      h: o.hashFn(m.key, o.salt),
+      gs,
+      ns: dailyTotal(m.pos, o.refs).total,
+      t: secondsInDay(m.completeAt, o.dateKey),
+      pos: o.viewerDone ? m.pos.join(',') : null,
+      k: m.streak && m.streak >= 2 ? m.streak : null,
+    };
+  });
+  rows.sort(cmpRows);
+  let kept = rows;
+  if (rows.length > cap) {
+    kept = rows.slice(0, cap);
+    if (!kept.some((r) => r.key === o.viewerKey)) {
+      const mine = rows.find((r) => r.key === o.viewerKey);
+      if (mine) kept.push(mine);
+    }
+  }
+  return {
+    n,
+    mq: groupMq(list),
+    divisiveIdx: groupDivisiveIdx(list),
+    selfHash: o.hashFn(o.viewerKey, o.salt),
+    rows: kept.map((r) => [r.h, r.gs, r.ns, r.t, r.pos, r.k]),
+  };
+}
+/**
+ * Friend board payload (spec 8.4 getFriendBoard): every complete daily of the day, hashed, ranked b
+    y national live
+ * score then completion time. Over `listCap` -> `selfOnly` with only the caller's row (if complete)
+    .
+ * @param {{dateKey:string, salt:string, refs:number[], entries:Array<{key,pos,completeAt,streak}>, 
+
+群友刻度盘 V1.0.0 源程序                                       第 18 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    viewerKey:string, viewerDone:boolean,
+ *   hashFn:Function, listCap?:number}} o
+ */
+function buildFriendBoard(o) {
+  const cap = o.listCap || CONFIG.board.listCap;
+  const mk = (m) => ({
+    key: m.key,
+    h: o.hashFn(m.key, o.salt),
+    ns: dailyTotal(m.pos, o.refs).total,
+    t: secondsInDay(m.completeAt, o.dateKey),
+    pos: o.viewerDone ? m.pos.join(',') : null,
+    k: m.streak && m.streak >= 2 ? m.streak : null,
+  });
+  // o.total (optional, TD-42): the true number of complete dailies when the caller passes only a su
+    bset of entries (a backend
+  // that pages or caps its read); defaults to entries.length. Above the cap the board is selfOnly (
+    the viewer's own entry).
+  const total = Number.isInteger(o.total) && o.total >= o.entries.length ? o.total : o.entries.lengt
+    h;
+  let mode = 'full';
+  let src = o.entries;
+  if (total > cap) {
+    mode = 'selfOnly';
+    src = o.entries.filter((m) => m.key === o.viewerKey);
+  }
+  const rows = src.map(mk);
+  rows.sort((a, b) => b.ns - a.ns || a.t - b.t || (a.h < b.h ? -1 : a.h > b.h ? 1 : 0));
+  return {
+    mode,
+    total,
+    selfHash: o.hashFn(o.viewerKey, o.salt),
+    rows: rows.map((r) => [r.h, r.ns, r.t, r.pos, r.k]),
+  };
+}
+/** The 7 date keys ending today, oldest first (spec 6.8). */
+function trendDates(todayKey, days) {
+  const n = days || G.trendDays;
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) out.push(addDays(todayKey, -i));
+  return out;
+}
+/** 7-day trend from a lookup(dateKey) -> {mq, n} | null (spec 8.4). A day with n < 3 or no data has
+     mq null. */
+function buildTrend(todayKey, lookup) {
+  return trendDates(todayKey).map((dateKey) => {
+    const g = lookup(dateKey);
+    return { dateKey, mq: g && g.mq !== undefined && g.mq !== null && g.n >= G.minForMq ? g.mq : nul
+    l, n: g ? g.n : 0 };
+  });
+}
+
+群友刻度盘 V1.0.0 源程序                                       第 19 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+module.exports = {
+  secondsInDay,
+  groupMedians,
+  groupMq,
+  groupDivisiveIdx,
+  leaveOneOutScore,
+  cardGroupBlock,
+  closestPeer,
+  buildGroupDay,
+  buildFriendBoard,
+  trendDates,
+  buildTrend,
+};
+/**
+ * Host rounds (spec 2.2, 3.5, 11.2, PD-8, PD-9, AC 6, 26-35). Pure JS: target draw, offers, state r
+    ules, scoring.
+ * Round statuses: draft | open | revealed | noGuesses  (a discarded draft is deleted / treated as n
+    ot found).
+ */
+const { CONFIG } = require('./config');
+const { cardScore, isPos } = require('./score');
+const { shuffle } = require('./rng');
+const R = CONFIG.rounds;
+/** Integer target 5..95, uniform, from a uniform float r in [0,1). The server passes crypto randomn
+    ess (AC 26). */
+function drawTarget(r) {
+  const n = R.targetMax - R.targetMin + 1;
+  return R.targetMin + Math.min(n - 1, Math.floor(r * n));
+}
+/** Fresh items first (shuffled), topped up from already-seen ones when fewer than `want` are fresh.
+     */
+function freshFirst(rng, all, isSeen, want) {
+  const fresh = shuffle(rng, all.filter((x) => !isSeen(x)));
+  if (fresh.length >= want) return fresh.slice(0, want);
+  const seen = shuffle(rng, all.filter((x) => isSeen(x)));
+  return fresh.concat(seen).slice(0, want);
+}
+/** Three distinct spectra, unseen ones first (spec 6.5). Client-side. */
+function offerSpectra(content, rng, exclude, n) {
+  const ex = exclude || new Set();
+  return freshFirst(rng, content.spectra, (s) => ex.has(s.id), n || R.offerSpectra).map((s) => ({ id
+    : s.id, left: s.left, right: s.right }));
+}
+/** Six clue items of a spectrum, unseen first, recycling seen ones when fewer than six remain (spec
+     2.2 step 4). Client-side. */
+function offerClues(content, spectrumId, rng, excludeIds, n) {
+  const sp = content.spectrumById[spectrumId];
+  if (!sp) return [];
+  const ex = excludeIds || new Set();
+  return freshFirst(rng, sp.items, (it) => ex.has(it.id), n || R.clueOptions).map((it) => ({ itemId:
+
+群友刻度盘 V1.0.0 源程序                                       第 20 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+     it.id, text: it.text }));
+}
+/** Does a clue item belong to the spectrum? (setClue validation) */
+function clueBelongs(content, spectrumId, itemId) {
+  const e = content.itemIndex[itemId];
+  return !!e && e.spectrum.id === spectrumId;
+}
+/**
+ * Lazy transitions applied before any read or write (spec 11.2 getRound / sweepRounds). Returns
+ * 'discard' | 'reveal' (24 h, >= 1 guess; revealBy 'timer') | 'noGuesses' | null.
+ */
+function lazyTransition(round, nowMs) {
+  if (round.status === 'draft' && nowMs > round.createdAt + R.draftMs) return 'discard';
+  if (round.status === 'open' && nowMs >= round.createdAt + R.autoRevealMs) return round.guessCount 
+    >= 1 ? 'reveal' : 'noGuesses';
+  return null;
+}
+/**
+ * submitGuess gate (spec 11.2, AC 31). The caller has already applied lazyTransition.
+ * @returns {{ok:true, late:boolean}|{ok:false, code:string}}
+ */
+function guessCheck(round, o) {
+  if (!round || round.status === 'discarded') return { ok: false, code: 'ROUND_NOT_FOUND' };
+  if (o.isHost) return { ok: false, code: 'OWN_ROUND' };
+  if (round.status === 'draft') return { ok: false, code: 'ROUND_NOT_FOUND' };
+  if (o.hasGuessed) return { ok: false, code: 'ALREADY_GUESSED' };
+  if (!isPos(o.pos)) return { ok: false, code: 'INVALID_INPUT' };
+  if (o.nowMs > round.createdAt + R.guessCloseMs || round.status === 'noGuesses') return { ok: false
+    , code: 'ROUND_EXPIRED' };
+  return { ok: true, late: round.status === 'revealed' };
+}
+/**
+ * L4: is the reveal of a revealed round served to this viewer without an explicit choice? The host 
+    and anyone who has
+ * guessed see it; so does everyone once guessing is closed (> 7 days, no late guess is possible any
+     more). Anyone else
+ * could still place a late guess, so they get the answer only by asking for it (getRound showAnswer
+    ), which records it
+ * (`reveal_views`) and closes the late guess for them (submitGuess then returns ROUND_EXPIRED).
+ */
+function revealServedByDefault(round, o) {
+  return !!(o.isHost || o.hasGuess || o.nowMs > round.createdAt + R.guessCloseMs);
+}
+/** The 8th on-time guess reveals (PD-8). `countAfter` = on-time guesses including this one. */
+function revealsOnGuess(countAfter) {
+  return countAfter >= R.autoRevealAtGuesses;
+}
+/** Host 揭晓 gate (spec 11.2): idempotent once revealed. */
+function hostRevealCheck(round, o) {
+  if (!round || round.status === 'draft' || round.status === 'discarded') return { ok: false, code: 
+
+群友刻度盘 V1.0.0 源程序                                       第 21 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    'ROUND_NOT_FOUND' };
+  if (!o.isHost) return { ok: false, code: 'NOT_HOST' };
+  if (round.status === 'revealed') return { ok: true, already: true };
+  if (round.status === 'noGuesses') return { ok: false, code: 'TOO_FEW_GUESSES' };
+  if (round.guessCount < R.minGuessesToReveal) return { ok: false, code: 'TOO_FEW_GUESSES' };
+  return { ok: true, already: false };
+}
+/**
+ * Score a round (spec 3.5). guesses: [{id, pos, ts, late}] (id = any stable key, e.g. the guess _id
+    ).
+ * @returns {{mq:number|null, closestId:string|null, scored:Array<{id,pos,d,score,late}>}}
+ */
+function scoreRound(target, guesses) {
+  const scored = guesses.map((g) => {
+    const d = Math.abs(g.pos - target);
+    return { id: g.id, pos: g.pos, ts: g.ts, d, score: cardScore(d), late: !!g.late };
+  });
+  const onTime = scored.filter((g) => !g.late);
+  let mq = null;
+  let closestId = null;
+  if (onTime.length) {
+    let sum = 0;
+    let best = null;
+    for (let i = 0; i < onTime.length; i++) {
+      sum += onTime[i].score;
+      const g = onTime[i];
+      if (best === null || g.d < best.d || (g.d === best.d && g.ts < best.ts)) best = g;
+    }
+    mq = Math.round(sum / onTime.length);
+    closestId = best.id;
+  }
+  return { mq, closestId, scored };
+}
+/**
+ * Revealed payload (spec 8.4 getRound revealed): rows `[h, g, s, late, isHost]`, `h` hashed per rou
+    nd salt via the
+ * injected `hashFn(openid, salt)` (server: sha256 hex first 12). On-time rows by closeness then tim
+    e, late rows by
+ * time, the host row last. `closestH` is 最懂你 (null if no on-time guess).
+ * @param {{target:number, salt:string, hostOpenid:string, guesses:Array<{openid:string,pos:number,t
+    s:number,late:boolean}>, viewerOpenid:string}} o
+ */
+function revealPayload(o, hashFn) {
+  const gs = o.guesses.map((g, i) => ({ id: String(i), pos: g.pos, ts: g.ts, late: g.late }));
+  const sc = scoreRound(o.target, gs);
+  const byId = {};
+  sc.scored.forEach((s) => {
+    byId[s.id] = s;
+  });
+  const rows = o.guesses.map((g, i) => {
+
+群友刻度盘 V1.0.0 源程序                                       第 22 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    const s = byId[String(i)];
+    return { h: hashFn(g.openid, o.salt), g: g.pos, s: s.score, late: s.late ? 1 : 0, d: s.d, ts: g.
+    ts };
+  });
+  rows.sort((a, b) => a.late - b.late || (a.late ? a.ts - b.ts : a.d - b.d || a.ts - b.ts));
+  const closestH = sc.closestId === null ? null : hashFn(o.guesses[+sc.closestId].openid, o.salt);
+  // L4: a late guess never shows a score (the guesser has seen the answer); mq already excludes lat
+    e rows
+  const out = rows.map((r) => [r.h, r.g, r.late ? null : r.s, r.late, 0]);
+  out.push([hashFn(o.hostOpenid, o.salt), null, null, 0, 1]);
+  return { target: o.target, mq: sc.mq, salt: o.salt, selfHash: hashFn(o.viewerOpenid, o.salt), clos
+    estH, rows: out };
+}
+/** Append a verified groupRef (<= cap, no duplicates). Returns the new list (same list when unchang
+    ed). */
+function appendGroupRef(list, ref) {
+  if (!ref || list.indexOf(ref) >= 0 || list.length >= R.groupRefsCap) return list;
+  return list.concat([ref]);
+}
+module.exports = {
+  drawTarget,
+  offerSpectra,
+  offerClues,
+  clueBelongs,
+  lazyTransition,
+  guessCheck,
+  revealsOnGuess,
+  revealServedByDefault,
+  hostRevealCheck,
+  scoreRound,
+  revealPayload,
+  appendGroupRef,
+};
+/**
+ * Ruler input logic (spec 2.1, 6.2, AC 14). Pure JS: screen x -> integer position 0..100, the needl
+    e state machine,
+ * single-finger routing, nudges. The renderer draws the needle from `pos` and reports raw touches t
+    o this object;
+ * it never computes a position itself (render/CONTRACT.md).
+ *
+ *   const ruler = createRuler();
+ *   const track = makeTrack({ x: 0, width: layout.W });      // full width minus 16 margins
+ *   ruler.touchStart(id, x, track, nowMs);  // nowMs comes from the caller (no clock in core)  rule
+    r.touchMove(id, x, track);  ruler.touchEnd(id);
+ *   ruler.nudge(-1 | +1);  ruler.canConfirm();  ruler.lock();
+ */
+const { CONFIG } = require('./config');
+/** The draggable span: [x0, x1] in canvas px. Touches in the margins clamp to the ends, so 0 and 10
+    0 are reachable. */
+function makeTrack(o) {
+
+群友刻度盘 V1.0.0 源程序                                       第 23 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const margin = o.margin === undefined ? 16 : o.margin;
+  const x = o.x || 0;
+  return { x0: x + margin, x1: x + o.width - margin };
+}
+/** Screen x -> integer 0..100 (clamped). */
+function posFromX(x, track) {
+  const span = track.x1 - track.x0;
+  if (!(span > 0)) return 0;
+  const p = Math.round(((x - track.x0) / span) * 100);
+  return p < 0 ? 0 : p > 100 ? 100 : p;
+}
+/** Integer position -> screen x of the needle. */
+function xFromPos(pos, track) {
+  return track.x0 + ((track.x1 - track.x0) * pos) / 100;
+}
+function createRuler() {
+  const s = {
+    pos: null, // null until the first touch: no needle, no anchoring at 50 (PD-2)
+    locked: false,
+    touchId: null,
+    touches: 0,
+    nudges: 0,
+    firstTouchAt: null,
+    tickPending: false,
+  };
+  function set(p) {
+    if (p === s.pos) return false;
+    const prev = s.pos;
+    s.pos = p;
+    if (prev === null || Math.floor(prev / CONFIG.track.tickEvery) !== Math.floor(p / CONFIG.track.t
+    ickEvery)) s.tickPending = true;
+    return true;
+  }
+  return {
+    get pos() {
+      return s.pos;
+    },
+    get locked() {
+      return s.locked;
+    },
+    get phase() {
+      return s.locked ? 'locked' : s.pos === null ? 'empty' : 'placing';
+    },
+    /** True when the needle moved. The needle jumps to the finger on touch start. */
+    touchStart(id, x, track, nowMs) {
+      if (s.locked || s.touchId !== null) return false; // one finger at a time (copied routing from
+     点将台)
+      s.touchId = id;
+      s.touches++;
+      if (s.firstTouchAt === null) s.firstTouchAt = nowMs || 0;
+
+群友刻度盘 V1.0.0 源程序                                       第 24 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+      return set(posFromX(x, track));
+    },
+    touchMove(id, x, track) {
+      if (s.locked || s.touchId === null || id !== s.touchId) return false;
+      return set(posFromX(x, track));
+    },
+    /** Release keeps the needle. */
+    touchEnd(id) {
+      if (id === s.touchId) s.touchId = null;
+    },
+    touchCancel(id) {
+      if (id === s.touchId) s.touchId = null;
+    },
+    /** One step left (-1) or right (+1), clamped. A no-op until the first touch (the nudge never cr
+    eates a needle). */
+    nudge(dir) {
+      if (s.locked || s.pos === null) return false;
+      s.nudges++;
+      const p = s.pos + (dir < 0 ? -CONFIG.track.nudge : CONFIG.track.nudge);
+      return set(p < 0 ? 0 : p > 100 ? 100 : p);
+    },
+    /** 就这儿 is enabled only with a needle and while not submitting. */
+    canConfirm() {
+      return s.pos !== null && !s.locked;
+    },
+    /** Lock while submitting / after the reveal; unlock to retry. */
+    lock() {
+      s.locked = true;
+      s.touchId = null;
+    },
+    unlock() {
+      s.locked = false;
+    },
+    /** true once per 5-step boundary crossing (play the light tick). */
+    consumeTick() {
+      const t = s.tickPending;
+      s.tickPending = false;
+      return t;
+    },
+    /** Restore a stored position (resume, pending submit). */
+    restore(pos) {
+      s.pos = pos;
+      s.tickPending = false;
+    },
+    reset() {
+      s.pos = null;
+      s.locked = false;
+      s.touchId = null;
+      s.touches = 0;
+      s.nudges = 0;
+
+群友刻度盘 V1.0.0 源程序                                       第 25 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+      s.firstTouchAt = null;
+      s.tickPending = false;
+    },
+    /** For `daily_card_place`: {touches, nudges, ms (first touch -> now)}. */
+    stats(nowMs) {
+      return { touches: s.touches, nudges: s.nudges, ms: s.firstTouchAt === null ? 0 : Math.max(0, (
+    nowMs || 0) - s.firstTouchAt) };
+    },
+  };
+}
+module.exports = { makeTrack, posFromX, xFromPos, createRuler };
+/**
+ * Input validation for every client-callable function (spec 11.2, AC 15, 28, 31, 79). Pure JS, shar
+    ed by the
+ * cloud functions and the mock server. Each validator returns {ok:true, v:<cleaned input>} or {ok:f
+    alse, code:'INVALID_INPUT'}.
+ * Unknown fields are dropped (whitelist), strings are length-capped, nothing is trusted.
+ */
+const { CONFIG } = require('./config');
+const { isPos } = require('./score');
+const DATE_KEY = /^\d{8}$/;
+const ROUND_ID = /^[A-Z2-7]{8}$/;
+const GROUP_REF = /^[0-9a-f]{16}$/;
+const ITEM_ID = /^s\d{3}i\d{2}$/;
+const SPECTRUM_ID = /^s\d{3}$/;
+/** a cloudID is a URL-safe token (studio standard, same in every app): 8-512 characters of A-Za-z0-
+    9_- */
+const CLOUD_ID_RE = /^[A-Za-z0-9_-]{8,512}$/;
+const REPORT_REASONS = ['unsuitable', 'ambiguous', 'typo'];
+/** typed clue text kept for the rules: anything longer than this is cut (it is `length` long either
+     way) */
+const CLUE_INPUT_CAP = 200;
+const BAD = { ok: false, code: 'INVALID_INPUT' };
+const good = (v) => ({ ok: true, v });
+function isDateKey(s) {
+  if (typeof s !== 'string' || !DATE_KEY.test(s)) return false;
+  const d = new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
+  return d.toISOString().slice(0, 10).replace(/-/g, '') === s;
+}
+function optGroupRef(x) {
+  return x === undefined || x === null ? null : typeof x === 'string' && GROUP_REF.test(x) ? x : fal
+    se;
+}
+function obj(e) {
+  return e && typeof e === 'object' && !Array.isArray(e) ? e : {};
+}
+const V = {
+  getDaily(e) {
+    e = obj(e);
+    const g = optGroupRef(e.groupRef);
+
+群友刻度盘 V1.0.0 源程序                                       第 26 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    if (g === false) return BAD;
+    if (e.dateKey !== undefined && !isDateKey(e.dateKey)) return BAD;
+    return good({ groupRef: g, dateKey: e.dateKey || null });
+  },
+  submitCard(e) {
+    e = obj(e);
+    const g = optGroupRef(e.groupRef);
+    if (g === false || !isDateKey(e.dateKey) || !Number.isInteger(e.idx) || e.idx < 0 || e.idx >= CO
+    NFIG.daily.cards || !isPos(e.pos)) return BAD;
+    return good({ dateKey: e.dateKey, idx: e.idx, pos: e.pos, groupRef: g });
+  },
+  getArchive(e) {
+    e = obj(e);
+    if (e.before !== undefined && e.before !== null && !isDateKey(e.before)) return BAD;
+    let limit = e.limit === undefined ? CONFIG.archive.pageMax : e.limit;
+    if (!Number.isInteger(limit) || limit < 1) return BAD;
+    limit = Math.min(limit, CONFIG.archive.pageMax);
+    return good({ before: e.before || null, limit });
+  },
+  getArchiveDay(e) {
+    e = obj(e);
+    return isDateKey(e.dateKey) ? good({ dateKey: e.dateKey }) : BAD;
+  },
+  getBonusCard(e) {
+    e = obj(e);
+    let ex = [];
+    if (e.exclude !== undefined) {
+      if (!Array.isArray(e.exclude) || e.exclude.length > CONFIG.archive.bonusExcludeMax || !e.exclu
+    de.every((x) => typeof x === 'string' && ITEM_ID.test(x))) return BAD;
+      ex = e.exclude.slice();
+    }
+    return good({ exclude: ex });
+  },
+  unlockDistribution(e) {
+    e = obj(e);
+    return isDateKey(e.dateKey) ? good({ dateKey: e.dateKey }) : BAD;
+  },
+  /**
+   * The RAW cloudID string from wx.getGroupEnterInfo (M1). It is opaque to the client and is resolv
+    ed on the server
+   * (cloud.getOpenData). A decrypted-looking object (`groupData`, or an object as cloudID) is never
+     accepted: the
+   * platform only substitutes top-level wx.cloud.CloudID() values, and a plain object a modified cl
+    ient builds would
+   * otherwise pass for decrypted data.
+   */
+  joinGroup(e) {
+    e = obj(e);
+    if (typeof e.cloudID !== 'string' || !CLOUD_ID_RE.test(e.cloudID)) return BAD;
+    return good({ cloudID: e.cloudID });
+
+群友刻度盘 V1.0.0 源程序                                       第 27 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  },
+  getGroupDay(e) {
+    e = obj(e);
+    const g = optGroupRef(e.groupRef);
+    if (!g || !isDateKey(e.dateKey)) return BAD;
+    return good({ groupRef: g, dateKey: e.dateKey });
+  },
+  getFriendBoard(e) {
+    e = obj(e);
+    return isDateKey(e.dateKey) ? good({ dateKey: e.dateKey }) : BAD;
+  },
+  createRound(e) {
+    e = obj(e);
+    return typeof e.spectrumId === 'string' && SPECTRUM_ID.test(e.spectrumId) ? good({ spectrumId: e
+    .spectrumId }) : BAD;
+  },
+  setClue(e) {
+    e = obj(e);
+    if (typeof e.roundId !== 'string' || !ROUND_ID.test(e.roundId)) return BAD;
+    // D-2: 'chat' (我在群里说) is gone: INVALID_INPUT like any unknown mode. A preset ignores clueText, 
+    a typed clue ignores clueItemId.
+    if (e.clueMode === 'preset' && typeof e.clueItemId === 'string' && ITEM_ID.test(e.clueItemId)) r
+    eturn good({ roundId: e.roundId, clueMode: 'preset', clueItemId: e.clueItemId, clueText: null })
+    ;
+    // the text is capped before any rule runs (core/clue.js answers `length` for anything over 12 c
+    haracters)
+    if (e.clueMode === 'text' && typeof e.clueText === 'string') return good({ roundId: e.roundId, c
+    lueMode: 'text', clueItemId: null, clueText: e.clueText.slice(0, CLUE_INPUT_CAP) });
+    return BAD;
+  },
+  /** {rulesVersion} (the contract name) or {version} (the spec's name): the 发言规则 version the player
+     agrees to */
+  agreeRules(e) {
+    e = obj(e);
+    const v = e.rulesVersion !== undefined ? e.rulesVersion : e.version;
+    return v === CONFIG.ugc.rulesVersion ? good({ rulesVersion: v }) : BAD;
+  },
+  /** {roundId, reason}: reason is one of the five (the legacy spelling 'ad' is read as 'ads') */
+  reportClue(e) {
+    e = obj(e);
+    if (typeof e.roundId !== 'string' || !ROUND_ID.test(e.roundId)) return BAD;
+    const reason = e.reason === 'ad' ? 'ads' : e.reason;
+    if (typeof reason !== 'string' || CONFIG.ugc.reportReasons.indexOf(reason) < 0) return BAD;
+    return good({ roundId: e.roundId, reason });
+  },
+  getRound(e) {
+    e = obj(e);
+    const g = optGroupRef(e.groupRef);
+    if (g === false || typeof e.roundId !== 'string' || !ROUND_ID.test(e.roundId)) return BAD;
+    // showAnswer: the viewer chooses 直接看答案 on a revealed round (L4); the server records that the re
+
+群友刻度盘 V1.0.0 源程序                                       第 28 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    veal was served
+    if (e.showAnswer !== undefined && typeof e.showAnswer !== 'boolean') return BAD;
+    return good({ roundId: e.roundId, groupRef: g, showAnswer: e.showAnswer === true });
+  },
+  submitGuess(e) {
+    e = obj(e);
+    const g = optGroupRef(e.groupRef);
+    if (g === false || typeof e.roundId !== 'string' || !ROUND_ID.test(e.roundId) || !isPos(e.pos)) 
+    return BAD;
+    return good({ roundId: e.roundId, pos: e.pos, groupRef: g });
+  },
+  revealRound(e) {
+    e = obj(e);
+    return typeof e.roundId === 'string' && ROUND_ID.test(e.roundId) ? good({ roundId: e.roundId }) 
+    : BAD;
+  },
+  subscribeRound(e) {
+    return V.revealRound(e);
+  },
+  reportCard(e) {
+    e = obj(e);
+    if (typeof e.itemId !== 'string' || !ITEM_ID.test(e.itemId) || REPORT_REASONS.indexOf(e.reason) 
+    < 0) return BAD;
+    if (e.dateKey !== undefined && e.dateKey !== null && !isDateKey(e.dateKey)) return BAD;
+    return good({ itemId: e.itemId, reason: e.reason, dateKey: e.dateKey || null });
+  },
+  track(e) {
+    e = obj(e);
+    if (!Array.isArray(e.events) || e.events.length === 0 || e.events.length > CONFIG.limits.trackBa
+    tchMax) return BAD;
+    if (e.sessionId !== undefined && (typeof e.sessionId !== 'string' || e.sessionId.length > 64)) r
+    eturn BAD;
+    return good({ sessionId: e.sessionId || null, events: e.events });
+  },
+};
+module.exports = { V, isDateKey, REPORT_REASONS, ROUND_ID, GROUP_REF };
+/**
+ * Content access (spec 4). The library is TWO modules (TD-62):
+ *   `content/spectra.v1.js`  client-safe text (ships in the game package; no anchors, no tags)
+ *   `content/anchors.v1.js`  SERVER-ONLY answer key: per item the anchor (prior of the live median)
+     and the tags
+ * This module indexes them and derives the card shapes the rest of the code uses. Pure JS; relative
+     `.js` requires
+ * only (WeChat cannot require .json).
+ *
+ *   getContent(2)          -> CLIENT content for contentVersion 2 (text only, hasAnchors false), or
+     null if absent
+ *   getServerContent(2)    -> the library merged with the answer key (hasAnchors true), or null whe
+    n either module
+ *                             is absent. Cloud functions, the mock server, the schedule tool and th
+
+群友刻度盘 V1.0.0 源程序                                       第 29 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    e content tests
+ *                             use this; the client never calls it (the answer key is not in its pac
+    kage).
+ *   serverLibrary(2)       -> the merged RAW library (tests)
+ *   createContent(raw)     -> index any raw library object (tests use a small fixture)
+ *   registerContent(raw)   -> make getContent / getServerContent(raw.contentVersion) return that li
+    brary (tests, tools)
+ */
+const LATEST_CONTENT_VERSION = 2;
+const SPECTRUM_ID = /^s\d{3}$/;
+const ITEM_ID = /^s\d{3}i\d{2}$/;
+const overrides = Object.create(null);
+const cache = Object.create(null);
+const serverCache = Object.create(null);
+const TAG = /^(easy|split|season:(spring|summer|autumn|winter)|festival:[a-z]+)$/;
+/** Structural problems of a raw library (empty = fine). The full quota/forbidden-term validation is
+     the content writer's test. */
+function shapeErrors(raw) {
+  const errs = [];
+  if (!raw || typeof raw !== 'object') return ['library is not an object'];
+  if (!Number.isInteger(raw.contentVersion)) errs.push('contentVersion must be an integer');
+  const cats = new Set();
+  (raw.categories || []).forEach((c) => {
+    if (!c || !c.key || !c.label) errs.push('bad category ' + JSON.stringify(c));
+    else cats.add(c.key);
+  });
+  const sIds = new Set();
+  const iIds = new Set();
+  (raw.spectra || []).forEach((s) => {
+    if (!s || !SPECTRUM_ID.test(s.id)) return errs.push('bad spectrum id ' + (s && s.id));
+    if (sIds.has(s.id)) errs.push('duplicate spectrum id ' + s.id);
+    sIds.add(s.id);
+    if (!s.left || !s.right) errs.push(s.id + ': left/right missing');
+    if (!cats.has(s.cat)) errs.push(s.id + ': unknown cat ' + s.cat);
+    if (!Array.isArray(s.items) || s.items.length === 0) errs.push(s.id + ': no items');
+    (s.items || []).forEach((it) => {
+      if (!it || !ITEM_ID.test(it.id) || it.id.slice(0, 4) !== s.id) return errs.push(s.id + ': bad 
+    item id ' + (it && it.id));
+      if (iIds.has(it.id)) errs.push('duplicate item id ' + it.id);
+      iIds.add(it.id);
+      if (!it.text) errs.push(it.id + ': text missing');
+      // the client library has no anchors; when an item carries one (merged server library, test fi
+    xtures) it must be valid
+      if (it.anchor !== undefined && (!Number.isInteger(it.anchor) || it.anchor < 5 || it.anchor > 9
+    5)) errs.push(it.id + ': anchor must be an integer 5..95');
+      if (it.tags !== undefined && (!Array.isArray(it.tags) || !it.tags.every((t) => typeof t === 's
+    tring'))) errs.push(it.id + ': tags must be a string array');
+    });
+  });
+  return errs;
+
+群友刻度盘 V1.0.0 源程序                                       第 30 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+}
+/** Index a raw library. Throws on structural errors so a bad library never half-loads. */
+function createContent(raw) {
+  const errs = shapeErrors(raw);
+  if (errs.length) throw new Error('invalid content: ' + errs.slice(0, 5).join('; '));
+  const catLabel = Object.create(null);
+  raw.categories.forEach((c) => {
+    catLabel[c.key] = c.label;
+  });
+  const spectrumById = Object.create(null);
+  const itemIndex = Object.create(null);
+  const itemIds = [];
+  raw.spectra.forEach((s) => {
+    spectrumById[s.id] = s;
+    s.items.forEach((it) => {
+      itemIndex[it.id] = { spectrum: s, item: it };
+      itemIds.push(it.id);
+    });
+  });
+  const hasAnchors = itemIds.length > 0 && itemIds.every((id) => Number.isInteger(itemIndex[id].item
+    .anchor));
+  return { contentVersion: raw.contentVersion, categories: raw.categories, catLabel, spectra: raw.sp
+    ectra, spectrumById, itemIndex, itemIds, hasAnchors };
+}
+/**
+ * Merge the server-only answer key into a client library. Returns {raw, errors}: any disagreement b
+    etween the two
+ * modules (an item without a key, a key without an item, a bad anchor or tag, another contentVersio
+    n) is an error.
+ */
+function mergeAnswerKey(raw, key) {
+  const errs = [];
+  if (!key || typeof key !== 'object' || !key.items || typeof key.items !== 'object') return { raw: 
+    null, errors: ['answer key malformed'] };
+  if (key.contentVersion !== raw.contentVersion) errs.push('answer key contentVersion ' + key.conten
+    tVersion + ' != library ' + raw.contentVersion);
+  const seen = new Set();
+  const spectra = (raw.spectra || []).map((s) => ({
+    ...s,
+    items: (s.items || []).map((it) => {
+      seen.add(it.id);
+      const k = key.items[it.id];
+      if (!k) {
+        errs.push(it.id + ': no entry in the answer key');
+        return it;
+      }
+      if (!Number.isInteger(k.anchor) || k.anchor < 5 || k.anchor > 95) errs.push(it.id + ': anchor 
+    must be an integer 5..95');
+      if (!Array.isArray(k.tags) || !k.tags.every((t) => typeof t === 'string' && TAG.test(t))) errs
+    .push(it.id + ': bad tags');
+
+群友刻度盘 V1.0.0 源程序                                       第 31 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+/** board row hash h = sha256(openid + '|' + salt)[0..12) (spec 8.3); the open data domain recompute
+    s it with the same rule */
+function rowHash(openid, salt) {
+  return sha256hex(openid + '|' + salt).slice(0, 12);
+}
+/** opaque group handle sha256(openGId + pepper)[0..16) (spec 8.1) */
+function groupRefOf(openGId, pepper) {
+  return sha256hex(openGId + pepper).slice(0, 16);
+}
+// ---- misc ----
+function isInt(n, min, max) {
+  return Number.isInteger(n) && n >= min && n <= max;
+}
+function isPlainObject(o) {
+  return o !== null && typeof o === 'object' && !Array.isArray(o);
+}
+function now() {
+  return Date.now();
+}
+function chunk(arr, n) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+/** In-instance cache TTL in seconds: env KD_CACHE_SEC (tests set 0) else the given default. Read on
+     every call. */
+function cacheSec(dflt) {
+  const v = process.env.KD_CACHE_SEC;
+  return v !== undefined && v !== '' && Number.isFinite(+v) ? Math.max(0, +v) : dflt;
+}
+/** Reject after `ms` (the underlying call is not cancelled): every WeChat content-security call is 
+    bounded this way. Carries `timeout: true`. */
+function withTimeout(promise, ms, what) {
+  let timer;
+  const cap = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error((what || 'call') + ' timed out after ' +
+     ms + ' ms'), { timeout: true, errCode: 'TIMEOUT' })), ms);
+  });
+  return Promise.race([Promise.resolve(promise), cap]).finally(() => clearTimeout(timer));
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+/** a trace id for a mock check (never mistaken for a real WeChat trace_id) */
+function newMockTraceId() {
+  return 'mock-' + crypto.randomBytes(8).toString('hex');
+}
+/** configured timeout (seconds) from function.config.json, in ms. Never hard-coded in logic. */
+function configuredTimeoutMs() {
+  try {
+
+群友刻度盘 V1.0.0 源程序                                       第 32 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    const c = require('../function.config.json');
+    if (c && c.timeout > 0) return c.timeout * 1000;
+  } catch (e) { /* fall through */ }
+  return 3000; // platform default
+}
+module.exports = {
+  COLLECTION_PREFIX, col, DAY_MS, BJT_MS, RETENTION_DAYS,
+  AppError, fail, sha256hex, hmacHex,
+  isDateKey, keyFromUtcMidnight, utcMidnight, addDaysKey, daysBetween, bjtDayStartMs,
+  base32From, randomSeed, newRoundId, randomFloat, newSalt, rowHash, groupRefOf, isInt, isPlainObjec
+    t, now, configuredTimeoutMs, chunk, cacheSec, withTimeout, sleep, newMockTraceId,
+};
+'use strict';
+// Thin wrappers around the cloud SDK's content-security calls (spec 11.6). NOTHING else in the code
+     base calls
+// cloud.openapi, so the platform parameter names and response shapes [VERIFY E12] are adapted in ex
+    actly one place.
+// No platform secret is involved (cloud calls need none). Copied from 传画接龙 common/wxapi.js (text ha
+    lf).
+const { CONFIG } = require('./coreapi');
+const store = require('./store');
+const { withTimeout } = require('./util');
+const cloud = () => {
+  store.db(); // makes sure cloud.init ran
+  return store.cloud;
+};
+/** openapi results carry errCode (0 = ok); a non-zero code is a failure even when the SDK did not t
+    hrow */
+function okResult(res, what) {
+  if (!res) throw new Error(what + ': empty response');
+  // the cloud SDK answers errCode / errMsg, the HTTPS API errcode / errmsg: read both
+  const code = res.errCode !== undefined && res.errCode !== null ? res.errCode : res.errcode;
+  if (code !== undefined && code !== null && code !== 0) {
+    throw Object.assign(new Error(what + ': errCode ' + code + ' ' + (res.errMsg || res.errmsg || ''
+    )), { errCode: code });
+  }
+  return res;
+}
+/** the platform's namespace for the mini-game content-security calls (wx-server-sdk: cloud.openapi.
+    wxa.game.contentSpam) */
+function contentSpam() {
+  const o = cloud().openapi;
+  const c = o && o.wxa && o.wxa.game && o.wxa.game.contentSpam;
+  if (!c) throw Object.assign(new Error('openapi.wxa.game.contentSpam is not available in this SDK')
+    , { errCode: 'NO_SDK_API' });
+  return c;
+}
+/**
+ * Game msgSecCheck (wxa.game.contentSpam.msgSecCheck [VERIFY E12]), timeout 2 s. `params` = core/mo
+    deration.gameTextParams.
+
+群友刻度盘 V1.0.0 源程序                                       第 33 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+ * @returns {Promise<{suggest:string|undefined, label:*, traceId:string|null}>} the caller maps `sug
+    gest` with moderation.planOutcome
+ */
+async function gameMsgSecCheck(params) {
+  const res = okResult(await withTimeout(contentSpam().msgSecCheck(params), CONFIG.moderation.textGa
+    meTimeoutMs, 'game msgSecCheck'), 'game msgSecCheck');
+  const r = res.result || {};
+  return { suggest: r.suggest, label: r.label, traceId: res.trace_id || res.traceId || null };
+}
+/**
+ * msgSecCheck v2 (the `textApi: 'general'` fallback). `params` = core/moderation.textCheckParams. T
+    imeout 3 s.
+ * @returns {Promise<{suggest:string|undefined, label:*, traceId:string|null}>}
+ */
+async function msgSecCheck(params) {
+  const o = cloud().openapi;
+  if (!o || !o.security || typeof o.security.msgSecCheck !== 'function') throw Object.assign(new Err
+    or('openapi.security.msgSecCheck is not available'), { errCode: 'NO_SDK_API' });
+  const res = okResult(await withTimeout(o.security.msgSecCheck(params), CONFIG.moderation.textTimeo
+    utMs, 'msgSecCheck'), 'msgSecCheck');
+  const r = res.result || {};
+  return { suggest: r.suggest, label: r.label, traceId: res.trace_id || res.traceId || null };
+}
+module.exports = { gameMsgSecCheck, msgSecCheck };
+'use strict';
+// admin: the takedown and offender path for typed clues (spec 11.7, D-2, AC 93). NO admin UI: the f
+    ounder (or a delegate)
+// runs it from the cloud console's function test invocation, which carries no OPENID. A call that c
+    arries an OPENID is
+// refused with FORBIDDEN unless that openid is in the ADMIN_OPENIDS allow-list (fallback if the con
+    sole turns out to carry
+// one). Never enable the HTTP access service for this function. Every op writes audit_log. This is 
+    the ONLY function
+// that returns a host openid, a strike count, a clue's moderation block or the text of a hidden clu
+    e. It never returns a
+// reporter's openid. Copied from 传画接龙 admin and adapted to rounds.
+const store = require('./common/store');
+const { fail, now, isInt } = require('./common/util');
+const { core, CONFIG, rateOf } = require('./common/coreapi');
+const players = require('./common/players');
+const env = require('./common/env');
+const OPS = ['listReports', 'getRound', 'sample', 'upholdReport', 'dismissReport', 'hideClue', 'rest
+    oreClue', 'deleteClue', 'restrict', 'liftRestriction', 'setUgc', 'setModeration'];
+const OPENID_RE = /^[A-Za-z0-9_-]{6,64}$/;
+const ROUND_RE = /^[A-Z2-7]{8}$/;
+const REPORT_CAP = 100; // reports read per round
+const bad = () => fail('INVALID_INPUT', 'invalid input');
+const roundIdOf = (d) => (typeof d.roundId === 'string' && ROUND_RE.test(d.roundId) ? d.roundId : ba
+    d());
+const intIn = (v, min, max) => (isInt(v, min, max) ? v : null);
+
+群友刻度盘 V1.0.0 源程序                                       第 34 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+async function audit(op, target, before, after, by) {
+  await store.coll('audit_log').add({ data: { op, target, before: before === undefined ? null : befo
+    re, after: after === undefined ? null : after, by, ts: now() } });
+}
+/** a transaction whose result is carried out through a closure (the pattern of every function here)
+     */
+async function txn(fn) {
+  let out;
+  await store.db().runTransaction(async (t) => {
+    out = await fn(t);
+  });
+  return out;
+}
+async function loadRound(id) {
+  const r = await store.getDoc('rounds', id);
+  if (!r) fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+  return r;
+}
+async function reportsOf(roundId) {
+  return (await store.coll('clue_reports').where({ roundId }).limit(REPORT_CAP).get()).data;
+}
+/** a report as the admin sees it: never the reporter */
+const reportView = (r) => ({ reason: r.reason, state: r.state, ts: r.ts, resolvedAt: r.resolvedAt ||
+     null });
+const clueSummary = (r) => ({
+  mode: r.clueMode || null,
+  text: typeof r.clueText === 'string' ? r.clueText : null,
+  hidden: r.clueHidden === true,
+  hiddenBy: r.clueHiddenBy || null,
+  hiddenAt: r.clueHiddenAt || null,
+  mod: r.clueMod || null,
+});
+const hiddenState = (r) => ({ hidden: r.clueHidden === true, by: r.clueHiddenBy || null });
+const ops = {
+  async listReports(d) {
+    const state = ['open', 'upheld', 'dismissed'].includes(d.state) ? d.state : 'open';
+    const limit = d.limit === undefined ? 20 : intIn(d.limit, 1, 50);
+    if (!limit) bad();
+    const rows = (await store.coll('clue_reports').where({ state }).orderBy('ts', 'asc').limit(limit
+    ).get()).data;
+    const items = [];
+    for (const r of rows) {
+      const round = await store.getDoc('rounds', r.roundId);
+      items.push({ roundId: r.roundId, state: r.state, reason: r.reason, ts: r.ts, ageMs: now() - r.
+    ts, clue: round ? clueSummary(round) : null });
+    }
+    return { items };
+  },
+  async getRound(d) {
+    const round = await loadRound(roundIdOf(d));
+
+群友刻度盘 V1.0.0 源程序                                       第 35 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    const reports = await reportsOf(round._id);
+    const host = await players.read(round.hostOpenid);
+    const view = {
+      roundId: round._id,
+      status: round.status,
+      left: round.left,
+      right: round.right,
+      createdAt: round.createdAt,
+      guessCount: round.guessCount,
+      hostOpenid: round.hostOpenid, // the only place a host openid is shown
+      clue: clueSummary(round),
+      reports: reports.map(reportView),
+      host: host ? { strikes30d: core.STK.activeStrikes(host.strikes, now()).length, restriction: co
+    re.STK.restrictionOf(host, now()), reviewFlag: host.reviewFlag === true } : null,
+    };
+    const logs = (await store.coll('mod_log').where({ roundId: round._id }).limit(20).get()).data;
+    view.modLog = logs.map((l) => ({ api: l.api, result: l.result, label: l.label, latencyMs: l.late
+    ncyMs, errCode: l.errCode || null, text: l.text === undefined ? null : l.text, ts: l.ts }));
+    return { round: view };
+  },
+  async sample(d) {
+    const n = d.n === undefined ? 20 : intIn(d.n, 1, 50);
+    if (!n) bad();
+    const _ = store._();
+    const rows = (await store.coll('rounds').where({ clueMode: 'text', 'clueMod.ts': _.gte(now() - C
+    ONFIG.ugc.sampleWindowMs) }).limit(500).get()).data.filter((r) => r.clueHidden !== true && typeo
+    f r.clueText === 'string');
+    for (let i = rows.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rows[i], rows[j]] = [rows[j], rows[i]];
+    }
+    return { items: rows.slice(0, n).map((r) => ({ roundId: r._id, left: r.left, right: r.right, tex
+    t: r.clueText, ts: r.clueMod ? r.clueMod.ts : null })), pool: rows.length };
+  },
+  /** the reports stand: every report of the round becomes upheld, the clue stays hidden, the host g
+    ets ONE strike (once per round) */
+  async upholdReport(d, by) {
+    const id = roundIdOf(d);
+    await loadRound(id); // ROUND_NOT_FOUND first
+    const reports = await reportsOf(id);
+    if (!reports.length) bad(); // nothing to uphold
+    const out = await txn(async (t) => {
+      const round = await store.getDocT(t, 'rounds', id);
+      if (!round) fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+      if (round.clueMode !== 'text') bad();
+      if (round.clueUpheld === true) return { already: true };
+      const before = hiddenState(round);
+      await store.collT(t, 'rounds').doc(id).update({ data: { clueHidden: true, clueHiddenAt: round.
+    clueHiddenAt || now(), clueHiddenBy: round.clueHiddenBy || 'admin', clueUpheld: true } });
+      for (const r of reports) await store.collT(t, 'clue_reports').doc(r._id).update({ data: { stat
+
+群友刻度盘 V1.0.0 源程序                                       第 36 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    e: 'upheld', resolvedAt: now() } });
+      const sr = await players.strikeT(t, round.hostOpenid);
+      return { before, strike: sr, reports: reports.length };
+    });
+    if (out.already) return { already: true };
+    await players.emitStrike('upheld', out.strike);
+    await audit('upholdReport', id, { clue: out.before }, { clue: { hidden: true }, reports: out.rep
+    orts, strikes30d: out.strike.count, restrictedUntil: out.strike.restrictedUntil || 0 }, by);
+    return { strikes30d: out.strike.count, restrictedUntil: out.strike.restrictedUntil || 0, flagged
+    : out.strike.flagged, reports: out.reports };
+  },
+  /** the reports were wrong: dismissed; with restore the clue is shown again (a deleted clue cannot
+     be restored) */
+  async dismissReport(d, by) {
+    const id = roundIdOf(d);
+    if (d.restore !== undefined && typeof d.restore !== 'boolean') bad();
+    const restore = d.restore === true;
+    const reports = await reportsOf(id);
+    const out = await txn(async (t) => {
+      const round = await store.getDocT(t, 'rounds', id);
+      if (!round) fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+      for (const r of reports) await store.collT(t, 'clue_reports').doc(r._id).update({ data: { stat
+    e: 'dismissed', resolvedAt: now() } });
+      const before = hiddenState(round);
+      let restored = false;
+      if (restore && round.clueHidden === true) {
+        const r = core.U.restoreClue(round);
+        if (r.ok) {
+          await store.collT(t, 'rounds').doc(id).update({ data: { clueHidden: false, clueHiddenAt: s
+    tore._().remove(), clueHiddenBy: store._().remove() } });
+          restored = true;
+        }
+      }
+      return { before, restored, reports: reports.length };
+    });
+    await audit('dismissReport', id, { clue: out.before }, { reports: out.reports, restore, restored
+    : out.restored }, by);
+    return { restored: out.restored, reports: out.reports };
+  },
+  async hideClue(d, by) {
+    const id = roundIdOf(d);
+    const out = await txn(async (t) => {
+      const round = await store.getDocT(t, 'rounds', id);
+      if (!round) fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+      if (round.clueMode !== 'text') bad();
+      const before = hiddenState(round);
+      if (round.clueHidden === true) return { before, changed: false };
+      await store.collT(t, 'rounds').doc(id).update({ data: { clueHidden: true, clueHiddenAt: now(),
+     clueHiddenBy: 'admin' } });
+      return { before, changed: true };
+
+群友刻度盘 V1.0.0 源程序                                       第 37 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    });
+    await audit('hideClue', id, { clue: out.before }, { clue: { hidden: true } }, by);
+    return { changed: out.changed };
+  },
+  async restoreClue(d, by) {
+    const id = roundIdOf(d);
+    const out = await txn(async (t) => {
+      const round = await store.getDocT(t, 'rounds', id);
+      if (!round) fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+      if (round.clueMode !== 'text') bad();
+      const before = hiddenState(round);
+      const r = core.U.restoreClue(round);
+      if (!r.ok) return { before, restored: false, why: 'deleted' };
+      if (round.clueHidden !== true) return { before, restored: true, changed: false };
+      await store.collT(t, 'rounds').doc(id).update({ data: { clueHidden: false, clueHiddenAt: store
+    ._().remove(), clueHiddenBy: store._().remove() } });
+      return { before, restored: true, changed: true };
+    });
+    await audit('restoreClue', id, { clue: out.before }, { restored: out.restored, why: out.why || n
+    ull }, by);
+    return { restored: out.restored, reason: out.why || null };
+  },
+  /** deletion request: the text leaves the round for good; mod_log evidence stays */
+  async deleteClue(d, by) {
+    const id = roundIdOf(d);
+    const out = await txn(async (t) => {
+      const round = await store.getDocT(t, 'rounds', id);
+      if (!round) fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+      if (round.clueMode !== 'text') bad();
+      const before = { ...hiddenState(round), hadText: typeof round.clueText === 'string' };
+      await store.collT(t, 'rounds').doc(id).update({ data: { clueText: null, clueHidden: true, clue
+    HiddenAt: round.clueHiddenAt || now(), clueHiddenBy: 'admin' } });
+      return { before };
+    });
+    await audit('deleteClue', id, { clue: out.before }, { clue: { hidden: true, hadText: false } }, 
+    by);
+    return { deleted: true };
+  },
+  async restrict(d, by) {
+    if (typeof d.openid !== 'string' || !OPENID_RE.test(d.openid)) bad();
+    if (!(await players.read(d.openid))) bad(); // never create a player by typo
+    const permanent = d.permanent === true;
+    const days = permanent ? null : intIn(d.days, 1, 3650);
+    if (!permanent && !days) bad();
+    const after = await players.mutate(d.openid, (p) => {
+      const np = core.STK.restrict(p, permanent ? { permanent: true } : { days }, now());
+      return { player: np, result: { restrictedUntil: np.restrictedUntil, permanent: !!np.restrictPe
+    rmanent } };
+    });
+    await audit('restrict', d.openid, null, after, by);
+
+群友刻度盘 V1.0.0 源程序                                       第 38 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    return after;
+  },
+  async liftRestriction(d, by) {
+    if (typeof d.openid !== 'string' || !OPENID_RE.test(d.openid)) bad();
+    if (!(await players.read(d.openid))) bad();
+    const before = await players.mutate(d.openid, (p) => ({ player: core.STK.liftRestriction(p, now(
+    )), result: { restrictedUntil: p.restrictedUntil || 0, permanent: !!p.restrictPermanent } }));
+    await audit('liftRestriction', d.openid, before, { restrictedUntil: 0, permanent: false }, by);
+    return { lifted: true };
+  },
+  /** the kill switches (spec 11.6): createEnabled, viewEnabled. Effective for clients within 10 s. 
+    */
+  async setUgc(d, by) {
+    const set = {};
+    for (const k of ['createEnabled', 'viewEnabled']) {
+      if (d[k] === undefined) continue;
+      if (typeof d[k] !== 'boolean') bad();
+      set['ugc.' + k] = d[k];
+    }
+    if (!Object.keys(set).length) bad();
+    set.updatedAt = now();
+    const before = await store.getDoc('app_config', 'live');
+    await store.addIfAbsent('app_config', { _id: 'live', ugc: { createEnabled: true, viewEnabled: tr
+    ue }, updatedAt: now() });
+    if (!(before && before.ugc)) await store.coll('app_config').doc('live').update({ data: { ugc: { 
+    createEnabled: true, viewEnabled: true } } });
+    await store.coll('app_config').doc('live').update({ data: set });
+    store.clearCache();
+    const after = await store.getDoc('app_config', 'live');
+    await audit('setUgc', 'app_config/live', before && before.ugc, after.ugc, by);
+    await store.writeEvent('server', 'ugc_pause', { createEnabled: after.ugc.createEnabled !== false
+    , viewEnabled: after.ugc.viewEnabled !== false });
+    return { ugc: after.ugc, note: 'clients see the change within 10 s (config cache)' };
+  },
+  /** textApi 'game' (default) | 'general' (the fallback msgSecCheck) */
+  async setModeration(d, by) {
+    if (d.textApi !== 'game' && d.textApi !== 'general') bad();
+    const before = await store.getDoc('app_config', 'live');
+    await store.addIfAbsent('app_config', { _id: 'live', ugc: { createEnabled: true, viewEnabled: tr
+    ue }, updatedAt: now() });
+    await store.coll('app_config').doc('live').update({ data: { 'moderation.textApi': d.textApi, upd
+    atedAt: now() } });
+    store.clearCache();
+    const after = await store.getDoc('app_config', 'live');
+    await audit('setModeration', 'app_config/live', before && before.moderation ? before.moderation 
+    : null, after.moderation, by);
+    return { moderation: after.moderation, note: 'effective within 10 s' };
+  },
+};
+exports.main = store.handler(async (event, { openid }) => {
+
+群友刻度盘 V1.0.0 源程序                                       第 39 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  // the console carries no OPENID; a call that does must be on the allow-list (fallback), else FORB
+    IDDEN
+  if (openid && !env.adminOpenids().includes(openid)) fail('FORBIDDEN', 'FORBIDDEN');
+  if (typeof event.op !== 'string' || !OPS.includes(event.op)) bad();
+  const by = openid ? 'console/' + openid : 'console';
+  if (openid) await store.rateLimit(openid, 'fn_admin', 1, rateOf('admin').limit);
+  const res = await ops[event.op](event, by);
+  return Object.assign({ ok: true, op: event.op }, res);
+}, { auth: false });
+'use strict';
+// agreeRules: record that the player agreed to the current 发言规则 version (spec 6.12, 11.2, AC 85). I
+    dentity from the
+// context only. The version must equal CONFIG.ugc.rulesVersion (INVALID_INPUT otherwise). Idempoten
+    t: an agreement at the
+// current version is kept as it is (rulesAt is the FIRST agreement). Stored in player_stats (create
+    d on first need).
+const store = require('./common/store');
+const { fail, now } = require('./common/util');
+const { core, rateOf } = require('./common/coreapi');
+const players = require('./common/players');
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.agreeRules(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const changed = await players.mutate(openid, (p) => {
+    const r = core.U.agreeRules(p, openid, now());
+    return { player: r.player, result: r.changed };
+  });
+  return { ok: true, rulesVersion: v.v.rulesVersion, changed };
+}, { rate: rateOf('agreeRules') });
+'use strict';
+// cleanup (timer, 04:00 Beijing): retention of 180 days (spec 13, D7). Keeps daily_sets, daily_card
+    _stats, item_usage,
+// app_config and meta (aggregates and config only). Idempotent.
+const store = require('./common/store');
+const { now, addDaysKey, RETENTION_DAYS } = require('./common/util');
+const { dateKeyAt } = require('./common/coreapi');
+const BUDGET_MS = 45000;
+exports.main = store.handler(async () => {
+  const t0 = now();
+  const _ = store._();
+  const cutoffMs = t0 - RETENTION_DAYS * 86400e3;
+  const cutoffKey = addDaysKey(dateKeyAt(t0), -RETENTION_DAYS);
+  // [collection, field, cutoff]; rate_limits expire on their own `expireAt`
+  const plan = [
+    ['daily_entries', 'dateKey', cutoffKey],
+    ['player_stats', 'updatedAt', cutoffMs],
+    ['group_members', 'lastSeen', cutoffKey],
+    ['group_daily', 'computedAt', cutoffMs],
+    ['rounds', 'createdAt', cutoffMs],
+    ['guesses', 'ts', cutoffMs],
+
+群友刻度盘 V1.0.0 源程序                                       第 40 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    ['sub_grants', 'grantedAt', cutoffMs],
+    ['card_reports', 'ts', cutoffMs],
+    ['anomalies', 'ts', cutoffMs],
+    ['events', 'ts', cutoffMs],
+    ['reveal_views', 'ts', cutoffMs],
+    // D-2 (spec 13, PD-40): typed clues leave with their round (rounds above); evidence, reports an
+    d the audit trail go at 180 days
+    ['clue_reports', 'ts', cutoffMs],
+    ['mod_log', 'ts', cutoffMs],
+    ['mod_quota', 'ts', cutoffMs],
+    ['audit_log', 'ts', cutoffMs],
+    ['rate_limits', 'expireAt', t0],
+  ];
+  const removed = {};
+  for (const [name, field, cutoff] of plan) {
+    removed[name] = 0;
+    for (let i = 0; i < 1000 && now() - t0 < BUDGET_MS; i++) {
+      const r = await store.coll(name).where({ [field]: _.lt(cutoff) }).remove();
+      const n = (r && r.stats && r.stats.removed) || 0;
+      removed[name] += n;
+      if (n === 0) break;
+    }
+  }
+  return { ok: true, removed };
+}, { auth: false, serverOnly: true });
+'use strict';
+// createRound: a host starts a draft round on a spectrum (spec 11.2, AC 26, 35). The hidden target 
+    is drawn from
+// crypto randomness (core drawTarget) and is returned to the host only.
+// D-2: the response carries the host's typed-clue state, `ugc`, which drives the clue step (spec 6.
+    5): the kill switch,
+// the 发言规则 agreement, a restriction, and the one-time strike warning (read once: this call clears i
+    t).
+const store = require('./common/store');
+const { fail, now, newRoundId, newSalt, randomFloat } = require('./common/util');
+const { core, CONFIG, content, dateKeyAt, rateOf } = require('./common/coreapi');
+const groups = require('./common/groups');
+const players = require('./common/players');
+/** the host's typed-clue state; a pending warning is consumed here (one transaction, so two calls n
+    ever both show it) */
+async function ugcState(openid) {
+  const fl = await groups.ugcFlags();
+  const nowMs = now();
+  const pv = core.U.playerView(await players.read(openid), nowMs);
+  let warnPending = pv.warnPending;
+  if (warnPending) {
+    warnPending = await players.mutate(openid, (p) => ({ player: { ...p, warnPending: false, updated
+    At: nowMs }, result: p.warnPending === true }));
+  }
+  return {
+
+群友刻度盘 V1.0.0 源程序                                       第 41 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    createEnabled: fl.createEnabled,
+    rulesVersion: pv.rulesVersion,
+    rulesRequiredVersion: CONFIG.ugc.rulesVersion,
+    rulesAgreed: pv.rulesAgreed,
+    restriction: pv.restriction ? { until: pv.restriction.until, permanent: pv.restriction.permanent
+     } : null,
+    warnPending,
+  };
+}
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.createRound(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const c = content();
+  const sp = c.spectrumById[v.v.spectrumId];
+  if (!sp) fail('INVALID_INPUT', 'unknown spectrum');
+  await store.dayLimit(openid, 'createRound', CONFIG.limits.createRoundPerDay, dateKeyAt(now()));
+  const target = core.R.drawTarget(randomFloat());
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const roundId = newRoundId();
+    const doc = core.SV.newRound({ roundId, hostOpenid: openid, spectrum: sp, target, salt: newSalt(
+    ), nowMs: now(), contentVersion: c.contentVersion });
+    if (await store.addIfAbsent('rounds', doc)) return { ok: true, roundId, target, left: sp.left, r
+    ight: sp.right, ugc: await ugcState(openid) };
+  }
+  fail('INTERNAL', 'could not allocate a round id');
+}, { rate: rateOf('createRound') });
+'use strict';
+// finalizeDay (timer, 00:40 Beijing): freeze the references of each newly closed day (定分), then pag
+    e through its
+// complete dailies and build finalHist / finalCount for the percentile (spec 3.3, edge 23, AC 25). 
+    Refs are frozen
+// first (cheap) so scores are right even if the aggregate resumes later. The aggregate is resumable
+    : progress
+// (cursor + partial histogram) is stored on the set after every 1,000-entry page. Idempotent; skips
+     finalized days.
+const store = require('./common/store');
+const { now, addDaysKey, configuredTimeoutMs } = require('./common/util');
+const { core, dateKeyAt } = require('./common/coreapi');
+const daily = require('./common/daily');
+const PAGE = 1000;
+const LOOKBACK_DAYS = 7;
+exports.main = store.handler(async () => {
+  const t0 = now();
+  const budgetMs = configuredTimeoutMs() * 0.8;
+  const _ = store._();
+  const newest = core.W.newestClosedKey(t0);
+  const keys = [];
+  for (let i = LOOKBACK_DAYS - 1; i >= 0; i--) keys.push(addDaysKey(newest, -i));
+  const sets = await store.getMany('daily_sets', keys);
+  const finalized = [];
+
+群友刻度盘 V1.0.0 源程序                                       第 42 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const partial = [];
+  for (const key of keys) {
+    let set = sets.get(key);
+    if (!set || set.finalizedAt) continue;
+    const started = now();
+    set = await daily.ensureFinal(set);
+    const prog = set.finalProgress || { after: null, hist: core.S.emptyHist(), count: 0 };
+    const hist = prog.hist.slice();
+    let count = prog.count;
+    let after = prog.after;
+    let done = false;
+    while (!done) {
+      if (now() - t0 > budgetMs) break;
+      const where = { dateKey: key, completeAt: _.gt(0) };
+      if (after) where._id = _.gt(after);
+      const r = await store.coll('daily_entries').where(where).orderBy('_id', 'asc').limit(PAGE).fie
+    ld({ pos: true }).get();
+      const rows = r.data.filter((e) => core.SV.isComplete(e));
+      const agg = core.SV.finalAggregate(set.final, rows.map((e) => e.pos));
+      for (let i = 0; i < hist.length; i++) hist[i] += agg.finalHist[i];
+      count += agg.finalCount;
+      if (r.data.length) after = r.data[r.data.length - 1]._id;
+      if (r.data.length < PAGE) {
+        done = true;
+        await store.updateDoc('daily_sets', key, { finalHist: hist, finalCount: count, finalizedAt: 
+    now(), finalProgress: null });
+      } else {
+        await store.updateDoc('daily_sets', key, { finalProgress: { after, hist, count } });
+      }
+    }
+    if (done) {
+      finalized.push(key);
+      await store.writeEvent('server', 'finalize_day', { dateKey: key, finalCount: count, ms: now() 
+    - started });
+    } else {
+      partial.push(key);
+      await store.writeEvent('server', 'finalize_day', { dateKey: key, finalCount: count, ms: now() 
+    - started, failed: true });
+      console.warn(`[finalizeDay] ${key} not finished (${count} entries so far); the next run resume
+    s`);
+      break;
+    }
+  }
+  return { ok: true, finalized, partial };
+}, { auth: false, serverOnly: true });
+'use strict';
+// genDaily (timer, nightly 23:00 Beijing): create tomorrow's set. Idempotent by the fixed _id (a se
+    cond fire, or a
+// lazy getDaily that got there first, returns created:false). Not callable by a client (FORBIDDEN).
+const store = require('./common/store');
+
+群友刻度盘 V1.0.0 源程序                                       第 43 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+const { fail, now, addDaysKey } = require('./common/util');
+const { dateKeyAt } = require('./common/coreapi');
+const daily = require('./common/daily');
+exports.main = store.handler(async () => {
+  const t0 = now();
+  const dateKey = addDaysKey(dateKeyAt(t0), 1);
+  const existing = await store.getDoc('daily_sets', dateKey);
+  if (existing) return { ok: true, dateKey, created: false };
+  const r = await daily.createSet(dateKey);
+  if (!r) {
+    console.error(`[ALERT] genDaily: no set could be created for ${dateKey} (before launch or conten
+    t/schedule problem)`);
+    await store.writeEvent('server', 'daily_gen', { dateKey, source: 'none', ms: now() - t0, failed:
+     true });
+    fail('DAILY_UNAVAILABLE', 'no set could be created');
+  }
+  if (r.created && r.set.source === 'auto') console.error(`[ALERT] schedule exhausted: ${dateKey} wa
+    s built by the auto path`);
+  await store.writeEvent('server', 'daily_gen', { dateKey, source: r.set.source, ms: now() - t0 });
+  return r.created ? { ok: true, dateKey, created: true, source: r.set.source } : { ok: true, dateKe
+    y, created: false };
+}, { auth: false, serverOnly: true });
+'use strict';
+// getArchive: closed days, newest first, with the caller's frozen total for completed ones (spec 11
+    .2, AC 36).
+const store = require('./common/store');
+const { fail, now } = require('./common/util');
+const { core, rateOf } = require('./common/coreapi');
+const daily = require('./common/daily');
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.getArchive(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const nowMs = now();
+  const _ = store._();
+  const newest = core.W.newestClosedKey(nowMs);
+  const { before, limit } = v.v;
+  const cond = before && before <= newest ? _.lt(before) : _.lte(newest);
+  const r = await store.coll('daily_sets').where({ _id: cond }).orderBy('_id', 'desc').limit(limit +
+     1).get();
+  const { page, hasMore } = core.SV.archivePage(r.data, before, limit, nowMs);
+  const sets = [];
+  for (const s of page) sets.push(await daily.ensureFinal(s));
+  const entries = await store.getMany('daily_entries', sets.map((s) => `${s._id}_${openid}`));
+  const items = sets.map((s) => core.SV.archiveItem(s, entries.get(`${s._id}_${openid}`) || null));
+  const ps = await store.getDoc('player_stats', openid);
+  return { ok: true, items, hasMore, bestStreak: ps ? ps.bestStreak || 0 : 0 };
+}, { rate: rateOf('getArchive') });
+'use strict';
+// getArchiveDay: one closed day for play-back / review (spec 11.2, AC 36-38). No histograms (TD-11)
+    .
+
+群友刻度盘 V1.0.0 源程序                                       第 44 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+const store = require('./common/store');
+const { fail, now } = require('./common/util');
+const { core, content, rateOf } = require('./common/coreapi');
+const daily = require('./common/daily');
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.getArchiveDay(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  let set = await store.getDoc('daily_sets', v.v.dateKey);
+  if (!set) fail('DAY_OPEN', 'no closed day');
+  set = await daily.ensureFinal(set);
+  const entry = await store.getDoc('daily_entries', `${set._id}_${openid}`);
+  const out = core.SV.archiveDayView(set, entry, content(set.contentVersion), now());
+  if (!out.ok) fail(out.code, out.code);
+  return out;
+}, { rate: rateOf('getArchiveDay') });
+'use strict';
+// getBonusCard (加一题): one unanswered card of a closed day (spec 11.2, TD-10). The per-day limit is 
+    consumed only
+// when a card is actually served. The "complete today's daily first" gate is UI-only.
+const store = require('./common/store');
+const { fail, now, randomFloat } = require('./common/util');
+const { core, CONFIG, content, dateKeyAt, rateOf } = require('./common/coreapi');
+const daily = require('./common/daily');
+const CLOSED_DAYS_SCANNED = 60; // newest closed days considered (TD-31)
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.getBonusCard(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const nowMs = now();
+  const _ = store._();
+  const r = await store.coll('daily_sets').where({ _id: _.lte(core.W.newestClosedKey(nowMs)) }).orde
+    rBy('_id', 'desc').limit(CLOSED_DAYS_SCANNED).get();
+  const closed = [];
+  for (const s of r.data) if (core.W.dayClosed(s._id, nowMs)) closed.push(await daily.ensureFinal(s)
+    );
+  const docs = await store.getMany('daily_entries', closed.map((s) => `${s._id}_${openid}`));
+  const byDate = {};
+  closed.forEach((s) => {
+    byDate[s._id] = docs.get(`${s._id}_${openid}`) || null;
+  });
+  const pick = core.SV.pickBonusCard(closed, byDate, new Set(v.v.exclude), randomFloat, content());
+  if (!pick) fail('NO_CARD_AVAILABLE', 'NO_CARD_AVAILABLE');
+  await store.dayLimit(openid, 'bonus', CONFIG.limits.bonusPerDay, dateKeyAt(nowMs));
+  return { ok: true, card: pick.card, final: pick.final, dateKey: pick.dateKey, issueNo: pick.issueN
+    o };
+}, { rate: rateOf('getBonusCard') });
+'use strict';
+// getDaily: today's 5 cards, the caller's answers and reveals, group blocks, yesterday, streak, fea
+    tures (spec 11.2).
+// Authenticate, validate (core/input), read, call core/service dailyView, return. No rules live her
+    e.
+
+群友刻度盘 V1.0.0 源程序                                       第 45 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+const store = require('./common/store');
+const { fail, now } = require('./common/util');
+const { core, dateKeyAt, content, rateOf } = require('./common/coreapi');
+const daily = require('./common/daily');
+const groups = require('./common/groups');
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.getDaily(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const nowMs = now();
+  const today = dateKeyAt(nowMs);
+  const dateKey = v.v.dateKey || today;
+  if (!core.W.liveDay(dateKey, nowMs)) fail('INVALID_INPUT', 'day is closed; use getArchiveDay');
+  const set = await daily.ensureSet(dateKey);
+  if (!set) fail('DAILY_UNAVAILABLE', 'no set for this day');
+  const [entry, hists, stats, prev, cfg] = await Promise.all([
+    store.getDoc('daily_entries', `${dateKey}_${openid}`),
+    daily.loadHists(dateKey),
+    store.getDoc('player_stats', openid),
+    daily.prevPublished(today),
+    groups.appConfig(),
+  ]);
+  let blocks = null;
+  if (v.v.groupRef && (await groups.isMember(openid, v.v.groupRef))) {
+    blocks = await groups.groupBlocks(openid, v.v.groupRef, dateKey, entry);
+  }
+  let yesterday = null;
+  if (prev) {
+    const prevEntry = await store.getDoc('daily_entries', `${prev._id}_${openid}`);
+    if (prevEntry && core.SV.isComplete(prevEntry)) {
+      const prevSet = await daily.ensureFinal(prev);
+      yesterday = core.SV.yesterdayInfo(prevSet, prevEntry, nowMs);
+    }
+  }
+  return core.SV.dailyView({
+    set,
+    entry,
+    hists,
+    content: content(set.contentVersion),
+    groupBlocks: blocks,
+    streak: core.ST.display(stats, today, prev ? prev._id : null),
+    yesterday,
+    features: core.AD.buildFeatures(cfg),
+    nowMs,
+  });
+}, { rate: rateOf('getDaily') });
+'use strict';
+// getFriendBoard: every complete daily of the day, hashed and ranked by national live score (spec 8
+    .4, AC 46).
+// Above CONFIG.board.listCap the board degrades to selfOnly. The listing is cached 60 s per instanc
+    e; the caller's own
+
+群友刻度盘 V1.0.0 源程序                                       第 46 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+// row is always read fresh and spliced in.
+const store = require('./common/store');
+const { fail, now, rowHash, cacheSec } = require('./common/util');
+const { core, CONFIG, rateOf } = require('./common/coreapi');
+const daily = require('./common/daily');
+const PAGE = 1000;
+/** {count, entries|null}: entries only when count <= listCap */
+async function listDay(dateKey) {
+  const _ = store._();
+  const where = { dateKey, completeAt: _.gt(0) };
+  const count = (await store.coll('daily_entries').where(where).count()).total;
+  if (count > CONFIG.board.listCap) return { count, entries: null };
+  const rows = await store.queryAll('daily_entries', where, { field: { openid: true, pos: true, comp
+    leteAt: true, streak: true } });
+  return { count, entries: rows.filter((e) => core.SV.isComplete(e)).map((e) => ({ key: e.openid, po
+    s: e.pos, completeAt: e.completeAt, streak: e.streak })) };
+}
+exports.main = store.handler(async (event, { openid }) => {
+  const started = now();
+  const v = core.V.getFriendBoard(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const { dateKey } = v.v;
+  const nowMs = now();
+  if (!core.SV.boardDayOk(dateKey, nowMs)) fail('INVALID_INPUT', 'INVALID_INPUT');
+  let set = await daily.ensureSet(dateKey);
+  if (!set) fail('DAILY_UNAVAILABLE', 'DAILY_UNAVAILABLE');
+  const hists = await daily.loadHists(dateKey);
+  if (core.W.dayClosed(dateKey, nowMs)) set = await daily.ensureFinal(set, hists);
+  const mineDoc = await store.getDoc('daily_entries', `${dateKey}_${openid}`);
+  const viewerDone = core.SV.isComplete(mineDoc);
+  const mine = viewerDone ? { key: openid, pos: mineDoc.pos, completeAt: mineDoc.completeAt, streak:
+     mineDoc.streak } : null;
+  const listing = await store.cached('friends:' + dateKey, cacheSec(CONFIG.board.cacheSec), () => li
+    stDay(dateKey));
+  // over the cap the core needs only the caller's row plus the true total (selfOnly keeps just the 
+    caller's key)
+  const over = listing.entries === null;
+  const entries = over ? (mine ? [mine] : []) : listing.entries.filter((e) => e.key !== openid).conc
+    at(mine ? [mine] : []);
+  const out = core.SV.friendBoardView({ set, hists, entries, total: listing.count, viewerOpenid: ope
+    nid, viewerDone, hashFn: rowHash, nowMs });
+  await store.writeSampled('board_list', { view: 'friend', mode: out.mode, rows: out.rows.length, by
+    tes: JSON.stringify(out).length, ms: now() - started }, CONFIG.caps.boardEventEvery);
+  return out;
+}, { rate: rateOf('getFriendBoard') });
+'use strict';
+// getGroupDay: the group page (spec 8.4, 3.4): hashed rows, 群默契度, 7-day trend, recent rounds. Membe
+    rship is checked
+// on a fresh row; rows carry only salted hashes (never openids, openGIds or groupRefs).
+const store = require('./common/store');
+
+群友刻度盘 V1.0.0 源程序                                       第 47 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+const { fail, now, rowHash } = require('./common/util');
+const { core, CONFIG, dateKeyAt, rateOf } = require('./common/coreapi');
+const daily = require('./common/daily');
+const groups = require('./common/groups');
+const GUESS_SCAN = 100; // newest guesses scanned for the rounds list (TD-31)
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.getGroupDay(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const { groupRef, dateKey } = v.v;
+  if (!(await groups.isMember(openid, groupRef))) fail('NOT_MEMBER', 'NOT_MEMBER');
+  const started = now();
+  const nowMs = started;
+  if (!core.SV.boardDayOk(dateKey, nowMs)) fail('INVALID_INPUT', 'INVALID_INPUT');
+  let set = await daily.ensureSet(dateKey);
+  if (!set) fail('DAILY_UNAVAILABLE', 'DAILY_UNAVAILABLE');
+  const hists = await daily.loadHists(dateKey);
+  if (core.W.dayClosed(dateKey, nowMs)) set = await daily.ensureFinal(set, hists);
+  const members = await groups.completeMembers(openid, groupRef, dateKey);
+  const viewerDone = members.some((m) => m.key === openid);
+  // 7-day trend; closed days are cached in group_daily (recomputable, trend only)
+  const today = dateKeyAt(nowMs);
+  const dates = core.G.trendDates(today);
+  const existing = await store.getMany('daily_sets', dates);
+  const cache = await store.getMany('group_daily', dates.map((d) => `${groupRef}_${d}`));
+  const lookup = {};
+  for (const dk of dates) {
+    if (!existing.has(dk)) {
+      lookup[dk] = null;
+      continue;
+    }
+    const closed = core.W.dayClosed(dk, nowMs);
+    const hit = cache.get(`${groupRef}_${dk}`);
+    if (closed && hit) {
+      lookup[dk] = { mq: hit.mq, n: hit.n };
+      continue;
+    }
+    const list = (dk === dateKey ? members : await groups.completeMembers(openid, groupRef, dk)).map
+    ((m) => m.pos);
+    lookup[dk] = { mq: core.G.groupMq(list), n: list.length };
+    if (closed) {
+      const divisive = core.G.groupDivisiveIdx(list);
+      await store.addIfAbsent('group_daily', { _id: `${groupRef}_${dk}`, n: list.length, mq: lookup[
+    dk].mq, divisiveIdx: divisive, computedAt: nowMs });
+    }
+  }
+  const trend = core.G.buildTrend(today, (dk) => lookup[dk] || null);
+  // rounds that carry this group's ref (newest first, <= 10)
+  const gs = await store.coll('guesses').where({ groupRef }).orderBy('ts', 'desc').limit(GUESS_SCAN)
+    .get();
+  const roundIds = Array.from(new Set(gs.data.map((g) => g.roundId)));
+
+群友刻度盘 V1.0.0 源程序                                       第 48 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  const roundDocs = await store.getMany('rounds', roundIds);
+  // PD-37: the rounds list carries only a curated preset clue text (U.publicClueText); a typed clue
+     is never public text
+  const rounds = roundIds
+    .map((id) => roundDocs.get(id))
+    .filter(Boolean)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, CONFIG.group.roundsListCap)
+    .map((r) => ({ roundId: r._id, left: r.left, right: r.right, clue: core.U.publicClueText(r), sta
+    tus: r.status, mq: r.status === 'revealed' ? r.mq : null, guesses: r.guessCount }));
+  const out = core.SV.groupDayView({ set, hists, members, viewerOpenid: openid, viewerDone, hashFn: 
+    rowHash, trend, rounds, nowMs });
+  await store.writeSampled('board_list', { view: 'group', mode: out.viewerDone ? 'full' : 'locked', 
+    rows: out.rows.length, bytes: JSON.stringify(out).length, ms: now() - started }, CONFIG.caps.boa
+    rdEventEvery);
+  return out;
+}, { rate: rateOf('getGroupDay') });
+'use strict';
+// getRound: a round as the caller may see it (spec 8.4, 11.2, AC 26, 30). Lazy 24 h / 30 min transi
+    tions run first.
+// A non-host never receives `target` before the reveal (core/service roundView).
+// L4: on a revealed round the answer is served by default only to the host, to a player who has gue
+    ssed, and to
+// everyone once guessing is closed. Anyone else who could still place a late guess gets `answerHidd
+    en` until they ask
+// (`showAnswer: true`); asking is recorded in `reveal_views`, after which submitGuess refuses them 
+    (ROUND_EXPIRED).
+const store = require('./common/store');
+const { fail, now, rowHash } = require('./common/util');
+const { core, rateOf } = require('./common/coreapi');
+const roundsDb = require('./common/rounds-db');
+const groups = require('./common/groups');
+const players = require('./common/players');
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.getRound(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const round = await roundsDb.loadRound(v.v.roundId);
+  if (!round) fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+  const nowMs = now();
+  const mine = await store.getDoc('guesses', `${round._id}_${openid}`);
+  let withhold = false;
+  if (round.status === 'revealed') {
+    const isHost = round.hostOpenid === openid;
+    let served = core.R.revealServedByDefault(round, { isHost, hasGuess: !!mine, nowMs });
+    if (!served) {
+      const viewId = `${round._id}_${openid}`;
+      if (v.v.showAnswer) {
+        await store.addIfAbsent('reveal_views', { _id: viewId, roundId: round._id, openid, ts: nowMs
+     });
+        served = true;
+
+群友刻度盘 V1.0.0 源程序                                       第 49 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+      } else {
+        served = !!(await store.getDoc('reveal_views', viewId));
+      }
+    }
+    withhold = !served;
+  }
+  const guesses = round.status === 'revealed' && !withhold ? await roundsDb.guessesOf(round._id) : [
+    ];
+  // D-2: the typed clue as THIS viewer may see it (hidden / paused -> text null), their report stat
+    e, rules, restriction, warning
+  const flags = await groups.ugcFlags();
+  const player = await players.read(openid);
+  const hasReport = round.clueMode === 'text' ? !!(await store.getDoc('clue_reports', `${round._id}_
+    ${openid}`)) : false;
+  // the warning belongs to the clue step: only the host's own view carries (and consumes) it
+  const strikeNotice = round.hostOpenid === openid && !!(player && player.warnPending === true);
+  const out = core.SV.roundView({ round, viewerOpenid: openid, myGuess: mine, guesses, hashFn: rowHa
+    sh, nowMs, withhold, ugc: { flags, player, hasReport, strikeNotice } });
+  if (!out.ok) fail(out.code, out.code);
+  // the one-time strike warning is read once
+  if (strikeNotice) await players.mutate(openid, (p) => ({ player: { ...p, warnPending: false, updat
+    edAt: nowMs }, result: true }));
+  return out;
+}, { rate: rateOf('getRound') });
+'use strict';
+// joinGroup: group context from the cloudID of wx.getGroupEnterInfo (spec 8.1, 11.2).
+// M1: the client sends the RAW cloudID string and the SERVER resolves it with cloud.getOpenData({ l
+    ist: [cloudID] })
+// (wx-server-sdk; https://developers.weixin.qq.com/minigame/dev/wxcloud/reference-sdk-api/open/Clou
+    d.getOpenData.html).
+// Nothing the client could have shaped is trusted: `event.groupData` / any decrypted-looking object
+     is never read, so a
+// modified client cannot join a group whose openGId it merely knows. No platform secret is needed. 
+    Returns an opaque
+// groupRef; never an openid or openGId. wx.getShareInfo is never used.
+const store = require('./common/store');
+const { fail, now, groupRefOf, isPlainObject } = require('./common/util');
+const { core, dateKeyAt, rateOf } = require('./common/coreapi');
+const GROUP_CHAT_TYPES = [3, 4]; // 3 group chat, 4 WeCom-interop group
+const PEPPER_MIN = 32; // L5
+function pepper() {
+  const p = process.env.GROUP_REF_PEPPER;
+  if (typeof p !== 'string' || p.length < PEPPER_MIN) fail('SERVER_CONFIG', 'GROUP_REF_PEPPER not co
+    nfigured (>= ' + PEPPER_MIN + ' characters)');
+  return p;
+}
+/**
+ * The decrypted payload of one getOpenData list item, or null. Studio standard (same in every app):
+     the SDK reference
+ * lists `{cloudID, data}`, so `data` must be a plain object; a truthy `errCode` (defensive: the doc
+
+群友刻度盘 V1.0.0 源程序                                       第 50 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    s list none) or a
+ * foreign cloudID makes it null.
+ */
+function payloadOf(item, cloudID) {
+  if (!isPlainObject(item)) return null;
+  if (item.errCode || item.errcode) return null;
+  if (item.cloudID !== undefined && item.cloudID !== cloudID) return null;
+  return isPlainObject(item.data) ? item.data : null;
+}
+/**
+ * {openGId} of a group payload, else {code}. CTO ruling (studio-wide): the documented payload may n
+    ot carry
+ * `chat_type` at all, so it may be ABSENT; when present it must be 3 or 4. `opengid` must be a non-
+    empty string of
+ * <= 128 chars; a payload with `open_single_roomid` and no `opengid` (a single chat) is NOT_GROUP.
+ */
+function groupOf(data) {
+  if (!data) return { code: 'BAD_CLOUDID' };
+  const ct = data.chat_type;
+  const chatType = ct === undefined ? undefined : typeof ct === 'number' ? ct : typeof ct === 'strin
+    g' && /^\d+$/.test(ct) ? Number(ct) : NaN;
+  const g = data.opengid;
+  if (typeof g !== 'string' || g.length < 1 || g.length > 128) return { code: 'NOT_GROUP' };
+  if (chatType !== undefined && !GROUP_CHAT_TYPES.includes(chatType)) return { code: 'NOT_GROUP' };
+  return { openGId: g };
+}
+async function resolveCloudId(cloudID) {
+  const api = store.cloud && store.cloud.getOpenData;
+  if (typeof api !== 'function') fail('SERVER_CONFIG', 'cloud.getOpenData unavailable');
+  let res;
+  try {
+    res = await store.cloud.getOpenData({ list: [cloudID] });
+  } catch (e) {
+    fail('BAD_CLOUDID', 'cloudID could not be resolved');
+  }
+  const list = res && Array.isArray(res.list) ? res.list : [];
+  return list.length === 1 ? payloadOf(list[0], cloudID) : null;
+}
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.joinGroup(event);
+  if (!v.ok) fail('BAD_CLOUDID', 'cloudID missing');
+  const g = groupOf(await resolveCloudId(v.v.cloudID));
+  if (!g.openGId) fail(g.code, g.code === 'NOT_GROUP' ? 'not a group chat' : 'cloudID invalid or exp
+    ired');
+  const openGId = g.openGId;
+  const groupRef = groupRefOf(openGId, pepper());
+  const dateKey = dateKeyAt(now());
+  const id = `${openGId}_${openid}`;
+  // upsert with a deterministic _id: add first, on duplicate refresh lastSeen
+  const created = await store.addIfAbsent('group_members', { _id: id, openGId, openid, groupRef, fir
+
+群友刻度盘 V1.0.0 源程序                                       第 51 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    stSeen: dateKey, lastSeen: dateKey });
+  if (!created) await store.updateDoc('group_members', id, { lastSeen: dateKey, groupRef });
+  return { ok: true, groupRef };
+}, { rate: rateOf('joinGroup') });
+exports.payloadOf = payloadOf;
+exports.groupOf = groupOf;
+'use strict';
+// reportCard: a player flags a card as unsuitable / ambiguous / a typo (spec 11.2, AC 79). Stores i
+    ds only, never text;
+// grants nothing.
+const store = require('./common/store');
+const { fail, now } = require('./common/util');
+const { core, CONFIG, content, dateKeyAt, rateOf } = require('./common/coreapi');
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.reportCard(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  if (!content().itemIndex[v.v.itemId]) fail('INVALID_INPUT', 'unknown item');
+  await store.dayLimit(openid, 'report', CONFIG.limits.reportPerDay, dateKeyAt(now()));
+  await store.coll('card_reports').add({ data: { openid, dateKey: v.v.dateKey, itemId: v.v.itemId, r
+    eason: v.v.reason, ts: now() } });
+  return { ok: true };
+}, { rate: rateOf('reportCard') });
+'use strict';
+// reportClue: 举报 a shown typed clue (spec 11.2, 11.7, D-2, AC 91). The clue is hidden for EVERYONE 
+    at once (the host
+// included), in the same transaction that stores the report. No free text: five fixed reasons. The 
+    reporter is never
+// revealed: nothing returned or stored on the round names them (the report row is admin-only). Stri
+    kes come later, from
+// `admin upholdReport`. One report per player per round (DUP_REPORT), 10 a day per player (REPORT_L
+    IMIT).
+const store = require('./common/store');
+const { fail, now } = require('./common/util');
+const { core, CONFIG, rateOf, dateKeyAt } = require('./common/coreapi');
+const roundsDb = require('./common/rounds-db');
+const groups = require('./common/groups');
+function failGate(g) {
+  const { ok, code, ...extra } = g;
+  fail(code, code, extra);
+}
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.reportClue(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const { roundId, reason } = v.v;
+  const fl = await groups.ugcFlags();
+  const round = await roundsDb.loadRound(roundId);
+  const gate = core.U.reportGate(round, openid, fl);
+  if (!gate.ok) failGate(gate);
+  const rid = `${roundId}_${openid}`;
+  if (await store.getDoc('clue_reports', rid)) fail('DUP_REPORT', 'DUP_REPORT');
+
+群友刻度盘 V1.0.0 源程序                                       第 52 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  await store.dayLimit(openid, 'clueReport', CONFIG.limits.clueReportsPerDay, dateKeyAt(now()), 'REP
+    ORT_LIMIT');
+  let out = null;
+  await store.db().runTransaction(async (t) => {
+    out = null;
+    const cur = await store.getDocT(t, 'rounds', roundId);
+    const g = core.U.reportGate(cur, openid, fl);
+    if (!g.ok) {
+      out = g;
+      return;
+    }
+    if (await store.getDocT(t, 'clue_reports', rid)) {
+      out = { ok: false, code: 'DUP_REPORT' };
+      return;
+    }
+    await store.collT(t, 'clue_reports').add({ data: { _id: rid, roundId, openid, reason, state: 'op
+    en', ts: now() } });
+    if (!g.alreadyHidden) {
+      const h = core.U.hideClue(cur, 'report', now());
+      await store.collT(t, 'rounds').doc(roundId).update({ data: { clueHidden: true, clueHiddenAt: h
+    .clueHiddenAt, clueHiddenBy: 'report' } });
+    }
+    out = { ok: true };
+  });
+  if (!out.ok) failGate(out);
+  return { ok: true, hidden: true };
+}, { rate: rateOf('reportClue') });
+'use strict';
+// revealRound: the host reveals (spec 11.2, AC 32, 33). core/rounds hostRevealCheck decides; the fl
+    ip itself is the
+// shared idempotent reveal (rounds-db), so a host tap racing the 8th guess or the sweep yields one 
+    reveal and one
+// message per subscribe grant (AC 63).
+const store = require('./common/store');
+const { fail, rowHash } = require('./common/util');
+const { core, rateOf } = require('./common/coreapi');
+const roundsDb = require('./common/rounds-db');
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.revealRound(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const round = await roundsDb.loadRound(v.v.roundId);
+  if (!round) fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+  const chk = core.R.hostRevealCheck(round, { isHost: round.hostOpenid === openid });
+  if (!chk.ok) fail(chk.code, chk.code);
+  let next = round;
+  let guesses;
+  if (chk.already) {
+    guesses = await roundsDb.guessesOf(round._id);
+  } else {
+    const x = await roundsDb.revealRound(round, 'host');
+
+群友刻度盘 V1.0.0 源程序                                       第 53 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    next = x.round || round;
+    guesses = x.guesses;
+  }
+  return { ok: true, reveal: core.SV.revealOf(next, { viewerOpenid: openid, guesses, hashFn: rowHash
+     }) };
+}, { rate: rateOf('revealRound') });
+'use strict';
+// setClue: the host sets the clue and the round opens (spec 11.2, 11.6, D-2, AC 28, 87-90, 94, 98, 
+    99).
+//   preset: clueItemId must belong to the round's spectrum; the curated text is copied from content
+    .
+//   text  : the host's own words. Order: host -> state -> hidden -> identical text -> UGC_PAUSED ->
+     RULES_REQUIRED ->
+//           RESTRICTED -> local rules (TEXT_REJECTED, no WeChat call, no strike) -> 50 checks a day
+     (RATE_LIMITED scope day)
+//           -> WeChat text check. pass: stored and the round opens. risky: TEXT_BLOCKED + a strike.
+     general-API review:
+//           TEXT_BLOCKED, no strike. ANYTHING else: MODERATION_BUSY. A non-pass leaves the round do
+    cument untouched.
+//   'chat' (我在群里说) is gone: INVALID_INPUT.
+// Nobody but the author sees the text until the check returned `pass`: it is written to the round o
+    nly after that, in the
+// same transaction that re-checks the round (a guess, a discard or a second call landing meanwhile 
+    wins cleanly).
+const store = require('./common/store');
+const { fail, now } = require('./common/util');
+const { core, content, rateOf, dateKeyAt } = require('./common/coreapi');
+const roundsDb = require('./common/rounds-db');
+const groups = require('./common/groups');
+const players = require('./common/players');
+const modio = require('./common/modio');
+const env = require('./common/env');
+function failGate(g) {
+  const { ok, code, ...extra } = g;
+  fail(code, code, extra);
+}
+async function presetClue(v, openid) {
+  if (!(await roundsDb.loadRound(v.roundId))) fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+  let res = null;
+  await store.db().runTransaction(async (t) => {
+    res = null;
+    const round = await store.getDocT(t, 'rounds', v.roundId);
+    if (!round) {
+      res = { ok: false, code: 'ROUND_NOT_FOUND' };
+      return;
+    }
+    res = core.SV.applyClue(round, round.hostOpenid === openid, { ...v, nowMs: now() }, content(roun
+    d.contentVersion));
+    if (!res.ok) return;
+    await store.collT(t, 'rounds').doc(round._id).update({ data: { status: 'open', clueMode: 'preset
+
+群友刻度盘 V1.0.0 源程序                                       第 54 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+    ', clueItemId: res.round.clueItemId, clueText: res.round.clueText } });
+  });
+  if (!res.ok) fail(res.code, res.code);
+  return { ok: true, status: 'open', clueMode: 'preset', clueText: res.round.clueText };
+}
+async function textClue(v, openid) {
+  env.ugcGuard(); // mock moderation in production refuses every typed-clue call
+  const round = await roundsDb.loadRound(v.roundId);
+  if (!round) fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+  const fl = await groups.ugcFlags();
+  const player = await players.read(openid);
+  const gate = core.U.textGate({ round, isHost: round.hostOpenid === openid, rawText: v.clueText, fl
+    , player, nowMs: now() });
+  if (!gate.ok) failGate(gate);
+  if (gate.same) return { ok: true, status: 'open', clueMode: 'text', clueText: round.clueText };
+  // probing guard: 50 WeChat checks a user and Beijing day (local rejections never get here)
+  const dk = dateKeyAt(now());
+  const take = await players.mutate(openid, (p) => {
+    const r = core.U.takeCheck(p, dk);
+    return r.ok ? { player: { ...p, clueChecks: r.clueChecks, updatedAt: now() }, result: true } : {
+     player: p, result: false };
+  });
+  if (!take) fail('RATE_LIMITED', 'rate limited', { scope: 'day' });
+  const chk = await modio.checkText({ openid, text: gate.text, roundId: round._id });
+  if (!chk.ok) {
+    if (chk.strike) await players.strike(openid, 'risky');
+    fail(chk.code, chk.code);
+  }
+  // commit: re-read the round inside the transaction and decide again on the fresh document (L1)
+  let out = null;
+  await store.db().runTransaction(async (t) => {
+    out = null;
+    const cur = await store.getDocT(t, 'rounds', round._id);
+    const g = core.U.textGate({ round: cur, isHost: !!cur && cur.hostOpenid === openid, rawText: v.c
+    lueText, fl, player, nowMs: now() });
+    if (!g.ok) {
+      out = g;
+      return;
+    }
+    if (g.same) {
+      out = { ok: true };
+      return;
+    }
+    const next = core.U.applyTextClue(cur, gate.text, chk.mod, now());
+    await store.collT(t, 'rounds').doc(cur._id).update({ data: { status: 'open', clueMode: 'text', c
+    lueItemId: null, clueText: next.clueText, clueMod: next.clueMod } });
+    out = { ok: true };
+  });
+  if (!out.ok) failGate(out);
+  return { ok: true, status: 'open', clueMode: 'text', clueText: gate.text };
+
+群友刻度盘 V1.0.0 源程序                                       第 55 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+}
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.setClue(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  return v.v.clueMode === 'text' ? textClue(v.v, openid) : presetClue(v.v, openid);
+}, { rate: rateOf('setClue') });
+'use strict';
+// submitCard: the one scoring write of the daily (spec 11.2, AC 15, 20). Server clock only. The ent
+    ry write, the
+// histogram increment and (on the 5th card) the streak update commit in one transaction, so a card 
+    counts exactly
+// once even for parallel identical calls. All decisions are core/service applySubmit / cardReveal /
+     completionBlock.
+const store = require('./common/store');
+const { fail, now } = require('./common/util');
+const { core, rateOf } = require('./common/coreapi');
+const daily = require('./common/daily');
+const groups = require('./common/groups');
+const strip = (doc) => {
+  const { _id, ...rest } = doc;
+  return rest;
+};
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.submitCard(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const { dateKey, idx, pos, groupRef } = v.v;
+  const nowMs = now();
+  const set = await daily.ensureSet(dateKey);
+  const member = groupRef ? await groups.isMember(openid, groupRef) : false;
+  // only the 5th card can complete the day (order is enforced), so the previous published day is ne
+    eded only then
+  const prev = set && idx === 4 ? await daily.prevPublished(dateKey) : null;
+  const entryId = `${dateKey}_${openid}`;
+  const _ = store._();
+  let plan = null;
+  let stats = null;
+  let streakOut = null;
+  await store.db().runTransaction(async (t) => {
+    plan = null;
+    stats = null;
+    streakOut = null;
+    const entry = await store.getDocT(t, 'daily_entries', entryId);
+    const p = core.SV.applySubmit({ set, entry, dateKey, idx, pos, nowMs, openid });
+    plan = { p, entry };
+    if (!p.ok) return;
+    let next = p.entry;
+    if (p.complete) {
+      const ps = await store.getDocT(t, 'player_stats', openid);
+      const r = core.ST.onComplete(ps, dateKey, prev ? prev._id : null);
+      stats = { ...r.stats, updatedAt: nowMs };
+
+群友刻度盘 V1.0.0 源程序                                       第 56 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+      streakOut = { current: r.stats.curStreak, best: r.stats.bestStreak };
+      next = { ...next, streak: r.streak };
+      plan.p = { ...p, entry: next };
+      // D-2: player_stats also holds the UGC state (rules, strikes, restriction): update the streak
+     fields, never replace the document
+      if (ps) await store.collT(t, 'player_stats').doc(openid).update({ data: stats });
+      else await store.collT(t, 'player_stats').doc(openid).set({ data: stats });
+    }
+    if (p.first) await store.collT(t, 'daily_entries').add({ data: next });
+    else await store.collT(t, 'daily_entries').doc(entryId).set({ data: strip(next) });
+    await store.collT(t, 'daily_card_stats').doc(`${dateKey}_${idx}`).update({ data: { [`hist.${pos}
+    `]: _.inc(1), n: _.inc(1) } });
+  });
+  const p = plan.p;
+  if (!p.ok) {
+    if (p.code === 'CARD_DONE') {
+      const hists = await daily.loadHists(dateKey);
+      const b = member ? await groups.groupBlocks(openid, groupRef, dateKey, plan.entry) : null;
+      const reveal = core.SV.cardReveal({ set, hists, idx, pos: plan.entry.pos[idx], group: b ? b[id
+    x] : null, nowMs });
+      fail('CARD_DONE', 'already answered', { reveal });
+    }
+    fail(p.code, p.code);
+  }
+  // best effort, never changes the answer (AC 82)
+  if (p.fast) {
+    await store.addIfAbsent('anomalies', { _id: `${openid}_${dateKey}_fast`, kind: 'fast', detail: {
+     ms: p.entry.completeAt - p.entry.firstAt }, ts: nowMs }).catch(() => {});
+  }
+  const hists = await daily.loadHists(dateKey); // includes this answer
+  const b = member ? await groups.groupBlocks(openid, groupRef, dateKey, p.entry) : null;
+  const reveal = core.SV.cardReveal({ set, hists, idx, pos, group: b ? b[idx] : null, nowMs });
+  const out = { ok: true, dateKey, ...reveal, complete: p.complete };
+  if (p.complete) Object.assign(out, core.SV.completionBlock({ set, hists, entry: p.entry, nowMs }),
+     { streak: streakOut });
+  return out;
+}, { rate: rateOf('submitCard') });
+'use strict';
+// submitGuess: one guess per player per round (spec 11.2, AC 30-34). The guess, the on-time counter
+     and the group tag
+// commit in one transaction against the round as that transaction reads it. The 8th on-time guess t
+    hen reveals
+// through the single idempotent reveal path (one winner under concurrency, AC 32). A guess on an al
+    ready revealed round
+// is stored `late` and never changes mq.
+const store = require('./common/store');
+const { fail, now, rowHash } = require('./common/util');
+const { core, rateOf } = require('./common/coreapi');
+const roundsDb = require('./common/rounds-db');
+const groups = require('./common/groups');
+
+群友刻度盘 V1.0.0 源程序                                       第 57 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.submitGuess(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const { roundId, pos, groupRef } = v.v;
+  if (!(await roundsDb.loadRound(roundId))) fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+  const useRef = groupRef && (await groups.isMember(openid, groupRef)) ? groupRef : null;
+  const _ = store._();
+  const gid = `${roundId}_${openid}`;
+  let res = null;
+  await store.db().runTransaction(async (t) => {
+    res = null;
+    const round = await store.getDocT(t, 'rounds', roundId);
+    const existing = round ? await store.getDocT(t, 'guesses', gid) : null;
+    if (!round) {
+      res = { ok: false, code: 'ROUND_NOT_FOUND' };
+      return;
+    }
+    const chk = core.R.guessCheck(round, { isHost: round.hostOpenid === openid, hasGuessed: !!existi
+    ng, pos, nowMs: now() });
+    if (!chk.ok) {
+      res = chk;
+      return;
+    }
+    // L4: a player who has already been served the answer of a revealed round cannot "guess" it any
+     more
+    if (round.status === 'revealed' && (await store.getDocT(t, 'reveal_views', gid))) {
+      res = { ok: false, code: 'ROUND_EXPIRED' };
+      return;
+    }
+    await store.collT(t, 'guesses').add({ data: { _id: gid, roundId, openid, pos, ts: now(), late: c
+    hk.late, groupRef: useRef } });
+    const upd = {};
+    const refs = core.R.appendGroupRef(round.groupRefs || [], useRef);
+    if (refs !== (round.groupRefs || [])) upd.groupRefs = refs;
+    if (!chk.late) upd.guessCount = _.inc(1);
+    if (Object.keys(upd).length) await store.collT(t, 'rounds').doc(roundId).update({ data: upd });
+    res = { ok: true, late: chk.late, guessCount: round.guessCount + (chk.late ? 0 : 1), status: rou
+    nd.status };
+  });
+  if (!res.ok) fail(res.code, res.code);
+  let round = await store.getDoc('rounds', roundId);
+  if (!res.late && core.R.revealsOnGuess(res.guessCount) && round.status !== 'revealed') {
+    const x = await roundsDb.revealRound(round, 'count');
+    if (x.round) round = x.round;
+  }
+  const out = { ok: true, late: res.late, guessCount: round.guessCount, revealed: round.status === '
+    revealed' };
+  if (round.status === 'revealed') {
+    const guesses = await roundsDb.guessesOf(roundId);
+    out.reveal = core.SV.revealOf(round, { viewerOpenid: openid, guesses, hashFn: rowHash });
+
+群友刻度盘 V1.0.0 源程序                                       第 58 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  }
+  return out;
+}, { rate: rateOf('submitGuess') });
+'use strict';
+// subscribeRound: store one opt-in grant for the reveal message (spec 7.4, TD-13). Only the host or
+     a guesser may
+// subscribe; a round that is no longer open has nothing left to notify.
+const store = require('./common/store');
+const { fail, now } = require('./common/util');
+const { core, rateOf } = require('./common/coreapi');
+const roundsDb = require('./common/rounds-db');
+const groups = require('./common/groups');
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.subscribeRound(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const feat = core.AD.buildFeatures(await groups.appConfig());
+  if (!feat.subscribe) fail('NO_TEMPLATE', 'NO_TEMPLATE');
+  const round = await roundsDb.loadRound(v.v.roundId);
+  if (!round || round.status === 'draft') fail('ROUND_NOT_FOUND', 'ROUND_NOT_FOUND');
+  const guessed = round.hostOpenid === openid ? true : !!(await store.getDoc('guesses', `${round._id
+    }_${openid}`));
+  if (!guessed) fail('FORBIDDEN', 'FORBIDDEN');
+  if (round.status !== 'open') return { ok: true, granted: false };
+  await store.addIfAbsent('sub_grants', { _id: `${round._id}_${openid}`, roundId: round._id, openid,
+     tmplId: feat.subscribe.tmplId, grantedAt: now(), used: false });
+  return { ok: true, granted: true };
+}, { rate: rateOf('subscribeRound') });
+'use strict';
+// sweepRounds (timer, hourly): apply the lazy transitions to rounds nobody has opened (stale drafts
+     are discarded,
+// 24 h rounds reveal by 'timer' or become noGuesses) and send subscribe messages the in-request bud
+    get did not
+// reach. Idempotent.
+const store = require('./common/store');
+const { now } = require('./common/util');
+const roundsDb = require('./common/rounds-db');
+const modio = require('./common/modio');
+const { core, CONFIG } = require('./common/coreapi');
+const BATCH = 200;
+const BUDGET_MS = 40000;
+exports.main = store.handler(async () => {
+  const t0 = now();
+  const _ = store._();
+  const r = await store.coll('rounds').where({ status: _.in(['draft', 'open']) }).orderBy('createdAt
+    ', 'asc').limit(BATCH).get();
+  let changed = 0;
+  for (const round of r.data) {
+    if (now() - t0 > BUDGET_MS) break;
+    const after = await roundsDb.loadRound(round._id);
+    if (!after || after.status !== round.status) changed++;
+
+群友刻度盘 V1.0.0 源程序                                       第 59 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+  }
+  // grants left unsent (budget ran out, or a send failed before being claimed)
+  let sent = 0;
+  const pending = await store.coll('sub_grants').where({ used: false }).orderBy('grantedAt', 'asc').
+    limit(BATCH).get();
+  const ids = Array.from(new Set(pending.data.map((g) => g.roundId)));
+  const rounds = await store.getMany('rounds', ids);
+  for (const id of ids) {
+    const round = rounds.get(id);
+    if (round && round.status === 'revealed' && now() - t0 < BUDGET_MS) sent += await roundsDb.sendG
+    rants(round, 5000);
+  }
+  // D-2 (spec 11.2): alert-only watchdogs, the founder greps the log for [ALERT]. Neither changes a
+    ny state.
+  const alerts = await ugcAlerts(t0);
+  return { ok: true, changed, sent, alerts };
+}, { auth: false, serverOnly: true });
+/**
+ * [ALERT] clue report open > 48 h (a report hides the clue at once, so a slow queue only delays res
+    tores and strikes) and
+ * [ALERT] moderation busy when >= 50% of >= 20 text checks in the last hour were busy (alert only, 
+    no automatic pause).
+ */
+async function ugcAlerts(t0) {
+  const _ = store._();
+  const out = { staleReports: 0, busy: false };
+  try {
+    const stale = await store.coll('clue_reports').where({ state: 'open', ts: _.lt(t0 - CONFIG.ugc.s
+    taleReportAlertMs) }).limit(100).get();
+    out.staleReports = stale.data.length;
+    if (out.staleReports) modio.alert('clue report open > 48 h: ' + out.staleReports + ' report(s); 
+    run admin listReports (Handoff H16)');
+    const win = await modio.busyWindow(CONFIG.ugc.busyAlert.windowMs);
+    out.busy = core.MOD.busyAlert(win);
+    if (out.busy) modio.alert('moderation busy: ' + win.busy + ' of ' + win.total + ' typed-clue che
+    cks in the last hour; consider admin setModeration {textApi:"general"} or setUgc {createEnabled:
+    false}');
+  } catch (e) {
+    console.warn('ugc alerts failed', store.errText(e));
+  }
+  return out;
+}
+'use strict';
+// track: batched analytics (spec 12, AC 77). <= 50 events per call, rate limited per openid (30 cal
+    ls and 300 events a
+// minute). Identity is the context OPENID. Unknown event names are dropped (the batch never fails).
+// L2: props are an ALLOWLIST per event: only the keys core/events.js EVENTS[name] lists (plus COMMO
+    N), each checked for
+// its type or enum (core/events.js sanitizeProps); every other key is dropped, so a modified client
+     cannot store free
+
+群友刻度盘 V1.0.0 源程序                                       第 60 页 / 共 60 页
+----------------------------------------------------------------------------------------------------
+// text, identifiers or oversized values. The event itself is still stored without the rejected keys
+    .
+const store = require('./common/store');
+const { fail, now, isPlainObject, isInt } = require('./common/util');
+const { core, rateOf } = require('./common/coreapi');
+const EVENTS_PER_MIN = 300;
+const MAX_PROPS_BYTES = 1024;
+const CLIENT_EVENTS = new Set(core.EV.CLIENT_EVENT_NAMES);
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.track(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const list = v.v.events;
+  await store.rateLimit(openid, 'track', list.length, EVENTS_PER_MIN);
+  const ts = now();
+  const docs = [];
+  for (const e of list) {
+    if (!isPlainObject(e) || typeof e.name !== 'string' || !CLIENT_EVENTS.has(e.name)) continue;
+    const raw = isPlainObject(e.props) ? e.props : {};
+    const props = core.EV.sanitizeProps(e.name, raw);
+    const rawSession = e.sessionId !== undefined ? e.sessionId : v.v.sessionId !== null ? v.v.sessio
+    nId : raw.sessionId;
+    if (JSON.stringify(props).length > MAX_PROPS_BYTES) continue;
+    const sessionId = typeof rawSession === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(rawSession) ? r
+    awSession : null;
+    docs.push({ openid, sessionId, name: e.name, props, ts, clientTs: isInt(e.clientTs, 0, 410244480
+    0000) ? e.clientTs : null });
+  }
+  await Promise.all(docs.map((data) => store.coll('events').add({ data })));
+  return { ok: true, accepted: docs.length };
+}, { rate: rateOf('track') });
+'use strict';
+// unlockDistribution: centred 21-bin national histograms of a day (spec 11.2, AC 40). The unlock it
+    self is client
+// state; the server stores only the rate counter. Limit 20 per Beijing day (TD-8).
+const store = require('./common/store');
+const { fail, now } = require('./common/util');
+const { core, CONFIG, dateKeyAt, rateOf } = require('./common/coreapi');
+const daily = require('./common/daily');
+exports.main = store.handler(async (event, { openid }) => {
+  const v = core.V.unlockDistribution(event);
+  if (!v.ok) fail('INVALID_INPUT', 'invalid input');
+  const nowMs = now();
+  const today = dateKeyAt(nowMs);
+  const set = await store.getDoc('daily_sets', v.v.dateKey);
+  if (!set || v.v.dateKey > today) fail('INVALID_INPUT', 'unknown day');
+  await store.dayLimit(openid, 'dist', CONFIG.limits.distributionPerDay, today);
+  const [entry, hists] = await Promise.all([store.getDoc('daily_entries', `${set._id}_${openid}`), d
+    aily.loadHists(set._id)]);
+  return { ok: true, dateKey: set._id, hist: core.SV.distributionView(set, entry, hists, nowMs) };
+}, { rate: rateOf('unlockDistribution') });

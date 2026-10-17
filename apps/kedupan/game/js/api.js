@@ -1,0 +1,73 @@
+/**
+ * Cloud function wrapper (spec 11). Every call returns a Promise that RESOLVES to the function's result
+ * ({ok:true,...}) or to {ok:false, code, message}; it never rejects, so callers branch on `ok`.
+ *
+ * Modes: 'cloud' (wx.cloud.callFunction) or 'mock' (js/mock-server.js, in memory, same contracts).
+ * The mock is the default until the founder supplies the AppID and the cloud env id (H1, H6).
+ * Identity is never sent: the server reads OPENID from the call context.
+ * Client-side codes (not from the server): TIMEOUT, NETWORK, BAD_RESPONSE.
+ */
+
+const { CLIENT_FUNCTIONS } = require('./functions');
+
+const NAMES = CLIENT_FUNCTIONS;
+
+/** One table: logical function name -> deployed cloud function name (`fnPrefix + name`, TD-41). */
+function buildNameTable(prefix) {
+  const t = {};
+  CLIENT_FUNCTIONS.forEach((n) => {
+    t[n] = (prefix || '') + n;
+  });
+  return t;
+}
+// ms; submitCard / createRound / setClue / submitGuess are the 5 s calls of the spec (6.2, 6.5, 6.7)
+const TIMEOUT_MS = { submitCard: 5000, createRound: 5000, setClue: 5000, agreeRules: 5000, reportClue: 5000, submitGuess: 5000, revealRound: 5000, getDaily: 10000, getGroupDay: 8000, getFriendBoard: 8000, track: 6000 };
+
+function createApi(opts) {
+  opts = opts || {};
+  const wx = opts.wx;
+  const mode = opts.mode || 'mock';
+  const now = opts.now || (() => Date.now());
+  const setTimer = opts.setTimeout || setTimeout;
+  const clearTimer = opts.clearTimeout || clearTimeout;
+  // the mock is required only here, on the mock branch: a cloud build never loads js/mock-server.js (QA-6)
+  const mock = mode === 'mock' ? opts.mockServer || require('./mock-server').createMockServer({ now, content: opts.content }) : null;
+  const fnNames = buildNameTable(opts.fnPrefix);
+  const api = { mode, mock, fnNames };
+
+  if (mode === 'cloud' && wx && wx.cloud && wx.cloud.init) {
+    wx.cloud.init({ env: opts.env, traceUser: false });
+  }
+
+  function call(name, data) {
+    if (mode === 'mock') return Promise.resolve(mock.call(name, data));
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (r) => {
+        if (settled) return;
+        settled = true;
+        clearTimer(timer);
+        resolve(r);
+      };
+      const timer = setTimer(() => done({ ok: false, code: 'TIMEOUT', message: 'timeout' }), TIMEOUT_MS[name] || 8000);
+      try {
+        wx.cloud.callFunction({
+          name: fnNames[name],
+          data,
+          success: (res) => done(res && res.result && typeof res.result === 'object' ? res.result : { ok: false, code: 'BAD_RESPONSE' }),
+          fail: (e) => done({ ok: false, code: 'NETWORK', message: (e && e.errMsg) || 'network' }),
+        });
+      } catch (e) {
+        done({ ok: false, code: 'NETWORK', message: String(e && e.message) });
+      }
+    });
+  }
+
+  NAMES.forEach((n) => {
+    api[n] = (data) => call(n, data || {});
+  });
+  api.NAMES = NAMES;
+  return api;
+}
+
+module.exports = { createApi, buildNameTable, NAMES, TIMEOUT_MS };

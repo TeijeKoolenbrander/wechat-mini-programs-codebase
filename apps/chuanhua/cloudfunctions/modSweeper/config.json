@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "openapi": [
+      "security.mediaCheckAsync",
+      "subscribeMessage.send",
+      "updatableMessage.setUpdatableMsg"
+    ]
+  },
+  "triggers": [
+    {
+      "name": "chuanhua_modSweeper_timer",
+      "type": "timer",
+      "config": "0 */5 * * * * *"
+    }
+  ]
+}

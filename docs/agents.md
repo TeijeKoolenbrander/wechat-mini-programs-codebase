@@ -70,6 +70,7 @@ Defines what gets built.
 - Writes specs for mini programs and game design docs for mini games: core loop, session length, social hooks, ad placement.
 - Follows WeChat design conventions (WeUI, the 小程序设计指南) and keeps the MVP small.
 - Flags compliance-sensitive features such as user data, payments, user-generated content, and virtual currency.
+- Writes the registration copy (name and fallbacks, 简介, short name) for the registration pack at the start of each app (constitution Article 4.4).
 - **Output:** `docs/<app>/spec.md` with ASCII wireframes and numbered acceptance criteria that QA tests against.
 
 ### frontend-ui: Frontend UI engineer
@@ -107,6 +108,7 @@ Verifies the work independently.
 
 ### release: Release engineer
 Gets builds onto the platform safely.
+- **Registration pack first** (constitution Article 4.4): as soon as an app is approved, writes `docs/<app>/release/registration/` (name with 3+ fallbacks, 简介, short name, 服务类目, avatar PNG/JPG, registration steps), with `product-ux` supplying the copy, and keeps it up to date.
 - **Rules check:** service category, privacy guidelines, ICP filing (备案), software copyright (软著), game publishing licence (版号), content rules, package size, and secrets.
 - **Upload:** uses `miniprogram-ci` with the key at `MP_UPLOAD_KEY_PATH`, **only after founder approval**.
 - **Never** submits for review or publishes. The founder does that in mp.weixin.qq.com.
@@ -118,7 +120,7 @@ Gets builds onto the platform safely.
 `market-researcher` ×2–4 (parallel) → `opportunity-analyst` → CTO presents the top 3–5 → founder picks one.
 
 **Build**
-`product-ux` spec (CTO signs off) → `backend` + `frontend-ui` + `miniprogram-dev`/`minigame-dev` (parallel, without overlapping files) → `qa` → CTO review → `release` pack and Founder Handoff in `docs/<app>/release/` → founder approves the upload → `release` uploads → founder submits for review.
+`release` + `product-ux` registration pack in `docs/<app>/release/registration/` (immediately, constitution Article 4.4) → `product-ux` spec (CTO signs off) → `backend` + `frontend-ui` + `miniprogram-dev`/`minigame-dev` (parallel, without overlapping files) → `qa` → CTO review → `release` pack and Founder Handoff in `docs/<app>/release/` → founder approves the upload → `release` uploads → founder submits for review.
 
 ## Founder responsibilities
 - Decide what to build, and approve uploads. Work through the Founder Handoff at the end of each build.

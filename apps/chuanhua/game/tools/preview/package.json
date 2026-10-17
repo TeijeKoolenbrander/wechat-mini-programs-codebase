@@ -1,0 +1,8 @@
+{
+  "name": "chuanhua-preview",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Renders every screen x state from samples.js to PNG, and backs the AC 27 canvas-vs-rasteriser test. Dev tool, not shipped.",
+  "scripts": { "render": "node render.js" },
+  "dependencies": { "@napi-rs/canvas": "^0.1.65" }
+}

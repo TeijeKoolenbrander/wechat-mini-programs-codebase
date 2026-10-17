@@ -1,0 +1,1 @@
+{"name":"chuanhua-assets","private":true,"version":"1.0.0","description":"Generates assets/share-fallback.png and assets/tick.mp3. Dev tool, not shipped.","scripts":{"build":"node build-assets.js"},"dependencies":{"@napi-rs/canvas":"^0.1.65","lamejs":"^1.2.1"}}

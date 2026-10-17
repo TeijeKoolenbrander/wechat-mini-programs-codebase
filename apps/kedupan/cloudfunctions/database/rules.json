@@ -1,0 +1,110 @@
+{
+  "_comment": "Cloud database security rules, one entry per PHYSICAL collection (kedupan_ prefix, shared test environment). Every collection is deny-all for clients: the game never touches the database directly; cloud functions run with admin rights and bypass these rules. Paste each value into the console (Database > collection > Permissions > custom rules). Why each collection needs deny-all is in _why.",
+  "_why": {
+    "kedupan_daily_sets": "holds the answer anchors of open days; only functions may shape what leaves",
+    "kedupan_daily_card_stats": "raw national histograms; clients get only revealed refs through functions",
+    "kedupan_daily_entries": "every player's answers (openid + positions); boards are served hashed by functions",
+    "kedupan_player_stats": "streaks per openid; read through getDaily/getArchive",
+    "kedupan_group_members": "maps openid to group (openGId, groupRef); must never be readable",
+    "kedupan_group_daily": "cached group trend; derived from member answers",
+    "kedupan_rounds": "holds the hidden target until reveal; any client read would leak it",
+    "kedupan_guesses": "each guess with openid and group tag; served as salted hashes after reveal only",
+    "kedupan_sub_grants": "subscribe opt-ins per openid; written and claimed by functions",
+    "kedupan_card_reports": "player reports with openid",
+    "kedupan_item_usage": "which items were published; server scheduling state",
+    "kedupan_anomalies": "observe-only fraud signals per openid",
+    "kedupan_events": "analytics with openid; written by track only",
+    "kedupan_rate_limits": "server counters; a writable limiter would be bypassable",
+    "kedupan_app_config": "ad and subscribe configuration set in the console; clients receive it only as features from getDaily",
+    "kedupan_reveal_views": "records that a player was served the answer of a revealed round (closes late guessing for them); openid per round",
+    "kedupan_meta": "launch date and other server constants",
+    "kedupan_mod_log": "typed-clue moderation evidence: openid, verdict, trace id and the blocked text; admin only (admin function)",
+    "kedupan_mod_quota": "daily WeChat text-check counters (dev budget, volume and busy alerts); server state only",
+    "kedupan_clue_reports": "who reported which clue and why; the reporter is never shown to anyone, the host included",
+    "kedupan_audit_log": "every admin takedown, restriction and switch with before/after; accountability record, admin only"
+  },
+  "kedupan_daily_sets": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_daily_card_stats": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_daily_entries": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_player_stats": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_group_members": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_group_daily": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_rounds": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_guesses": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_sub_grants": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_card_reports": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_item_usage": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_anomalies": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_events": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_rate_limits": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_app_config": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_reveal_views": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_meta": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_mod_log": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_mod_quota": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_clue_reports": {
+    "read": false,
+    "write": false
+  },
+  "kedupan_audit_log": {
+    "read": false,
+    "write": false
+  }
+}

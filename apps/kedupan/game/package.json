@@ -1,0 +1,10 @@
+{
+  "name": "kedupan-game",
+  "version": "0.1.0",
+  "private": true,
+  "description": "群友刻度盘 (kedupan) WeChat mini game. See docs/kedupan/spec.md.",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "build-schedule": "node tools/build-schedule.js"
+  }
+}

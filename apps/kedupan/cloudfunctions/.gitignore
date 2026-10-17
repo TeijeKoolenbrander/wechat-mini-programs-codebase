@@ -1,0 +1,4 @@
+# synced copies of the game core (source: apps/kedupan/game/core). Run: npm run sync
+*/core/
+node_modules/
+# `npm run pack` writes to ../game/cloudfunctions-deploy/ (gitignored at the repo root)

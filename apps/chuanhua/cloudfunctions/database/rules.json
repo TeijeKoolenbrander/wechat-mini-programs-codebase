@@ -1,0 +1,75 @@
+{
+  "_comment": "Cloud database security rules, one entry per PHYSICAL collection (prefix chuanhua_ because the test cloud environment is shared across apps). Every collection is deny-all for clients (spec 13, AC 57): the mini game never reads or writes the database directly; all content goes through cloud functions, which run with admin rights and bypass these rules. THE ONE EXCEPTION is chuanhua_room_signals: a content-free per-seat doorbell (room id, seq, state, round, kind, phase, deadline, serverNow, counts, the owner _openid) that the client watch()es; its custom read rule is `doc._openid == auth.openid` (a player reads only their own documents), write stays false (only functions write it). Paste each value into the console (Database > collection > Permissions > Custom rules). Generated from game/core/schema.js by scripts/gen-rules.js; tests/security.test.js keeps them in sync.",
+  "chuanhua_chains": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_steps": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_rooms": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_room_signals": {
+    "read": "doc._openid == auth.openid",
+    "write": false
+  },
+  "chuanhua_mod_traces": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_mod_log": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_mod_quota": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_reports": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_players": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_group_members": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_group_stats": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_reactions": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_sub_grants": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_daily_stats": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_audit_log": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_events": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_rate_limits": {
+    "read": false,
+    "write": false
+  },
+  "chuanhua_app_config": {
+    "read": false,
+    "write": false
+  }
+}

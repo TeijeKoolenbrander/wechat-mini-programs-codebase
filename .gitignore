@@ -24,3 +24,17 @@ Thumbs.db
 .vscode/
 .idea/
 .claude/worktrees/
+
+# kedupan preview output
+apps/kedupan/game/tools/preview/out/
+
+# yuyirelen answer review sheet lists every answer (spoilers); never tracked
+docs/yuyirelen/answer-review.md
+
+# built by cloudfunctions `npm run pack` (TD-59); DevTools cloudfunctionRoot
+apps/kedupan/game/cloudfunctions-deploy/
+
+# built by yuyirelen cloudfunctions `npm run pack` (TD-64); DevTools cloudfunctionRoot
+apps/yuyirelen/game/cloudfunctions-deploy/
+# built by cloudfunctions `npm run pack` (QA-1); DevTools cloudfunctionRoot
+apps/chuanhua/game/cloudfunctions-deploy/

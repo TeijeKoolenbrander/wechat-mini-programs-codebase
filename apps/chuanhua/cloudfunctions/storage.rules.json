@@ -1,0 +1,5 @@
+{
+  "_comment": "Cloud storage security rule (spec 13.3, V9): clients never read or write any file. Only cloud functions (admin rights) write chuanhua/mod/** and read it for moderation and admin review. Fallback if custom storage rules are unavailable in a mini game environment: the default rule 仅创建者及管理员可读写 (the creator is the server).",
+  "read": false,
+  "write": false
+}
